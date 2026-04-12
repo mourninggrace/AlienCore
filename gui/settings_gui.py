@@ -98,14 +98,14 @@ class SettingsWindow:
         self.root.title(f"{APP_NAME} Settings  v{VERSION}")
         self.root.configure(bg=BG)
         self.root.resizable(True, True)
-        self.root.minsize(820, 600)
-        self.root.geometry("920x800")
+        self.root.minsize(1280, 600)
+        self.root.geometry("1360x840")
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        x  = max(0, (sw - 920) // 2)
-        y  = max(0, (sh - 800) // 2)
-        self.root.geometry(f"920x800+{x}+{y}")
+        x  = max(0, (sw - 1360) // 2)
+        y  = max(0, (sh - 840) // 2)
+        self.root.geometry(f"1360x840+{x}+{y}")
         self.root.lift()
         self.root.focus_force()
         self.root.attributes("-topmost", True)
@@ -157,6 +157,7 @@ class SettingsWindow:
         self._tab_thresholds()
         self._tab_ai()
         self._tab_insights()
+        self._tab_drivers()
 
         # Footer
         tk.Frame(self.root, bg=SEP, height=1).pack(fill="x")
@@ -262,10 +263,11 @@ class SettingsWindow:
         self._slider(t, "gpu.power_limit_idle_pct",      "Power limit at idle (%)",      30, 100, 5, fmt=lambda v: f"{int(v)}%")
         self._slider(t, "gpu.power_limit_gaming_pct",    "Power limit gaming (%)",       50, 100, 5, fmt=lambda v: f"{int(v)}%")
         self._slider(t, "gpu.power_limit_streaming_pct", "Power limit streaming (%)",    50, 100, 5, fmt=lambda v: f"{int(v)}%")
-        self._section(t, "Turbo Cool")
-        self._note(t, "Spins GPU fan to 100% for rapid cooling. Auto-disables when timer OR temps cool — whichever first.")
-        self._slider(t, "turbo_cool.auto_off_minutes", "Auto-disable after (minutes)", 1, 60, 1, fmt=lambda v: f"{int(v)} min")
-        self._opt(t, "turbo_cool.auto_off_on_cool", "Also disable when temps drop below warning thresholds", "")
+        if self._hw.get("platform", {}).get("has_awcc", True):
+            self._section(t, "Turbo Cool")
+            self._note(t, "Spins fans to 100% for rapid cooling via AWCC. Auto-disables when timer OR temps cool — whichever first.")
+            self._slider(t, "turbo_cool.auto_off_minutes", "Auto-disable after (minutes)", 1, 60, 1, fmt=lambda v: f"{int(v)} min")
+            self._opt(t, "turbo_cool.auto_off_on_cool", "Also disable when temps drop below warning thresholds", "")
 
     def _tab_ram(self):
         t = self._make_tab("RAM")
@@ -581,8 +583,7 @@ class SettingsWindow:
         self._startup_panel(t)
 
         self._section(t, "AlienCore Behavior")
-        self._opt(t, "service.log_enabled",              "Enable logging",                   "Writes to aliencore.log")
-        self._slider(t, "service.log_max_mb", "Max log size (MB)", 1, 50, 1, fmt=lambda v: f"{int(v)} MB")
+        self._opt(t, "service.log_enabled",              "Enable logging",                   "Writes to aliencore.log — grows unbounded over time")
         self._opt(t, "service.notify_on_profile_switch", "Toast on profile switch",          "Windows notification")
         self._opt(t, "service.hardware_refresh_on_startup","Re-scan hardware on startup",    "Adds ~3s to boot")
 
@@ -774,6 +775,7 @@ class SettingsWindow:
                          bg=BG_HW, fg=color, anchor="w").pack(side="left")
 
             stat("Days of data",        summary.get("days_of_data", 0))
+            stat("Total events logged", summary.get("total_events", 0))
             stat("Gaming sessions",     summary.get("gaming_sessions", 0))
             stat("Streaming sessions",  summary.get("streaming_sessions", 0))
             stat("Thermal warnings",    summary.get("thermal_warnings", 0),
@@ -879,6 +881,250 @@ class SettingsWindow:
         self._slider(t, "thresholds.gpu_crit",  "GPU critical (°C)",  50, 100, 1, fmt=lambda v: f"{int(v)}°C")
         self._slider(t, "thresholds.nvme_warn", "NVMe warning (°C)",  30, 80,  1, fmt=lambda v: f"{int(v)}°C")
         self._slider(t, "thresholds.nvme_crit", "NVMe critical (°C)", 40, 90,  1, fmt=lambda v: f"{int(v)}°C")
+
+    # ── Drivers tab ───────────────────────────────────────────────────────────
+
+    _VENDOR_LINKS = {
+        "nvidia":   ("NVIDIA",    "https://www.nvidia.com/drivers"),
+        "intel":    ("Intel",     "https://www.intel.com/content/www/us/en/download-center/home.html"),
+        "amd":      ("AMD",       "https://www.amd.com/support"),
+        "advanced micro devices": ("AMD", "https://www.amd.com/support"),
+        "realtek":  ("Realtek",   "https://www.realtek.com/en/downloads"),
+        "killer":   ("Killer",    "https://www.killernetworking.com/driver-downloads/"),
+        "rivet":    ("Killer",    "https://www.killernetworking.com/driver-downloads/"),
+        "qualcomm": ("Qualcomm",  "https://www.qualcomm.com/support"),
+        "broadcom": ("Broadcom",  "https://www.broadcom.com/support/download-search"),
+        "mediatek": ("MediaTek",  "https://www.mediatek.com/products"),
+    }
+
+    def _tab_drivers(self):
+        t = self._make_tab("Drivers")
+        self._section(t, "Installed Drivers")
+        self._note(t, "Third-party drivers shown by default. "
+                      "NVIDIA status is checked live against the latest Game Ready Driver. "
+                      "Click a vendor link to open their download page.")
+
+        # Controls row
+        ctrl = tk.Frame(t, bg=BG_SECT)
+        ctrl.pack(fill="x", padx=16, pady=(4, 8))
+        self._drv_show_ms = tk.BooleanVar(value=False)
+        tk.Checkbutton(ctrl, text="Show Microsoft / Windows drivers",
+                       variable=self._drv_show_ms,
+                       bg=BG_SECT, fg=FG, selectcolor=BG_SECT,
+                       activebackground=BG_SECT, activeforeground=ACCENT,
+                       font=("Segoe UI", 9),
+                       command=self._drivers_render).pack(side="left")
+        self._btn(ctrl, "Refresh", self._drivers_refresh, ACCENT).pack(side="right")
+
+        # Column headers
+        hdr = tk.Frame(t, bg=BG_PANEL, padx=16, pady=4)
+        hdr.pack(fill="x", padx=16, pady=(0, 2))
+        for col, w in [("Device", 28), ("Provider", 18), ("Version", 16), ("Date", 12), ("Status", 20)]:
+            tk.Label(hdr, text=col, font=("Segoe UI", 8, "bold"),
+                     bg=BG_PANEL, fg=FG_DIM, width=w, anchor="w").pack(side="left")
+        tk.Label(hdr, text="Download", font=("Segoe UI", 8, "bold"),
+                 bg=BG_PANEL, fg=FG_DIM, anchor="w").pack(side="left")
+
+        self._drv_tab          = t
+        self._drv_all          = []
+        self._drv_rows_frame   = None
+        self._drv_nvidia_latest = None   # cached latest version string per refresh
+        self._drv_status_labels = {}     # installed_ver → tk.Label
+        self._drv_loader       = tk.Label(t, text="Loading drivers...",
+                                          font=("Segoe UI", 9, "italic"),
+                                          bg=BG_SECT, fg=FG_DIM)
+        self._drv_loader.pack(anchor="w", padx=20, pady=8)
+        threading.Thread(target=self._load_drivers, daemon=True).start()
+
+    def _load_drivers(self):
+        try:
+            drivers = self._query_drivers()
+            self._drv_tab.after(0, lambda: self._populate_drivers(drivers))
+        except Exception as e:
+            self._drv_tab.after(0, lambda: self._drv_loader.config(
+                text=f"Failed to query drivers: {e}", fg=DANGER))
+
+    def _query_drivers(self):
+        import subprocess, json as _json
+        ps = (
+            "Get-WmiObject Win32_PnPSignedDriver | "
+            "Where-Object { $_.DeviceName -and $_.DriverVersion } | "
+            "Select-Object DeviceName, DriverProviderName, DriverVersion, DriverDate, DeviceClass | "
+            "Sort-Object DeviceClass, DeviceName | "
+            "ConvertTo-Json -Compress"
+        )
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "PowerShell query failed")
+        raw = result.stdout.strip()
+        if not raw:
+            return []
+        data = _json.loads(raw)
+        return [data] if isinstance(data, dict) else data
+
+    def _populate_drivers(self, drivers):
+        if hasattr(self, "_drv_loader") and self._drv_loader.winfo_exists():
+            self._drv_loader.destroy()
+        self._drv_all = drivers
+        self._drivers_render()
+
+    def _drivers_render(self):
+        # Destroy previous rows frame if it exists
+        if self._drv_rows_frame and self._drv_rows_frame.winfo_exists():
+            self._drv_rows_frame.destroy()
+        self._drv_status_labels = {}
+
+        show_ms = self._drv_show_ms.get()
+        drivers = [
+            d for d in self._drv_all
+            if show_ms or (d.get("DriverProviderName") or "").lower() not in
+               {"microsoft", "microsoft corporation", "windows", "(standard display types)"}
+        ]
+
+        # Deduplicate by (name, version, date) — same package installed as multiple components
+        seen = set()
+        unique = []
+        for d in drivers:
+            key = (d.get("DeviceName",""), d.get("DriverVersion",""), d.get("DriverDate",""))
+            if key not in seen:
+                seen.add(key)
+                unique.append(d)
+        drivers = unique
+
+        if not drivers:
+            self._drv_rows_frame = tk.Label(
+                self._drv_tab,
+                text="No third-party drivers found. Enable 'Show Microsoft drivers' to see all.",
+                font=("Segoe UI", 9, "italic"), bg=BG_SECT, fg=FG_DIM)
+            self._drv_rows_frame.pack(anchor="w", padx=20, pady=8)
+            return
+
+        self._drv_rows_frame = tk.Frame(self._drv_tab, bg=BG_SECT)
+        self._drv_rows_frame.pack(fill="x", padx=16, pady=(0, 16))
+
+        nvidia_versions = []  # list of (version_string, status_label) to check
+
+        for i, d in enumerate(drivers):
+            row_bg = BG_PANEL if i % 2 == 0 else BG_SECT
+            row = tk.Frame(self._drv_rows_frame, bg=row_bg, padx=16, pady=3)
+            row.pack(fill="x", pady=1)
+
+            name     = (d.get("DeviceName")         or "Unknown")[:48]
+            provider = (d.get("DriverProviderName") or "")[:22]
+            version  = (d.get("DriverVersion")      or "")[:20]
+            date_raw = d.get("DriverDate") or ""
+            date_str = (f"{date_raw[0:4]}-{date_raw[4:6]}-{date_raw[6:8]}"
+                        if len(date_raw) >= 8 else "")
+
+            tk.Label(row, text=name, font=("Segoe UI", 9),
+                     bg=row_bg, fg=FG, width=32, anchor="w").pack(side="left")
+            tk.Label(row, text=provider, font=("Segoe UI", 8),
+                     bg=row_bg, fg=FG_DIM, width=20, anchor="w").pack(side="left")
+            tk.Label(row, text=version, font=("Consolas", 8),
+                     bg=row_bg, fg=FG_DIM, width=18, anchor="w").pack(side="left")
+            tk.Label(row, text=date_str, font=("Segoe UI", 8),
+                     bg=row_bg, fg=FG_DIM, width=12, anchor="w").pack(side="left")
+
+            # Status column
+            is_nvidia = "nvidia" in (d.get("DriverProviderName") or "").lower()
+            if is_nvidia:
+                status_lbl = tk.Label(row, text="Checking...", font=("Segoe UI", 8),
+                                      bg=row_bg, fg=FG_DIM, width=20, anchor="w")
+                nvidia_versions.append((version, status_lbl))
+            else:
+                status_lbl = tk.Label(row, text="\u2014", font=("Segoe UI", 8),
+                                      bg=row_bg, fg=FG_DIM, width=20, anchor="w")
+            status_lbl.pack(side="left")
+
+            link_label, link_url = self._driver_vendor_link(provider)
+            if link_label and link_url:
+                import webbrowser
+                lnk = tk.Label(row, text=link_label, font=("Segoe UI", 8, "underline"),
+                                bg=row_bg, fg=ACCENT, cursor="hand2")
+                lnk.pack(side="left")
+                lnk.bind("<Button-1>", lambda e, u=link_url: webbrowser.open(u))
+
+        if nvidia_versions:
+            self._schedule_version_checks(nvidia_versions)
+
+    def _schedule_version_checks(self, nvidia_entries):
+        """Fetch the latest NVIDIA version once (cached per refresh) and update all status labels."""
+        def worker():
+            if self._drv_nvidia_latest is None:
+                self._drv_nvidia_latest = self._fetch_nvidia_latest()
+            latest = self._drv_nvidia_latest
+            for installed_ver, lbl in nvidia_entries:
+                if not lbl.winfo_exists():
+                    continue
+                converted = self._parse_nvidia_version(installed_ver)
+                if latest is None:
+                    text, color = "Check failed", FG_DIM
+                elif converted is None:
+                    text, color = "Unknown", FG_DIM
+                elif converted == latest:
+                    text, color = "Up to date", "#00cc66"
+                else:
+                    text, color = f"Update: v{latest}", "#ffaa00"
+                lbl.after(0, lambda l=lbl, t=text, c=color: l.config(text=t, fg=c))
+
+        threading.Thread(target=worker, daemon=True, name="NvidiaVerCheck").start()
+
+    @staticmethod
+    def _parse_nvidia_version(windows_ver: str):
+        """Convert Windows driver version (e.g. 31.0.15.5585) to NVIDIA display version (555.85)."""
+        try:
+            parts = windows_ver.strip().split(".")
+            if len(parts) != 4:
+                return None
+            p2, p3 = parts[2], parts[3]
+            if len(p3) < 2:
+                return None
+            return f"{p2[-1]}{p3[:2]}.{p3[2:]}"
+        except Exception:
+            return None
+
+    @staticmethod
+    def _fetch_nvidia_latest():
+        """Fetch the latest NVIDIA Game Ready Driver version string, or None on failure."""
+        try:
+            import urllib.request, json as _json
+            url = (
+                "https://gfwsl.geforce.com/services_toolkit/services/com/nvidia/services/"
+                "AjaxDriverService.php?func=DriverManualLookup&pfid=929&osID=57"
+                "&languageCode=1033&isWHQL=1&isMobile=1&isION=0&isQuadro=0&dch=1"
+            )
+            req = urllib.request.Request(url, headers={"User-Agent": "AlienCore/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = _json.loads(resp.read().decode())
+            ids = data.get("IDS") or []
+            if ids:
+                return ids[0].get("downloadInfo", {}).get("Version")
+        except Exception:
+            pass
+        return None
+
+    def _drivers_refresh(self):
+        if self._drv_rows_frame and self._drv_rows_frame.winfo_exists():
+            self._drv_rows_frame.destroy()
+            self._drv_rows_frame = None
+        self._drv_nvidia_latest = None   # force re-fetch on next render
+        self._drv_status_labels = {}
+        ldr = tk.Label(self._drv_tab, text="Loading drivers...",
+                       font=("Segoe UI", 9, "italic"), bg=BG_SECT, fg=FG_DIM)
+        ldr.pack(anchor="w", padx=20, pady=8)
+        self._drv_loader = ldr
+        self._drv_all = []
+        threading.Thread(target=self._load_drivers, daemon=True).start()
+
+    def _driver_vendor_link(self, provider: str):
+        p = (provider or "").lower()
+        for key, (label, url) in self._VENDOR_LINKS.items():
+            if key in p:
+                return label, url
+        return None, None
 
     # ── Services list ─────────────────────────────────────────────────────────
 

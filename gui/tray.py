@@ -475,7 +475,8 @@ def _build_menu(on_settings_open, on_quit):
             lambda item: "Turbo Cool: ON  (click to disable)"
                          if _turbo_active() else
                          "Turbo Cool: OFF  (click to enable)",
-            lambda item: _toggle_turbo_cool()
+            lambda item: _toggle_turbo_cool(),
+            visible=lambda item: _awcc_available(),
         ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Override Profile",
@@ -495,6 +496,7 @@ def _build_menu(on_settings_open, on_quit):
         pystray.MenuItem("Toggle Overlay",   lambda item: _toggle_overlay()),
         pystray.MenuItem("Show/Hide Bar",    lambda item: _toggle_bar()),
         pystray.MenuItem("View Log",         lambda item: _open_log()),
+        pystray.MenuItem("Send Feedback",    lambda item: _open_feedback()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(
             lambda item: "Start with Windows: ON  (click to disable)"
@@ -510,6 +512,14 @@ def _build_menu(on_settings_open, on_quit):
 # ─────────────────────────────────────────────────────────────────────────────
 # Overlay
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _awcc_available() -> bool:
+    try:
+        from core import awcc
+        return awcc.is_available()
+    except Exception:
+        return False
+
 
 def _turbo_active() -> bool:
     try:
@@ -727,6 +737,11 @@ def _open_log():
     except Exception:
         import subprocess
         subprocess.Popen(["notepad.exe", LOG_PATH])
+
+
+def _open_feedback():
+    from gui import feedback
+    feedback.open_feedback_thread()
 
 
 def _safe(fn):

@@ -1,16 +1,16 @@
 """
 AlienCore - logger.py
-Sets up a rotating log file at logs/aliencore.log.
+Sets up an append-only log file at logs/aliencore.log.
+No size limit — the log grows for the life of the installation.
 All modules use: logging.getLogger("aliencore.<module>")
 """
 
 import logging
 import os
-from logging.handlers import RotatingFileHandler
 from core.constants import LOG_PATH
 
 
-def setup(log_enabled: bool = True, max_mb: int = 10):
+def setup(log_enabled: bool = True):
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 
     root = logging.getLogger("aliencore")
@@ -22,12 +22,7 @@ def setup(log_enabled: bool = True, max_mb: int = 10):
     )
 
     if log_enabled:
-        fh = RotatingFileHandler(
-            LOG_PATH,
-            maxBytes=max_mb * 1024 * 1024,
-            backupCount=3,
-            encoding="utf-8",
-        )
+        fh = logging.FileHandler(LOG_PATH, mode="a", encoding="utf-8")
         fh.setFormatter(fmt)
         fh.setLevel(logging.DEBUG)
         root.addHandler(fh)
@@ -38,4 +33,4 @@ def setup(log_enabled: bool = True, max_mb: int = 10):
     ch.setLevel(logging.INFO)
     root.addHandler(ch)
 
-    root.info("AlienCore logger initialized (log_enabled=%s, max_mb=%s)", log_enabled, max_mb)
+    root.info("AlienCore logger initialized (log_enabled=%s)", log_enabled)

@@ -9,6 +9,10 @@ import sys
 VERSION = "1.0.0"
 APP_NAME = "AlienCore"
 
+# ── Support / feedback ────────────────────────────────────────────────────────
+SUPPORT_EMAIL     = "mourning.grace.2014@gmail.com"
+GITHUB_ISSUES_URL = "https://github.com/mourninggrace/AlienCore/issues/new"
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH    = os.path.join(BASE_DIR, "config.json")
@@ -281,7 +285,6 @@ DEFAULT_CONFIG = {
     # ── Service behavior ──
     "service": {
         "log_enabled": True,
-        "log_max_mb": 10,
         "start_with_windows": True,
         "notify_on_profile_switch": False,    # toast notification on switch
         "hardware_refresh_on_startup": True,

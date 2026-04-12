@@ -15,5 +15,8 @@ logs/
 # Claude Code session data
 .claude/
 
+# .NET build artifacts
+tools/lhm_bridge/obj/
+
 # Leftover scaffold directory
 {core,gui,assets,profiles,logs}/

@@ -70,7 +70,6 @@ def main():
     # Set up logging
     log_setup.setup(
         log_enabled=c["service"]["log_enabled"],
-        max_mb=c["service"]["log_max_mb"],
     )
     root_logger = logging.getLogger("aliencore")
     root_logger.info("=" * 60)

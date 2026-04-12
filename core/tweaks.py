@@ -76,7 +76,7 @@ def apply_profile(profile_name: str, hardware: dict, dry_run: bool = False):
             break
 
     if c["cpu"]["enabled"]:
-        _apply_cpu_profile(behavior, c, dry_run)
+        _apply_cpu_profile(behavior, c, hardware, dry_run)
     if c["gpu"]["enabled"]:
         _apply_gpu_profile(behavior, c, hardware, dry_run)
     if c["scheduler"]["enabled"]:
@@ -145,8 +145,9 @@ def restore_defaults(dry_run: bool = False):
 # CPU
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _apply_cpu_profile(profile: str, c: dict, dry_run: bool):
-    cpu = c["cpu"]
+def _apply_cpu_profile(profile: str, c: dict, hardware: dict, dry_run: bool):
+    cpu      = c["cpu"]
+    is_intel = hardware.get("cpu", {}).get("is_intel", False)
 
     if profile == "idle":
         _ensure_aliencore_power_plan(dry_run)
@@ -174,12 +175,17 @@ def _apply_cpu_profile(profile: str, c: dict, dry_run: bool):
     elif profile == "manual":
         pass   # manual = tray override, don't touch CPU settings
 
-    # Apply Intel hybrid scheduling policy for all active profiles
+    # Intel Thread Director + heterogeneous scheduling — Intel hybrid CPUs only.
+    # These GUIDs and policies are meaningless (and harmless but noisy) on AMD Ryzen.
     if cpu.get("hetero_scheduling", True):
-        _set_hetero_scheduling(profile, dry_run)
-        _set_perf_autonomous(profile, dry_run)
-        _set_perf_thresholds(profile, dry_run)
+        if is_intel:
+            _set_hetero_scheduling(profile, dry_run)
+            _set_perf_autonomous(profile, dry_run)
+            _set_perf_thresholds(profile, dry_run)
+        else:
+            logger.debug("Intel Thread Director tweaks skipped — non-Intel CPU detected")
 
+    # Core parking is a generic Windows powercfg feature — works on Intel and AMD
     if cpu.get("core_parking_gaming", True):
         _set_core_parking(profile, dry_run)
 
