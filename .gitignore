@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# AlienCore runtime data (machine-specific / sensitive)
+config.json
+config.advisor_backup.json
+hardware_profile.json
+learning.json
+learning.json.bak
+logs/
+
+# Claude Code session data
+.claude/
+
+# Leftover scaffold directory
+{core,gui,assets,profiles,logs}/
