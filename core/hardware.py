@@ -70,10 +70,20 @@ def _wmi_connect():
 
 
 def _get_os_info() -> dict:
+    edition = ""
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+        edition, _ = winreg.QueryValueEx(key, "EditionID")
+        winreg.CloseKey(key)
+    except Exception:
+        pass
     return {
         "name":    platform.system(),
         "version": platform.version(),
         "release": platform.release(),
+        "edition": edition,
         "machine": platform.machine(),
     }
 

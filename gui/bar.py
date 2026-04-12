@@ -212,6 +212,9 @@ class SensorBar:
         self._size  = saved_size if saved_size in BAR_SIZES else DEFAULT_SIZE
         self._apply_size_fonts()
 
+        self._orient      = cfg.get_value("display", "bar_orientation", default="horizontal")
+        self._last_orient = self._orient
+
         self._build()
         self._restore_position()
         self._apply_rounded_corners()
@@ -246,6 +249,21 @@ class SensorBar:
         FONT_VALUE = ("Consolas", s["value"], "bold")
         FONT_SEP   = ("Consolas", s["sep"])
 
+    # ── Orientation helpers ───────────────────────────────────────────────────
+
+    def _pack_side(self) -> str:
+        return "top" if self._orient == "vertical" else "left"
+
+    def _make_separator(self, parent) -> tk.Widget:
+        """Return a separator widget appropriate for the current orientation."""
+        if self._orient == "vertical":
+            w = tk.Frame(parent, height=1, bg="#222222")
+            w.pack(side="top", fill="x", pady=2)
+        else:
+            w = tk.Label(parent, text="|", font=FONT_SEP, bg=BG, fg="#222222")
+            w.pack(side="left", padx=3)
+        return w
+
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
@@ -266,7 +284,7 @@ class SensorBar:
         # Drag handle
         grip = tk.Label(self.inner, text="⠿", font=("Consolas", 10),
                         bg=BG, fg="#333333", cursor="fleur", padx=4)
-        grip.pack(side="left")
+        grip.pack(side=self._pack_side())
         grip.bind("<ButtonPress-1>",   self._drag_start)
         grip.bind("<B1-Motion>",       self._drag_move)
         grip.bind("<ButtonRelease-1>", self._drag_end)
@@ -278,7 +296,8 @@ class SensorBar:
             self.inner, width=dot_sz, height=dot_sz,
             bg=BG, highlightthickness=0, cursor="fleur"
         )
-        self.profile_dot.pack(side="left", padx=(2, 0))
+        pad_kw = {"pady": (2, 0)} if self._orient == "vertical" else {"padx": (2, 0)}
+        self.profile_dot.pack(side=self._pack_side(), **pad_kw)
         self._dot_oval = self.profile_dot.create_oval(
             2, 2, dot_sz - 2, dot_sz - 2, fill="#1a4a6e", outline=""
         )
@@ -288,7 +307,7 @@ class SensorBar:
             self.inner, text="IDLE", font=("Consolas", 7, "bold"),
             bg=BG, fg="#444444", padx=2, cursor="fleur"
         )
-        self.profile_label.pack(side="left")
+        self.profile_label.pack(side=self._pack_side())
 
         for w in [self.profile_dot, self.profile_label]:
             w.bind("<ButtonPress-1>",   self._drag_start)
@@ -296,8 +315,7 @@ class SensorBar:
             w.bind("<ButtonRelease-1>", self._drag_end)
             w.bind("<Button-3>",        self._show_context_menu)
 
-        sep = tk.Label(self.inner, text="|", font=FONT_SEP, bg=BG, fg="#222222")
-        sep.pack(side="left", padx=2)
+        sep = self._make_separator(self.inner)
         sep.bind("<ButtonPress-1>",   self._drag_start)
         sep.bind("<B1-Motion>",       self._drag_move)
         sep.bind("<ButtonRelease-1>", self._drag_end)
@@ -377,14 +395,12 @@ class SensorBar:
             label, getter, unit = sensor_map[config_key]
 
             if not first:
-                sep = tk.Label(self.inner, text="|", font=FONT_SEP,
-                               bg=BG, fg="#222222")
-                sep.pack(side="left", padx=3)
+                sep = self._make_separator(self.inner)
                 self._cell_widgets.append(sep)
             first = False
 
             cell = tk.Frame(self.inner, bg=BG, padx=2)
-            cell.pack(side="left")
+            cell.pack(side=self._pack_side())
             self._cell_widgets.append(cell)
 
             lbl = tk.Label(cell, text=label, font=FONT_LABEL,
@@ -440,16 +456,26 @@ class SensorBar:
         hist = self._history.get(config_key, collections.deque())
         _Sparkline.show(config_key, label, hist, unit)
 
+    def _set_orientation(self, orient: str):
+        cfg.set_value("display", "bar_orientation", value=orient)
+        # _update loop will detect the change and rebuild
+
     def _show_sensor_menu(self, event, key: str):
         menu = tk.Menu(self.root, tearoff=0,
                        bg="#1a1a1a", fg="#cccccc",
                        activebackground="#333333",
                        activeforeground="#ffffff",
                        font=("Segoe UI", 9))
-        menu.add_command(label="◀ Move Left",
-                         command=lambda: self._move_sensor(key, -1))
-        menu.add_command(label="▶ Move Right",
-                         command=lambda: self._move_sensor(key, 1))
+        if self._orient == "vertical":
+            menu.add_command(label="▲ Move Up",
+                             command=lambda: self._move_sensor(key, -1))
+            menu.add_command(label="▼ Move Down",
+                             command=lambda: self._move_sensor(key, 1))
+        else:
+            menu.add_command(label="◀ Move Left",
+                             command=lambda: self._move_sensor(key, -1))
+            menu.add_command(label="▶ Move Right",
+                             command=lambda: self._move_sensor(key, 1))
         menu.add_separator()
         try:
             from core import turbo_cool
@@ -761,6 +787,13 @@ class SensorBar:
             profile  = profiles.get_current()
             sens     = c.get("sensors", {})
 
+            # Rebuild everything if orientation changed
+            orient_now = cfg.get_value("display", "bar_orientation", default="horizontal")
+            if orient_now != self._last_orient:
+                self._orient      = orient_now
+                self._last_orient = orient_now
+                self._rebuild_bar_widgets()
+
             # Rebuild cells if enabled set changed
             enabled_now = tuple(
                 k for k in self._SENSOR_DEFS if sens.get(k, False)
@@ -880,7 +913,7 @@ class SensorBar:
         grip = tk.Label(self.inner, text="⠿",
                         font=("Consolas", BAR_SIZES[self._size]["sep"]),
                         bg=BG, fg="#333333", cursor="fleur", padx=4)
-        grip.pack(side="left")
+        grip.pack(side=self._pack_side())
         for ev, cb in [("<ButtonPress-1>",   self._drag_start),
                        ("<B1-Motion>",       self._drag_move),
                        ("<ButtonRelease-1>", self._drag_end),
@@ -893,7 +926,8 @@ class SensorBar:
             self.inner, width=dot_sz, height=dot_sz,
             bg=BG, highlightthickness=0, cursor="fleur"
         )
-        self.profile_dot.pack(side="left", padx=(2, 0))
+        pad_kw = {"pady": (2, 0)} if self._orient == "vertical" else {"padx": (2, 0)}
+        self.profile_dot.pack(side=self._pack_side(), **pad_kw)
         self._dot_oval = self.profile_dot.create_oval(
             2, 2, dot_sz - 2, dot_sz - 2, fill="#1a4a6e", outline=""
         )
@@ -904,7 +938,7 @@ class SensorBar:
             font=("Consolas", BAR_SIZES[self._size]["label"], "bold"),
             bg=BG, fg="#444444", padx=2, cursor="fleur"
         )
-        self.profile_label.pack(side="left")
+        self.profile_label.pack(side=self._pack_side())
 
         for w in [self.profile_dot, self.profile_label]:
             w.bind("<ButtonPress-1>",   self._drag_start)
@@ -913,8 +947,7 @@ class SensorBar:
             w.bind("<Button-3>",        self._show_context_menu)
 
         # Separator
-        sep = tk.Label(self.inner, text="|", font=FONT_SEP, bg=BG, fg="#222222")
-        sep.pack(side="left", padx=2)
+        sep = self._make_separator(self.inner)
         for ev, cb in [("<ButtonPress-1>",   self._drag_start),
                        ("<B1-Motion>",       self._drag_move),
                        ("<ButtonRelease-1>", self._drag_end)]:
@@ -961,6 +994,19 @@ class SensorBar:
                 command=lambda s=size_name: self._set_size(s)
             )
         menu.add_cascade(label="Bar Size", menu=size_menu)
+
+        orient_menu = tk.Menu(menu, tearoff=0,
+                              bg="#1a1a1a", fg="#cccccc",
+                              activebackground="#333333",
+                              activeforeground="#ffffff",
+                              font=("Segoe UI", 9))
+        for orient_name, orient_val in [("Horizontal", "horizontal"), ("Vertical", "vertical")]:
+            check = "✓ " if self._orient == orient_val else "   "
+            orient_menu.add_command(
+                label=f"{check}{orient_name}",
+                command=lambda v=orient_val: self._set_orientation(v)
+            )
+        menu.add_cascade(label="Orientation", menu=orient_menu)
 
         menu.add_separator()
         menu.add_command(label="Profile: Auto",

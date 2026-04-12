@@ -97,6 +97,8 @@ def _poll_loop():
             data.update(_parse_cpu_watts(flat))
             data.update(_read_gpu_nvidia_smi())
             data.update(_read_ram_usage())
+            # Feed boost tracker with latest CPU freq + temp
+            _update_boost_tracker(data)
             data.update(_read_cpu_load())
             data.update(_read_cpu_freq())
             data.update(_read_battery())
@@ -217,17 +219,21 @@ def _parse_cpu_watts(flat: list) -> dict:
 
 def _read_gpu_nvidia_smi() -> dict:
     result = {
-        "gpu_load":          None,
-        "gpu_vram_used_mb":  None,
-        "gpu_vram_total_mb": None,
-        "gpu_watts":         None,
-        "gpu_fan_pct":       None,
-        "gpu_clock_mhz":     None,
-        "gpu_mem_clock_mhz": None,
+        "gpu_load":               None,
+        "gpu_vram_used_mb":       None,
+        "gpu_vram_total_mb":      None,
+        "gpu_watts":              None,
+        "gpu_fan_pct":            None,
+        "gpu_clock_mhz":          None,
+        "gpu_mem_clock_mhz":      None,
+        "gpu_power_limit_w":      None,
+        "gpu_throttle_reasons":   "0x0000000000000000",
+        "gpu_throttle_perf_lost": False,
     }
     try:
         fields = ("utilization.gpu,memory.used,memory.total,"
-                  "power.draw,fan.speed,clocks.gr,clocks.mem")
+                  "power.draw,fan.speed,clocks.gr,clocks.mem,"
+                  "power.limit,clocks_throttle_reasons.active")
         proc = subprocess.run(
             ["nvidia-smi", f"--query-gpu={fields}",
              "--format=csv,noheader,nounits"],
@@ -247,6 +253,19 @@ def _read_gpu_nvidia_smi() -> dict:
             if len(parts) >= 7:
                 result["gpu_clock_mhz"]     = _f(parts[5])
                 result["gpu_mem_clock_mhz"] = _f(parts[6])
+            if len(parts) >= 8:
+                result["gpu_power_limit_w"] = _f(parts[7])
+            if len(parts) >= 9:
+                throttle_hex = parts[8].strip()
+                result["gpu_throttle_reasons"] = throttle_hex
+                # Record throttle events and compute efficiency
+                from core import throttle_log
+                throttle_log.record(
+                    throttle_hex,
+                    gpu_temp=None,   # temp comes from LHM — will be correlated in monitor
+                    gpu_watts=result["gpu_watts"],
+                )
+                result["gpu_throttle_perf_lost"] = throttle_log.is_perf_limited(throttle_hex)
     except FileNotFoundError:
         logger.debug("nvidia-smi not found")
     except Exception as e:
@@ -356,6 +375,18 @@ def _read_disk_io() -> dict:
     except Exception as e:
         logger.debug("disk_io error: %s", e)
         return {"disk_read_mbps": None, "disk_write_mbps": None}
+
+
+def _update_boost_tracker(data: dict):
+    """Feed the latest CPU freq + package temp into boost_tracker."""
+    try:
+        from core import boost_tracker
+        freq_ghz = data.get("cpu_freq_ghz")
+        temp_c   = data.get("cpu_temp_package") or data.get("cpu_temp_avg")
+        if freq_ghz is not None:
+            boost_tracker.record(freq_ghz, temp_c)
+    except Exception:
+        pass
 
 
 def _read_awcc_data() -> dict:

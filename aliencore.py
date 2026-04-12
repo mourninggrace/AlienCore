@@ -131,6 +131,10 @@ def _run(firstrun: bool = False):
     force_refresh = c["service"].get("hardware_refresh_on_startup", True)
     hw = hardware.build_profile(force_refresh=force_refresh)
 
+    # 3b. Configure boost tracker with detected CPU max frequency
+    from core import boost_tracker as _bt
+    _bt.configure(max_freq_mhz=hw.get("cpu", {}).get("max_freq_mhz", 0))
+
     # 4. Apply baseline tweaks
     tweaks.apply_baseline(hw, dry_run=False)
 
@@ -195,10 +199,16 @@ def _start_bar():
 def _start_tray(hw: dict):
     from gui import tray
 
+    _settings_proc = None
+
     def on_settings_open():
         """Launch settings GUI as a separate subprocess — always gets clean environment."""
+        nonlocal _settings_proc
         import subprocess
-        subprocess.Popen(
+        # Don't open a second window if one is already running
+        if _settings_proc is not None and _settings_proc.poll() is None:
+            return
+        _settings_proc = subprocess.Popen(
             [sys.executable,
              os.path.join(BASE_DIR, "aliencore.py"),
              "--settings"],
@@ -206,6 +216,12 @@ def _start_tray(hw: dict):
         )
 
     def on_quit():
+        nonlocal _settings_proc
+        if _settings_proc is not None and _settings_proc.poll() is None:
+            try:
+                _settings_proc.terminate()
+            except Exception:
+                pass
         sensors.stop()
         monitor.stop()
         from core import lhm_manager

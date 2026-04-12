@@ -119,6 +119,19 @@ def _loop():
                     standby_counter = 0
                     _maybe_clear_standby(readings)
 
+            # ── DIMM thermal throttle protection ──
+            if c["ram"].get("dimm_throttle_protection", False):
+                _check_dimm_temps(readings, c)
+
+            # ── Memory leak watchdog ──
+            if c["ram"].get("leak_watchdog_enabled", False):
+                _run_leak_watchdog(c)
+
+            # ── TVB optimizer ──
+            if (_last_profile == "idle"
+                    and c["cpu"].get("tvb_optimizer", False)):
+                _run_tvb_optimizer(readings, c)
+
             iteration += 1
 
         except Exception as e:
@@ -247,6 +260,53 @@ def _maybe_clear_standby(readings: dict):
 # ─────────────────────────────────────────────────────────────────────────────
 # Toast notification
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _check_dimm_temps(readings: dict, c: dict):
+    """Alert + reduce CPU ceiling when DIMM temps exceed threshold."""
+    threshold = c["ram"].get("dimm_throttle_temp_c", 52)
+    ram_temps = readings.get("ram_temps", [])
+    hot_dimms = [d for d in ram_temps if d.get("temp_c", 0) >= threshold]
+    if hot_dimms:
+        hottest = max(d["temp_c"] for d in hot_dimms)
+        logger.warning("DIMM thermal alert: %.0f°C (threshold %.0f°C) — reducing CPU ceiling",
+                       hottest, threshold)
+        # Reduce CPU ceiling to relieve memory controller heat
+        tweaks._set_max_processor_state(60, "AC", dry_run=False)
+        tweaks._set_max_processor_state(60, "DC", dry_run=False)
+
+
+def _run_leak_watchdog(c: dict):
+    """Update the memory leak watchdog with current config parameters."""
+    try:
+        from core import ram_watchdog
+        window  = c["ram"].get("leak_window_minutes", 5.0)
+        thresh  = c["ram"].get("leak_threshold_mb_per_min", 50.0)
+        ram_watchdog.update(window_minutes=window, threshold_mb_per_min=thresh)
+    except Exception as e:
+        logger.debug("Leak watchdog error: %s", e)
+
+
+def _run_tvb_optimizer(readings: dict, c: dict):
+    """
+    TVB optimizer: if CPU temp is within 5°C of the TVB threshold and we're
+    at idle, nudge the idle ceiling down by 5% to keep temps below TVB.
+    This preserves single-threaded boost by keeping the CPU cooler.
+    """
+    from core.constants import TVB_TEMP_THRESHOLD
+    cpu_temp = readings.get("cpu_temp_avg")
+    if cpu_temp is None:
+        return
+    margin = TVB_TEMP_THRESHOLD - cpu_temp
+    if 0 <= margin <= 5:
+        # Getting close — pull ceiling down slightly
+        current_ceil = _current_cpu_ceiling or c["cpu"]["idle_max_state_pct"]
+        new_ceil     = max(c["cpu"]["idle_max_state_pct"], current_ceil - 5)
+        if new_ceil != _current_cpu_ceiling:
+            logger.debug("TVB optimizer: nudging CPU ceiling to %d%% (temp=%.1f°C, TVB=%.0f°C)",
+                         new_ceil, cpu_temp, TVB_TEMP_THRESHOLD)
+            tweaks._set_max_processor_state(new_ceil, "AC", dry_run=False)
+            tweaks._set_max_processor_state(new_ceil, "DC", dry_run=False)
+
 
 def _toast(message: str):
     try:

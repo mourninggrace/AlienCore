@@ -14,11 +14,19 @@ SUPPORT_EMAIL     = "mourning.grace.2014@gmail.com"
 GITHUB_ISSUES_URL = "https://github.com/mourninggrace/AlienCore/issues/new"
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-BASE_DIR       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH    = os.path.join(BASE_DIR, "config.json")
-LOG_PATH       = os.path.join(BASE_DIR, "logs", "aliencore.log")
-PROFILE_DIR    = os.path.join(BASE_DIR, "profiles")
-HARDWARE_CACHE = os.path.join(BASE_DIR, "hardware_profile.json")
+BASE_DIR              = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH           = os.path.join(BASE_DIR, "config.json")
+LOG_PATH              = os.path.join(BASE_DIR, "logs", "aliencore.log")
+PROFILE_DIR           = os.path.join(BASE_DIR, "profiles")
+HARDWARE_CACHE        = os.path.join(BASE_DIR, "hardware_profile.json")
+THROTTLE_LOG_PATH     = os.path.join(BASE_DIR, "logs", "throttle_events.json")
+EFFICIENCY_HISTORY_PATH = os.path.join(BASE_DIR, "logs", "efficiency_history.json")
+BOOST_HISTORY_PATH    = os.path.join(BASE_DIR, "logs", "boost_history.json")
+PAGEFILE_SESSIONS_PATH = os.path.join(BASE_DIR, "logs", "pagefile_sessions.json")
+
+# ── Feature thresholds ────────────────────────────────────────────────────────
+TVB_TEMP_THRESHOLD = 70    # Intel TVB activates below this temp (Raptor Lake i9)
+DDR5_PEAK_GBPS     = 89.0  # DDR5-5600 dual-channel theoretical peak (GB/s)
 
 # ── Temperature thresholds (°C) ───────────────────────────────────────────────
 TEMP_CPU_WARN     = 80
@@ -119,6 +127,8 @@ DEFAULT_CONFIG = {
         "tray_cycle_interval_sec": TRAY_CYCLE_INTERVAL,
         "update_interval_value": 2.0,         # numeric interval value
         "update_interval_unit": "seconds",    # "seconds" or "milliseconds"
+        "bar_orientation": "horizontal",      # "horizontal" | "vertical"
+        "settings_theme": "Void",             # settings window color theme
     },
 
     # ── Sensors to show ──
@@ -164,6 +174,9 @@ DEFAULT_CONFIG = {
         "full_power_in_streaming": True,
         "hetero_scheduling": True,            # Intel Thread Director + hetero parking policy
         "core_parking_gaming": True,          # unpark all 32 logical processors in gaming/streaming
+        "tvb_optimizer": False,               # nudge idle CPU ceiling to stay under TVB threshold
+        "interrupt_steering": False,          # steer critical IRQs toward P-cores via registry
+        "process_affinity_tags": {},          # {exe_name: "p" | "e"} manual affinity hints
     },
 
     # ── GPU management ──
@@ -176,6 +189,8 @@ DEFAULT_CONFIG = {
         "optimal_decision": True,
         "hags_enabled": True,                 # Hardware-Accelerated GPU Scheduling (req'd for DLSS 3)
         "powermizer_max_performance": True,   # NVIDIA max performance P-state on AC power
+        "vram_idle_clock_lock": False,        # lock VRAM to idle clock when not gaming
+        "vram_idle_clock_mhz": 405,           # VRAM clock to lock to at idle (405 MHz = P8 state)
     },
 
     # ── RAM ──
@@ -186,6 +201,11 @@ DEFAULT_CONFIG = {
         "pagefile_custom_mb": 0,
         "clear_standby_cache_on_idle": True,
         "disable_paging_executive": True,     # keep kernel code pinned in RAM (never paged)
+        "dimm_throttle_protection": False,    # alert + throttle CPU when DIMM temps exceed threshold
+        "dimm_throttle_temp_c": 52,           # DIMM temp (°C) that triggers protection
+        "leak_watchdog_enabled": False,       # monitor per-process RSS for memory leaks
+        "leak_threshold_mb_per_min": 50.0,    # growth rate that flags a leak
+        "leak_window_minutes": 5.0,           # observation window for leak detection
     },
 
     # ── Scheduler / process priority ──

@@ -1026,3 +1026,150 @@ def _reg_set(path: str, name: str, value, reg_type, dry_run: bool):
         logger.warning("Registry permission denied: %s\\%s (need admin?)", path, name)
     except Exception as e:
         logger.error("Registry error [%s\\%s]: %s", path, name, e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VRAM idle clock lock
+# ─────────────────────────────────────────────────────────────────────────────
+
+def set_vram_clock_lock(enabled: bool, mem_mhz: int = 405, dry_run: bool = False) -> tuple:
+    """
+    Lock or release VRAM memory clock via nvidia-smi.
+    When enabled: locks memory clock to mem_mhz (low idle state, saves ~10-15W).
+    When disabled: resets application clocks so the driver can boost freely.
+    Returns (success: bool, message: str).
+    """
+    try:
+        if dry_run:
+            action = f"lock mem={mem_mhz}MHz" if enabled else "reset clocks"
+            logger.info("[DRY RUN] VRAM clock: %s", action)
+            return True, f"[DRY RUN] {action}"
+
+        if enabled:
+            # Lock memory clock (GPU clock follows VRAM in P-state management)
+            r = subprocess.run(
+                ["nvidia-smi", f"--lock-memory-clocks={mem_mhz},{mem_mhz}"],
+                capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0:
+                logger.info("VRAM clock locked to %d MHz", mem_mhz)
+                return True, f"VRAM clock locked to {mem_mhz} MHz."
+            return False, (r.stderr or r.stdout).strip() or "nvidia-smi returned non-zero"
+        else:
+            r = subprocess.run(
+                ["nvidia-smi", "--reset-memory-clocks"],
+                capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0:
+                logger.info("VRAM clock lock released")
+                return True, "VRAM clock lock released — driver manages freely."
+            return False, (r.stderr or r.stdout).strip() or "nvidia-smi returned non-zero"
+    except FileNotFoundError:
+        return False, "nvidia-smi not found."
+    except Exception as e:
+        return False, str(e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Interrupt affinity steering
+# ─────────────────────────────────────────────────────────────────────────────
+
+def apply_interrupt_steering(dry_run: bool = False) -> tuple:
+    """
+    Steer performance-critical interrupt sources toward P-cores.
+    Uses the Windows registry key HKLM\\SYSTEM\\CurrentControlSet\\Control\\IRQ Routing
+    and device-specific AffinityPolicy overrides.
+
+    P-core affinity mask for i9-14900HX (32 logical, LP 0-15 = P-cores):
+      0x000000000000FFFF = logical processors 0-15 (P-core threads only)
+
+    Returns (success: bool, message: str).
+    """
+    # Interrupt affinity policy registry path
+    BASE    = r"HKLM\SYSTEM\CurrentControlSet\Control\PnP\Pci"
+    # Affinity mask for logical processors 0-15 (P-cores on i9-14900HX)
+    P_MASK  = 0x000000000000FFFF
+
+    # Devices to steer to P-cores: NIC, NVME, GPU (class GUIDs)
+    # These are device class GUIDs that get interrupt policy overrides
+    TARGET_CLASSES = {
+        "{4d36e972-e325-11ce-bfc1-08002be10318}": "Network Adapter",
+        "{4d36e968-e325-11ce-bfc1-08002be10318}": "Display Adapter",
+        "{4d36e97b-e325-11ce-bfc1-08002be10318}": "Storage Controller",
+    }
+
+    if dry_run:
+        logger.info("[DRY RUN] Would steer device interrupts to P-cores (mask=0x%X)", P_MASK)
+        return True, f"[DRY RUN] Would steer interrupts to P-cores (mask=0x{P_MASK:X})."
+
+    applied = 0
+    errors  = 0
+    try:
+        for class_guid, class_name in TARGET_CLASSES.items():
+            try:
+                key_path = f"SYSTEM\\CurrentControlSet\\Control\\Class\\{class_guid}"
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path,
+                                    0, winreg.KEY_READ) as ck:
+                    i = 0
+                    while True:
+                        try:
+                            sub = winreg.EnumKey(ck, i)
+                            if not sub.isdigit():
+                                i += 1
+                                continue
+                            sub_path = f"HKLM\\SYSTEM\\CurrentControlSet\\Control\\Class\\{class_guid}\\{sub}"
+                            _reg_set(sub_path, "InterruptPolicyMask",
+                                     P_MASK, winreg.REG_QWORD if hasattr(winreg, "REG_QWORD")
+                                     else winreg.REG_DWORD, False)
+                            applied += 1
+                            i += 1
+                        except OSError:
+                            break
+            except (FileNotFoundError, OSError):
+                pass
+        msg = f"Interrupt steering applied to {applied} device(s). Reboot recommended for full effect."
+        logger.info("Interrupt steering: %d device(s) updated", applied)
+        return True, msg
+    except Exception as e:
+        logger.warning("Interrupt steering error: %s", e)
+        return False, str(e)
+
+
+def reset_interrupt_steering(dry_run: bool = False) -> tuple:
+    """Remove interrupt affinity policy overrides (restore Windows auto-routing)."""
+    TARGET_CLASSES = {
+        "{4d36e972-e325-11ce-bfc1-08002be10318}": "Network Adapter",
+        "{4d36e968-e325-11ce-bfc1-08002be10318}": "Display Adapter",
+        "{4d36e97b-e325-11ce-bfc1-08002be10318}": "Storage Controller",
+    }
+    if dry_run:
+        return True, "[DRY RUN] Would reset interrupt steering."
+    removed = 0
+    for class_guid in TARGET_CLASSES:
+        try:
+            key_path = f"SYSTEM\\CurrentControlSet\\Control\\Class\\{class_guid}"
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path,
+                                0, winreg.KEY_READ) as ck:
+                i = 0
+                while True:
+                    try:
+                        sub = winreg.EnumKey(ck, i)
+                        if sub.isdigit():
+                            sub_path = (f"SYSTEM\\CurrentControlSet\\Control\\"
+                                        f"Class\\{class_guid}\\{sub}")
+                            try:
+                                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, sub_path,
+                                                    0, winreg.KEY_SET_VALUE) as sk:
+                                    try:
+                                        winreg.DeleteValue(sk, "InterruptPolicyMask")
+                                        removed += 1
+                                    except FileNotFoundError:
+                                        pass
+                            except OSError:
+                                pass
+                        i += 1
+                    except OSError:
+                        break
+        except (FileNotFoundError, OSError):
+            pass
+    return True, f"Interrupt steering cleared from {removed} device(s)."

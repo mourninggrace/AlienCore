@@ -20,7 +20,117 @@ from core.constants import (
 
 logger = logging.getLogger("aliencore.gui")
 
-# ── Palette ───────────────────────────────────────────────────────────────────
+# ── Themes ───────────────────────────────────────────────────────────────────
+THEMES = {
+    "Void": {
+        "BG": "#1a1a1a", "BG_PANEL": "#222222", "BG_SECT": "#2a2a2a",
+        "BG_HW": "#1e1e2e", "FG": "#e8e8e8", "FG_DIM": "#888888",
+        "FG_HEAD": "#ffffff", "ACCENT": "#00aaff", "ACCENT2": "#00cc66",
+        "WARN": "#ffaa00", "DANGER": "#ff4444",
+        "BTN_BG": "#333333", "BTN_HOV": "#444444", "SEP": "#333333",
+    },
+    "Nebula": {
+        "BG": "#130d1f", "BG_PANEL": "#1a1228", "BG_SECT": "#221830",
+        "BG_HW": "#0f0a1a", "FG": "#e0d8f0", "FG_DIM": "#7a6a9a",
+        "FG_HEAD": "#f0e8ff", "ACCENT": "#bb66ff", "ACCENT2": "#8844dd",
+        "WARN": "#ff9933", "DANGER": "#ff3355",
+        "BTN_BG": "#2a1f40", "BTN_HOV": "#3a2f55", "SEP": "#2a1f40",
+    },
+    "Ember": {
+        "BG": "#1a0f0a", "BG_PANEL": "#221510", "BG_SECT": "#2a1c14",
+        "BG_HW": "#160b06", "FG": "#f0e0d0", "FG_DIM": "#997766",
+        "FG_HEAD": "#ffe8d0", "ACCENT": "#ff6600", "ACCENT2": "#cc4400",
+        "WARN": "#ffcc00", "DANGER": "#ff2200",
+        "BTN_BG": "#3a2010", "BTN_HOV": "#4a2e18", "SEP": "#3a2010",
+    },
+    "Aurora": {
+        "BG": "#0a1a14", "BG_PANEL": "#101f18", "BG_SECT": "#162820",
+        "BG_HW": "#081510", "FG": "#d0f0e0", "FG_DIM": "#5a9070",
+        "FG_HEAD": "#e8fff4", "ACCENT": "#00ffaa", "ACCENT2": "#00cc88",
+        "WARN": "#aaff00", "DANGER": "#ff4466",
+        "BTN_BG": "#1a3020", "BTN_HOV": "#243a28", "SEP": "#1a3020",
+    },
+    "Spectre": {
+        "BG": "#141414", "BG_PANEL": "#1c1c1c", "BG_SECT": "#242424",
+        "BG_HW": "#111111", "FG": "#d0d0d0", "FG_DIM": "#707070",
+        "FG_HEAD": "#f8f8f8", "ACCENT": "#c8c8c8", "ACCENT2": "#a0a0a0",
+        "WARN": "#ffcc44", "DANGER": "#ff4444",
+        "BTN_BG": "#2c2c2c", "BTN_HOV": "#3c3c3c", "SEP": "#2c2c2c",
+    },
+    "Crimson": {
+        "BG": "#1a0a0a", "BG_PANEL": "#221010", "BG_SECT": "#2a1414",
+        "BG_HW": "#150808", "FG": "#f0d8d8", "FG_DIM": "#997070",
+        "FG_HEAD": "#ffe8e8", "ACCENT": "#ff3355", "ACCENT2": "#cc1133",
+        "WARN": "#ff8800", "DANGER": "#ff0022",
+        "BTN_BG": "#3a1515", "BTN_HOV": "#4a2020", "SEP": "#3a1515",
+    },
+    "Phantom": {
+        "BG": "#0d0d14", "BG_PANEL": "#13131c", "BG_SECT": "#1a1a26",
+        "BG_HW": "#0a0a10", "FG": "#ddd8f0", "FG_DIM": "#7070aa",
+        "FG_HEAD": "#f0eeff", "ACCENT": "#ff44cc", "ACCENT2": "#cc22aa",
+        "WARN": "#ffaa22", "DANGER": "#ff2244",
+        "BTN_BG": "#1e1e30", "BTN_HOV": "#28283e", "SEP": "#1e1e30",
+    },
+    "Solaris": {
+        "BG": "#0f0e14", "BG_PANEL": "#16151e", "BG_SECT": "#1e1c28",
+        "BG_HW": "#0c0b12", "FG": "#f0e8c8", "FG_DIM": "#88806a",
+        "FG_HEAD": "#fff8e0", "ACCENT": "#ffcc00", "ACCENT2": "#ddaa00",
+        "WARN": "#ff8800", "DANGER": "#ff4422",
+        "BTN_BG": "#2a2820", "BTN_HOV": "#38362c", "SEP": "#2a2820",
+    },
+    "Hex": {
+        "BG": "#080e08", "BG_PANEL": "#0d140d", "BG_SECT": "#121c12",
+        "BG_HW": "#060c06", "FG": "#80ff80", "FG_DIM": "#408040",
+        "FG_HEAD": "#aaffaa", "ACCENT": "#00ff41", "ACCENT2": "#00cc33",
+        "WARN": "#aaff00", "DANGER": "#ff2200",
+        "BTN_BG": "#0f1f0f", "BTN_HOV": "#162816", "SEP": "#0f1f0f",
+    },
+    "Glacier": {
+        "BG": "#0a0e14", "BG_PANEL": "#0e1420", "BG_SECT": "#141c2a",
+        "BG_HW": "#080c10", "FG": "#d8eaf8", "FG_DIM": "#6888aa",
+        "FG_HEAD": "#eef6ff", "ACCENT": "#44aaff", "ACCENT2": "#22ddee",
+        "WARN": "#aaccff", "DANGER": "#ff4466",
+        "BTN_BG": "#141e2e", "BTN_HOV": "#1c283c", "SEP": "#141e2e",
+    },
+    "Venom": {
+        "BG": "#0a100a", "BG_PANEL": "#0e160e", "BG_SECT": "#131e13",
+        "BG_HW": "#080d08", "FG": "#c8f0c8", "FG_DIM": "#508050",
+        "FG_HEAD": "#ddffdd", "ACCENT": "#88ff00", "ACCENT2": "#66dd00",
+        "WARN": "#ffcc00", "DANGER": "#ff3300",
+        "BTN_BG": "#152015", "BTN_HOV": "#1e2e1e", "SEP": "#152015",
+    },
+    "Abyss": {
+        "BG": "#080c18", "BG_PANEL": "#0c1020", "BG_SECT": "#10162a",
+        "BG_HW": "#060a14", "FG": "#c8d8f8", "FG_DIM": "#5070a0",
+        "FG_HEAD": "#ddeeff", "ACCENT": "#00ccff", "ACCENT2": "#0088dd",
+        "WARN": "#ff9900", "DANGER": "#ff3344",
+        "BTN_BG": "#101828", "BTN_HOV": "#182030", "SEP": "#101828",
+    },
+}
+
+
+def _apply_theme(name: str):
+    """Write theme colors into module globals before any widget is built."""
+    global BG, BG_PANEL, BG_SECT, BG_HW, FG, FG_DIM, FG_HEAD
+    global ACCENT, ACCENT2, WARN, DANGER, BTN_BG, BTN_HOV, SEP
+    t = THEMES.get(name, THEMES["Void"])
+    BG       = t["BG"]
+    BG_PANEL = t["BG_PANEL"]
+    BG_SECT  = t["BG_SECT"]
+    BG_HW    = t["BG_HW"]
+    FG       = t["FG"]
+    FG_DIM   = t["FG_DIM"]
+    FG_HEAD  = t["FG_HEAD"]
+    ACCENT   = t["ACCENT"]
+    ACCENT2  = t["ACCENT2"]
+    WARN     = t["WARN"]
+    DANGER   = t["DANGER"]
+    BTN_BG   = t["BTN_BG"]
+    BTN_HOV  = t["BTN_HOV"]
+    SEP      = t["SEP"]
+
+
+# ── Palette (default — overwritten by _apply_theme before window opens) ───────
 BG       = "#1a1a1a"
 BG_PANEL = "#222222"
 BG_SECT  = "#2a2a2a"
@@ -43,21 +153,30 @@ SEP      = "#333333"
 
 def open_settings(on_save_callback=None, is_first_run=False):
     # Bootstrap — ensure sys.path includes aliencore root
-    import sys, os, time
+    import sys, os, time, ctypes
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if base not in sys.path:
         sys.path.insert(0, base)
+
+    # Single-instance mutex — exit silently if settings is already open
+    _mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "AlienCore_Settings_v1")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        ctypes.windll.kernel32.CloseHandle(_mutex)
+        return
 
     # Small delay to ensure any in-flight disk writes have completed
     time.sleep(0.2)
 
     # Always load config fresh from disk
     cfg.load()
+    _apply_theme(cfg.get_value("display", "settings_theme", default="Void"))
 
     root = tk.Tk()
     SettingsWindow(root, on_save_callback=on_save_callback,
                    is_first_run=is_first_run)
     root.mainloop()
+
+    ctypes.windll.kernel32.CloseHandle(_mutex)
 
 
 # Also handle being run directly as a subprocess
@@ -82,6 +201,9 @@ class SettingsWindow:
 
         self._setup_window()
         self._build_ui()
+        # Snapshot clean state for dirty detection
+        self._saved_state = {k: v.get() for k, v in self.vars.items()}
+        self._saved_theme = self._cfg_get("display.settings_theme") or "Void"
 
     # ── Setup ─────────────────────────────────────────────────────────────────
 
@@ -110,7 +232,10 @@ class SettingsWindow:
         self.root.focus_force()
         self.root.attributes("-topmost", True)
         self.root.after(200, lambda: self.root.attributes("-topmost", False))
+        self._configure_styles()
 
+    def _configure_styles(self):
+        """Apply TTK styles using current theme globals. Safe to call on rebuild."""
         s = ttk.Style(self.root)
         s.theme_use("clam")
         s.configure("TNotebook",     background=BG,       borderwidth=0)
@@ -120,8 +245,52 @@ class SettingsWindow:
               background=[("selected", BG_SECT)],
               foreground=[("selected", FG_HEAD)])
         s.configure("TFrame",    background=BG)
+        s.configure("TCombobox", fieldbackground=BG_PANEL, background=BTN_BG,
+                    foreground=FG, selectbackground=ACCENT, selectforeground=BG,
+                    arrowcolor=FG_DIM, insertcolor=FG)
+        s.map("TCombobox",
+              fieldbackground=[("readonly", BG_PANEL)],
+              foreground=[("readonly", FG)],
+              selectbackground=[("readonly", ACCENT)],
+              selectforeground=[("readonly", BG)])
         s.configure("Vertical.TScrollbar", background=BG_PANEL,
                     troughcolor=BG, borderwidth=0, arrowcolor=FG_DIM)
+
+    # ── Theme rebuild ─────────────────────────────────────────────────────────
+
+    def _rebuild_for_theme(self):
+        """Destroy all widgets and rebuild with new theme globals in-place."""
+        # Save in-flight var values and tab position
+        self._collect()
+        try:
+            active_tab = self.nb.index(self.nb.select())
+        except Exception:
+            active_tab = 0
+        saved_state = dict(self._saved_state)
+        saved_theme = self._saved_theme
+
+        # Tear down
+        for w in self.root.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        self.vars          = {}
+        self._text_widgets = {}
+
+        # Rebuild
+        self.root.configure(bg=BG)
+        self._configure_styles()
+        self._build_ui()
+
+        # Restore tab and clean-state snapshot
+        try:
+            self.nb.select(active_tab)
+        except Exception:
+            pass
+        self._saved_state = saved_state
+        self._saved_theme = saved_theme
+        self._mark_dirty()
 
     # ── UI builder ────────────────────────────────────────────────────────────
 
@@ -167,7 +336,8 @@ class SettingsWindow:
                  font=("Segoe UI", 9), bg=BG, fg=FG_DIM).pack(side="left")
         self._btn(foot, "Cancel",           self._cancel,   FG_DIM).pack(side="right", padx=4)
         self._btn(foot, "Restore Defaults", self._defaults, WARN).pack(side="right", padx=4)
-        self._btn(foot, "  Save  ",         self._save,     ACCENT2, bold=True).pack(side="right", padx=4)
+        self._save_btn = self._btn(foot, "  Close  ", self._close, FG_DIM, bold=True)
+        self._save_btn.pack(side="right", padx=4)
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
 
@@ -226,6 +396,42 @@ class SettingsWindow:
                            activebackground=BG_SECT, activeforeground=ACCENT,
                            font=("Segoe UI",9)).pack(side="left", padx=10)
 
+        self._section(t, "Settings theme")
+        self._note(t, "Color palette for this settings window. Takes effect immediately.")
+        theme_row = tk.Frame(t, bg=BG_SECT, pady=4)
+        theme_row.pack(fill="x", padx=20, pady=(0, 8))
+
+        current_theme = self._cfg_get("display.settings_theme") or "Void"
+        theme_var = tk.StringVar(value=current_theme)
+
+        swatch = tk.Canvas(theme_row, width=40, height=20, highlightthickness=1,
+                           highlightbackground="#444444", cursor="arrow")
+
+        def _update_swatch(name):
+            td = THEMES.get(name, THEMES["Void"])
+            swatch.configure(bg=td["BG"])
+            swatch.delete("all")
+            swatch.create_rectangle(0,  0, 20, 20, fill=td["ACCENT"],  outline="")
+            swatch.create_rectangle(20, 0, 40, 20, fill=td["ACCENT2"], outline="")
+
+        def _on_theme_change(event=None):
+            name = theme_var.get()
+            self._cfg_set("display.settings_theme", name)
+            _apply_theme(name)
+            self._rebuild_for_theme()
+
+        combo = ttk.Combobox(theme_row, textvariable=theme_var,
+                             values=list(THEMES.keys()),
+                             state="readonly", width=14,
+                             font=("Segoe UI", 10))
+        combo.pack(side="left", padx=(0, 8))
+        combo.bind("<<ComboboxSelected>>", _on_theme_change)
+        swatch.pack(side="left", padx=(0, 10))
+        _update_swatch(current_theme)
+        tk.Label(theme_row, text="Takes effect immediately",
+                 font=("Segoe UI", 8, "italic"),
+                 bg=BG_SECT, fg=FG_DIM).pack(side="left")
+
         self._section(t, "Overlay")
         self._opt(t, "display.auto_hide_fullscreen", "Auto-hide bar in fullscreen", "Withdraws sensor bar when a fullscreen app is active")
         self._opt(t, "display.overlay_enabled", "Show floating overlay", "Always-on-top overlay window")
@@ -252,6 +458,10 @@ class SettingsWindow:
                      fmt=lambda v: f"{int(v)}°C")
         self._opt(t, "cpu.full_power_in_gaming",    "Full power during gaming",    "Removes ceiling when game detected")
         self._opt(t, "cpu.full_power_in_streaming", "Full power during streaming", "Removes ceiling when OBS/XSplit detected")
+        self._cpu_tvb_panel(t)
+        self._cpu_boost_score_panel(t)
+        self._cpu_core_role_panel(t)
+        self._cpu_interrupt_steering_panel(t)
 
     def _tab_gpu(self):
         t = self._make_tab("GPU")
@@ -268,6 +478,11 @@ class SettingsWindow:
             self._note(t, "Spins fans to 100% for rapid cooling via AWCC. Auto-disables when timer OR temps cool — whichever first.")
             self._slider(t, "turbo_cool.auto_off_minutes", "Auto-disable after (minutes)", 1, 60, 1, fmt=lambda v: f"{int(v)} min")
             self._opt(t, "turbo_cool.auto_off_on_cool", "Also disable when temps drop below warning thresholds", "")
+        self._gpu_dynamic_boost_panel(t)
+        self._gpu_vram_clock_panel(t)
+        self._gpu_driver_features_panel(t)
+        self._gpu_throttle_log_panel(t)
+        self._gpu_efficiency_panel(t)
 
     def _tab_ram(self):
         t = self._make_tab("RAM")
@@ -279,6 +494,793 @@ class SettingsWindow:
         self._slider(t, "ram.pagefile_custom_mb", "Custom pagefile (MB)", 0, 32768, 512,
                      fmt=lambda v: "Windows managed" if int(v)==0 else f"{int(v)} MB")
         self._opt(t, "ram.clear_standby_cache_on_idle","Clear standby cache at idle",  "Frees unused RAM")
+        self._ram_composition_panel(t)
+        self._ram_unified_pressure_panel(t)
+        self._ram_working_set_panel(t)
+        self._ram_leak_watchdog_panel(t)
+        self._ram_dimm_protection_panel(t)
+        self._ram_pagefile_advisor_panel(t)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # CPU advanced panels
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _cpu_tvb_panel(self, parent):
+        from core.constants import TVB_TEMP_THRESHOLD
+        self._section(parent, "TVB Headroom & Thermal Velocity Boost Optimizer")
+        self._note(parent,
+            f"Intel Thermal Velocity Boost (TVB) activates when CPU temp is below "
+            f"{TVB_TEMP_THRESHOLD}°C, adding +200 MHz on top of normal boost. "
+            f"The optimizer gently lowers the idle ceiling when temps creep toward the threshold, "
+            f"keeping you in TVB territory for higher sustained single-core speeds.")
+        self._opt(parent, "cpu.tvb_optimizer",
+                  "Enable TVB optimizer",
+                  f"Automatically adjusts idle ceiling to maintain temp < {TVB_TEMP_THRESHOLD}°C")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+        tk.Label(panel, text="Live TVB Status", font=("Segoe UI", 9, "bold"),
+                 bg=BG_HW, fg=FG_HEAD).pack(anchor="w", pady=(0, 4))
+
+        tvb_lbl  = tk.Label(panel, text="—", font=("Segoe UI", 9), bg=BG_HW, fg=FG_DIM)
+        tvb_lbl.pack(anchor="w")
+        head_lbl = tk.Label(panel, text="—", font=("Segoe UI", 9), bg=BG_HW, fg=FG_DIM)
+        head_lbl.pack(anchor="w")
+
+        def _refresh():
+            try:
+                from core import sensors, boost_tracker
+                r     = sensors.get_readings()
+                temp  = r.get("cpu_temp_avg")
+                score = boost_tracker.get_score()
+                if temp is not None:
+                    headroom = TVB_TEMP_THRESHOLD - temp
+                    if headroom > 0:
+                        tvb_lbl.config(
+                            text=f"TVB ACTIVE  —  CPU temp {temp:.0f}°C  ({headroom:.1f}°C below threshold)",
+                            fg=ACCENT2)
+                    else:
+                        tvb_lbl.config(
+                            text=f"TVB INACTIVE  —  CPU temp {temp:.0f}°C  ({-headroom:.1f}°C above threshold)",
+                            fg=WARN)
+                    head_lbl.config(
+                        text=f"Boost sustainability: {score['score_pct']:.0f}%  |  "
+                             f"Avg clock: {score['avg_freq_ghz']:.2f} GHz  |  "
+                             f"Max: {score['max_freq_mhz']:,} MHz",
+                        fg=FG_DIM)
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(2500, _refresh)
+
+        panel.after(500, _refresh)
+
+    def _cpu_boost_score_panel(self, parent):
+        self._section(parent, "Boost Clock Sustainability Score")
+        self._note(parent,
+            "Tracks how often your CPU reaches ≥90% of its max boost clock over the last 60 "
+            "seconds. 100% = sustaining boost continuously. Low scores indicate thermal or power "
+            "throttling is cutting performance short.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        score_lbl = tk.Label(panel, text="—", font=("Segoe UI Semibold", 18),
+                             bg=BG_HW, fg=ACCENT)
+        score_lbl.pack(anchor="w")
+        detail_lbl = tk.Label(panel, text="", font=("Segoe UI", 8),
+                              bg=BG_HW, fg=FG_DIM)
+        detail_lbl.pack(anchor="w")
+
+        # Canvas bar
+        bar_canvas = tk.Canvas(panel, width=400, height=14, bg=BG_PANEL,
+                               highlightthickness=0, bd=0)
+        bar_canvas.pack(anchor="w", pady=(4, 0))
+
+        def _refresh():
+            try:
+                from core import boost_tracker
+                s = boost_tracker.get_score()
+                pct   = s["score_pct"]
+                color = (ACCENT2 if pct >= 70 else WARN if pct >= 40 else DANGER)
+                score_lbl.config(text=f"{pct:.0f}%  Boost Score", fg=color)
+                detail_lbl.config(
+                    text=f"Avg {s['avg_freq_ghz']:.2f} GHz over last {s['window_seconds']}s  "
+                         f"({s['sample_count']} samples)")
+                bar_canvas.delete("all")
+                fill_w = int(400 * pct / 100)
+                bar_canvas.create_rectangle(0, 0, 400, 14, fill=BG_PANEL, outline="")
+                if fill_w > 0:
+                    bar_canvas.create_rectangle(0, 0, fill_w, 14, fill=color, outline="")
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(2500, _refresh)
+
+        panel.after(800, _refresh)
+
+    def _cpu_core_role_panel(self, parent):
+        self._section(parent, "P-core / E-core Topology")
+        self._note(parent,
+            "Detected P-cores handle high-priority foreground threads. E-cores handle "
+            "background work via EcoQoS. Intel Thread Director automatically routes threads — "
+            "the settings below tune how aggressively Windows defers to the hardware scheduler.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+        tk.Label(panel, text="Detected Topology", font=("Segoe UI", 9, "bold"),
+                 bg=BG_HW, fg=FG_HEAD).pack(anchor="w", pady=(0, 4))
+
+        topo_lbl = tk.Label(panel, text="Detecting...", font=("Segoe UI", 9),
+                            bg=BG_HW, fg=FG_DIM)
+        topo_lbl.pack(anchor="w")
+
+        def _load_topo():
+            try:
+                from core import cpu_topology
+                t = cpu_topology.get_topology()
+                confirmed = "confirmed" if t["detected"] else "estimated"
+                txt = (f"P-cores: {t['p_count']} logical processors  "
+                       f"(LPs {t['p_cores'][0]}–{t['p_cores'][-1] if t['p_cores'] else '?'})  "
+                       f"|  E-cores: {t['e_count']} logical processors  "
+                       f"({confirmed})")
+                if panel.winfo_exists():
+                    panel.after(0, lambda: topo_lbl.config(text=txt, fg=ACCENT))
+            except Exception as e:
+                if panel.winfo_exists():
+                    panel.after(0, lambda: topo_lbl.config(text=f"Detection failed: {e}", fg=WARN))
+
+        import threading as _t
+        _t.Thread(target=_load_topo, daemon=True).start()
+
+        self._opt(parent, "cpu.hetero_scheduling",
+                  "Intel Thread Director (heterogeneous scheduling)",
+                  "Lets Intel's microcontroller guide thread placement across P/E-cores")
+        self._opt(parent, "cpu.core_parking_gaming",
+                  "Unpark all cores during gaming/streaming",
+                  "Eliminates wakeup latency — all 32 logical processors always ready")
+
+    def _cpu_interrupt_steering_panel(self, parent):
+        self._section(parent, "Interrupt Affinity Steering")
+        self._note(parent,
+            "Routes hardware interrupt requests (IRQs) from your NIC, NVMe, and GPU "
+            "toward P-cores instead of E-cores. This reduces DPC interrupt latency by "
+            "ensuring your fastest cores service device events. Requires admin. "
+            "A reboot is recommended after applying.")
+        self._opt(parent, "cpu.interrupt_steering",
+                  "Enable interrupt steering (stored in config)",
+                  "Apply/revert buttons below take effect immediately")
+
+        ctrl = tk.Frame(parent, bg=BG_SECT, pady=4)
+        ctrl.pack(fill="x", padx=20, pady=(0, 4))
+        status_var = tk.StringVar(value="")
+        status_lbl = tk.Label(parent, textvariable=status_var,
+                              font=("Segoe UI", 8, "italic"),
+                              bg=BG_SECT, fg=FG_DIM, anchor="w")
+        status_lbl.pack(fill="x", padx=20, pady=(0, 8))
+
+        def _apply():
+            status_var.set("Applying interrupt steering...")
+            def _work():
+                from core import tweaks
+                ok, msg = tweaks.apply_interrupt_steering(dry_run=False)
+                parent.after(0, lambda: status_var.set(
+                    msg if ok else f"Failed: {msg}"))
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _revert():
+            status_var.set("Reverting interrupt steering...")
+            def _work():
+                from core import tweaks
+                ok, msg = tweaks.reset_interrupt_steering(dry_run=False)
+                parent.after(0, lambda: status_var.set(
+                    msg if ok else f"Failed: {msg}"))
+            threading.Thread(target=_work, daemon=True).start()
+
+        self._btn(ctrl, "Apply to P-cores", _apply, ACCENT2, bold=True).pack(side="left", padx=(0, 8))
+        self._btn(ctrl, "Revert to Windows Auto", _revert, FG_DIM).pack(side="left")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # GPU advanced panels
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _gpu_dynamic_boost_panel(self, parent):
+        self._section(parent, "Dynamic Boost Transparency")
+        self._note(parent,
+            "Live view of GPU boost state — current power draw vs. limit, "
+            "clock vs. max, and whether any throttle reasons are active.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        boost_lbl  = tk.Label(panel, text="—", font=("Segoe UI Semibold", 11),
+                              bg=BG_HW, fg=ACCENT)
+        boost_lbl.pack(anchor="w")
+        detail_lbl = tk.Label(panel, text="", font=("Segoe UI", 8),
+                              bg=BG_HW, fg=FG_DIM, wraplength=700, justify="left")
+        detail_lbl.pack(anchor="w", pady=(2, 0))
+
+        def _refresh():
+            try:
+                from core import sensors, throttle_log
+                r = sensors.get_readings()
+                watts      = r.get("gpu_watts")
+                limit      = r.get("gpu_power_limit_w")
+                clock      = r.get("gpu_clock_mhz")
+                mem_clock  = r.get("gpu_mem_clock_mhz")
+                throttle   = r.get("gpu_throttle_reasons", "0x0000000000000000")
+                reasons    = throttle_log.decode_reasons(throttle)
+                perf_lost  = throttle_log.is_perf_limited(throttle)
+
+                if watts is not None:
+                    pct_str = f" ({watts/limit*100:.0f}% of limit)" if limit else ""
+                    boost_lbl.config(
+                        text=f"Power: {watts:.0f}W{pct_str}  |  "
+                             f"Core: {int(clock or 0):,} MHz  |  "
+                             f"VRAM: {int(mem_clock or 0):,} MHz",
+                        fg=DANGER if perf_lost else ACCENT2 if watts and limit and watts/limit > 0.9 else ACCENT)
+                    detail_lbl.config(
+                        text=("Throttle: " + ", ".join(reasons)) if reasons else "Throttle: none",
+                        fg=DANGER if perf_lost else FG_DIM)
+                else:
+                    boost_lbl.config(text="nvidia-smi not available", fg=FG_DIM)
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(2000, _refresh)
+
+        panel.after(300, _refresh)
+
+    def _gpu_vram_clock_panel(self, parent):
+        self._section(parent, "VRAM Idle Clock Reduction")
+        self._note(parent,
+            "Locks VRAM to a low idle clock state when not gaming. "
+            "Reduces memory controller heat and saves 10-15W at idle. "
+            "AlienCore automatically releases the lock when switching to gaming profile. "
+            "Requires nvidia-smi and admin rights.")
+        self._opt(parent, "gpu.vram_idle_clock_lock",
+                  "Enable VRAM idle clock lock",
+                  "Locks memory clock at idle — auto-released during gaming")
+        self._slider(parent, "gpu.vram_idle_clock_mhz", "Idle VRAM clock (MHz)",
+                     200, 1000, 5, fmt=lambda v: f"{int(v)} MHz",
+                     note="405 MHz = NVIDIA P8 idle state (recommended for most GPUs)")
+
+        ctrl = tk.Frame(parent, bg=BG_SECT, pady=4)
+        ctrl.pack(fill="x", padx=20, pady=(0, 4))
+        vram_status = tk.StringVar(value="")
+        tk.Label(parent, textvariable=vram_status,
+                 font=("Segoe UI", 8, "italic"), bg=BG_SECT, fg=FG_DIM,
+                 anchor="w").pack(fill="x", padx=20, pady=(0, 8))
+
+        def _lock_now():
+            mhz = int(self._cfg_get("gpu.vram_idle_clock_mhz") or 405)
+            vram_status.set(f"Locking VRAM to {mhz} MHz...")
+            def _work():
+                from core import tweaks
+                ok, msg = tweaks.set_vram_clock_lock(True, mhz)
+                parent.after(0, lambda: vram_status.set(msg))
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _release_now():
+            vram_status.set("Releasing VRAM clock lock...")
+            def _work():
+                from core import tweaks
+                ok, msg = tweaks.set_vram_clock_lock(False)
+                parent.after(0, lambda: vram_status.set(msg))
+            threading.Thread(target=_work, daemon=True).start()
+
+        self._btn(ctrl, "Lock Now", _lock_now, ACCENT2, bold=True).pack(side="left", padx=(0, 8))
+        self._btn(ctrl, "Release Lock", _release_now, FG_DIM).pack(side="left")
+
+    def _gpu_driver_features_panel(self, parent):
+        self._section(parent, "NVIDIA Driver Feature Panel")
+        self._note(parent,
+            "Key driver features managed by AlienCore. Changes apply on next "
+            "AlienCore startup or when you click Apply below.")
+        self._opt(parent, "gpu.hags_enabled",
+                  "Hardware-Accelerated GPU Scheduling (HAGS)",
+                  "Required for DLSS 3 Frame Generation. Reduces input latency. Stored in registry.")
+        self._opt(parent, "gpu.powermizer_max_performance",
+                  "PowerMizer: Prefer Maximum Performance",
+                  "Forces GPU to max P-state on AC power — eliminates stutters from clock ramp-up.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+        feat_status = tk.StringVar(value="")
+        feat_lbl    = tk.Label(panel, textvariable=feat_status,
+                               font=("Segoe UI", 8, "italic"),
+                               bg=BG_HW, fg=FG_DIM, anchor="w", wraplength=720)
+        feat_lbl.pack(anchor="w")
+
+        def _read_status():
+            try:
+                import winreg
+                hags = None
+                try:
+                    k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                       r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers")
+                    hags, _ = winreg.QueryValueEx(k, "HwSchMode")
+                    winreg.CloseKey(k)
+                except Exception:
+                    pass
+                hags_str = ("Enabled" if hags == 2 else "Disabled" if hags == 1 else "Unknown")
+                parent.after(0, lambda: (
+                    feat_status.set(f"HAGS: {hags_str}"),
+                    feat_lbl.config(fg=ACCENT2 if hags == 2 else WARN)))
+            except Exception:
+                pass
+
+        threading.Thread(target=_read_status, daemon=True).start()
+
+        ctrl = tk.Frame(parent, bg=BG_HW)
+        ctrl.pack(anchor="w", pady=(4, 0))
+        apply_status = tk.StringVar(value="")
+        tk.Label(parent, textvariable=apply_status,
+                 font=("Segoe UI", 8, "italic"), bg=BG_HW, fg=FG_DIM,
+                 anchor="w").pack(fill="x", padx=16, pady=(0, 8))
+
+        def _apply_feat():
+            apply_status.set("Applying NVIDIA driver features...")
+            def _work():
+                from core import tweaks
+                tweaks._tweak_gpu_baseline(self.config, self._hw, dry_run=False)
+                parent.after(0, lambda: (apply_status.set("Applied. A reboot may be needed for HAGS."),
+                                         _read_status()))
+            threading.Thread(target=_work, daemon=True).start()
+
+        self._btn(ctrl, "Apply Now", _apply_feat, ACCENT, bold=True).pack(side="left")
+
+    def _gpu_throttle_log_panel(self, parent):
+        self._section(parent, "Thermal Throttle Event Log")
+        self._note(parent,
+            "Records every time the GPU was performance-limited by thermals, power cap, "
+            "or HW slowdown. Logged continuously while AlienCore is running.")
+
+        outer = tk.Frame(parent, bg=BG_PANEL)
+        outer.pack(fill="x", padx=16, pady=(4, 4))
+
+        hdr = tk.Frame(outer, bg=BG_PANEL, pady=3, padx=10)
+        hdr.pack(fill="x")
+        for col, w in [("Time", 14), ("Reason(s)", 52), ("Temp", 8), ("Watts", 8)]:
+            tk.Label(hdr, text=col, font=("Segoe UI", 8, "bold"),
+                     bg=BG_PANEL, fg=FG_DIM, width=w, anchor="w").pack(side="left")
+
+        rows_frame = tk.Frame(outer, bg=BG_SECT)
+        rows_frame.pack(fill="x")
+
+        ctrl = tk.Frame(parent, bg=BG_SECT, pady=4)
+        ctrl.pack(fill="x", padx=16, pady=(0, 8))
+        log_status = tk.StringVar(value="")
+        tk.Label(parent, textvariable=log_status,
+                 font=("Segoe UI", 8, "italic"), bg=BG_SECT, fg=FG_DIM,
+                 anchor="w").pack(fill="x", padx=16, pady=(0, 4))
+
+        def _load_log():
+            for w in rows_frame.winfo_children():
+                rows_frame.winfo_children() and w.destroy()
+            try:
+                from core import throttle_log
+                from datetime import datetime
+                events = throttle_log.get_recent(20)
+                if not events:
+                    tk.Label(rows_frame, text="No throttle events recorded this session.",
+                             font=("Segoe UI", 8, "italic"), bg=BG_SECT,
+                             fg=FG_DIM, padx=10, pady=6).pack(anchor="w")
+                    log_status.set("")
+                    return
+                for ev in reversed(events):
+                    row = tk.Frame(rows_frame, bg=BG_SECT, padx=10, pady=2)
+                    row.pack(fill="x")
+                    ts  = datetime.fromtimestamp(ev["timestamp"]).strftime("%H:%M:%S")
+                    reasons_str = "; ".join(ev.get("reasons", []))[:60]
+                    temp_str    = f"{ev['gpu_temp']:.0f}°C" if ev.get("gpu_temp") else "—"
+                    watts_str   = f"{ev['gpu_watts']:.0f}W" if ev.get("gpu_watts") else "—"
+                    col_color   = DANGER if ev.get("perf_limited") else WARN
+                    for val, w in [(ts, 14), (reasons_str, 52), (temp_str, 8), (watts_str, 8)]:
+                        tk.Label(row, text=val, font=("Consolas", 8),
+                                 bg=BG_SECT, fg=col_color, width=w, anchor="w"
+                                 ).pack(side="left")
+                log_status.set(f"{len(events)} event(s) this session.")
+            except Exception as e:
+                log_status.set(f"Error: {e}")
+
+        def _clear_log():
+            from core import throttle_log
+            throttle_log.clear()
+            _load_log()
+
+        self._btn(ctrl, "Refresh", _load_log, ACCENT).pack(side="left", padx=(0, 8))
+        self._btn(ctrl, "Clear Log", _clear_log, FG_DIM).pack(side="left")
+        _load_log()
+
+    def _gpu_efficiency_panel(self, parent):
+        self._section(parent, "Power vs. Performance Efficiency")
+        self._note(parent,
+            "Efficiency score = GPU load% ÷ power draw (W). Higher is better. "
+            "A score that drops while load stays the same means you're spending more "
+            "watts for the same work — often caused by a climbing thermal limit.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        eff_lbl    = tk.Label(panel, text="—", font=("Segoe UI Semibold", 14),
+                              bg=BG_HW, fg=ACCENT)
+        eff_lbl.pack(anchor="w")
+        eff_detail = tk.Label(panel, text="", font=("Segoe UI", 8),
+                              bg=BG_HW, fg=FG_DIM)
+        eff_detail.pack(anchor="w")
+
+        bar_c = tk.Canvas(panel, width=400, height=12, bg=BG_PANEL,
+                          highlightthickness=0, bd=0)
+        bar_c.pack(anchor="w", pady=(4, 0))
+
+        # Rolling efficiency average
+        _eff_samples = []
+
+        def _refresh():
+            try:
+                from core import sensors
+                r     = sensors.get_readings()
+                load  = r.get("gpu_load")
+                watts = r.get("gpu_watts")
+                if load is not None and watts and watts > 0:
+                    score = round(load / watts, 2)
+                    _eff_samples.append(score)
+                    if len(_eff_samples) > 30:
+                        _eff_samples.pop(0)
+                    avg_score = sum(_eff_samples) / len(_eff_samples)
+                    color = (ACCENT2 if avg_score >= 1.5 else
+                             ACCENT  if avg_score >= 0.8 else
+                             WARN    if avg_score >= 0.4 else DANGER)
+                    eff_lbl.config(
+                        text=f"{avg_score:.2f}  %load/W  (30-sample avg)",
+                        fg=color)
+                    eff_detail.config(
+                        text=f"Current: {load:.0f}% @ {watts:.0f}W  →  {score:.2f} %/W  "
+                             f"|  Peak: {max(_eff_samples):.2f}")
+                    norm = min(1.0, avg_score / 2.0)
+                    bar_c.delete("all")
+                    bar_c.create_rectangle(0, 0, 400, 12, fill=BG_PANEL, outline="")
+                    fill_w = int(400 * norm)
+                    if fill_w:
+                        bar_c.create_rectangle(0, 0, fill_w, 12, fill=color, outline="")
+                else:
+                    eff_lbl.config(text="Waiting for GPU data...", fg=FG_DIM)
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(2000, _refresh)
+
+        panel.after(500, _refresh)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # RAM advanced panels
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _ram_composition_panel(self, parent):
+        self._section(parent, "Memory Composition Breakdown")
+        self._note(parent,
+            "In Use = committed to processes/kernel.  "
+            "Modified = dirty pages queued to disk.  "
+            "Standby = cached pages (reclaimable instantly).  "
+            "Free = zeroed, immediately available.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        bar_c  = tk.Canvas(panel, width=500, height=18, bg=BG_PANEL,
+                           highlightthickness=0, bd=0)
+        bar_c.pack(anchor="w", pady=(0, 4))
+        detail_lbl = tk.Label(panel, text="—", font=("Segoe UI", 8),
+                              bg=BG_HW, fg=FG_DIM)
+        detail_lbl.pack(anchor="w")
+
+        _COLORS = {"in_use": "#e05555", "modified": "#e09020",
+                   "standby": "#4488cc", "free": "#33aa66"}
+
+        def _refresh():
+            try:
+                from core import wmi_memory
+                comp = wmi_memory.get_composition()
+                total = comp["total_gb"] or 1
+                segments = [
+                    ("in_use",   comp["in_use_gb"],   comp["in_use_pct"]),
+                    ("modified", comp["modified_gb"],  0),
+                    ("standby",  comp["standby_gb"],   comp["standby_pct"]),
+                    ("free",     comp["free_gb"],       comp["free_pct"]),
+                ]
+                bar_c.delete("all")
+                x = 0
+                for key, gb, pct in segments:
+                    w = int(500 * gb / total)
+                    if w > 0:
+                        bar_c.create_rectangle(x, 0, x + w, 18,
+                                               fill=_COLORS[key], outline="")
+                    x += w
+                mod_str = f"{comp['modified_gb']:.1f} GB modified" if comp["modified_gb"] > 0.1 else ""
+                detail_lbl.config(
+                    text=f"In Use: {comp['in_use_gb']:.1f} GB ({comp['in_use_pct']:.0f}%)  "
+                         f"Standby: {comp['standby_gb']:.1f} GB  "
+                         f"Free: {comp['free_gb']:.1f} GB  "
+                         + (f"  {mod_str}" if mod_str else ""),
+                    fg=FG_DIM)
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(3000, _refresh)
+
+        panel.after(400, _refresh)
+
+    def _ram_unified_pressure_panel(self, parent):
+        self._section(parent, "Unified Memory Pressure  (RAM + VRAM)")
+        self._note(parent,
+            "Combined view of system RAM and GPU VRAM pressure. "
+            "When both are high simultaneously, expect stutters and asset streaming delays.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        ram_row  = tk.Frame(panel, bg=BG_HW); ram_row.pack(fill="x", pady=2)
+        vram_row = tk.Frame(panel, bg=BG_HW); vram_row.pack(fill="x", pady=2)
+
+        tk.Label(ram_row,  text="System RAM :", font=("Segoe UI", 8), bg=BG_HW,
+                 fg=FG_DIM, width=12, anchor="w").pack(side="left")
+        ram_bar  = tk.Canvas(ram_row,  width=300, height=12, bg=BG_PANEL,
+                             highlightthickness=0, bd=0)
+        ram_bar.pack(side="left", padx=(0, 8))
+        ram_lbl  = tk.Label(ram_row,  text="—", font=("Segoe UI", 8),
+                            bg=BG_HW, fg=FG_DIM)
+        ram_lbl.pack(side="left")
+
+        tk.Label(vram_row, text="GPU VRAM    :", font=("Segoe UI", 8), bg=BG_HW,
+                 fg=FG_DIM, width=12, anchor="w").pack(side="left")
+        vram_bar = tk.Canvas(vram_row, width=300, height=12, bg=BG_PANEL,
+                             highlightthickness=0, bd=0)
+        vram_bar.pack(side="left", padx=(0, 8))
+        vram_lbl = tk.Label(vram_row, text="—", font=("Segoe UI", 8),
+                            bg=BG_HW, fg=FG_DIM)
+        vram_lbl.pack(side="left")
+
+        def _bar(canvas, pct):
+            color = (DANGER if pct >= 90 else WARN if pct >= 70 else ACCENT2)
+            canvas.delete("all")
+            w = int(300 * pct / 100)
+            if w:
+                canvas.create_rectangle(0, 0, w, 12, fill=color, outline="")
+
+        def _refresh():
+            try:
+                from core import sensors
+                r = sensors.get_readings()
+                ram_pct  = r.get("ram_usage_pct") or 0
+                vram_used  = r.get("gpu_vram_used_mb") or 0
+                vram_total = r.get("gpu_vram_total_mb") or 1
+                vram_pct   = round(vram_used / vram_total * 100, 1) if vram_total else 0
+                _bar(ram_bar,  ram_pct)
+                _bar(vram_bar, vram_pct)
+                ram_lbl.config(text=f"{ram_pct:.0f}%  ({r.get('ram_used_gb', 0):.1f} / {r.get('ram_total_gb', 0):.0f} GB)")
+                vram_lbl.config(text=f"{vram_pct:.0f}%  ({vram_used/1024:.1f} / {vram_total/1024:.1f} GB)")
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(2000, _refresh)
+
+        panel.after(300, _refresh)
+
+    def _ram_working_set_panel(self, parent):
+        self._section(parent, "Process Working Set Trimmer")
+        self._note(parent,
+            "Forces Windows to release idle process working sets back to standby, "
+            "making them immediately reclaimable. Useful before starting a game to "
+            "reclaim RAM from background apps without killing them.")
+
+        outer = tk.Frame(parent, bg=BG_PANEL)
+        outer.pack(fill="x", padx=16, pady=(4, 4))
+
+        hdr = tk.Frame(outer, bg=BG_PANEL, pady=3, padx=10)
+        hdr.pack(fill="x")
+        for col, w in [("Process", 28), ("RSS (MB)", 12), ("% of RAM", 10)]:
+            tk.Label(hdr, text=col, font=("Segoe UI", 8, "bold"),
+                     bg=BG_PANEL, fg=FG_DIM, width=w, anchor="w").pack(side="left")
+
+        rows_f = tk.Frame(outer, bg=BG_SECT)
+        rows_f.pack(fill="x")
+
+        trim_status = tk.StringVar(value="")
+        ctrl = tk.Frame(parent, bg=BG_SECT, pady=4)
+        ctrl.pack(fill="x", padx=16, pady=(0, 4))
+        tk.Label(parent, textvariable=trim_status,
+                 font=("Segoe UI", 8, "italic"), bg=BG_SECT, fg=FG_DIM,
+                 anchor="w").pack(fill="x", padx=16, pady=(0, 8))
+
+        def _load_procs():
+            for w in rows_f.winfo_children():
+                w.destroy()
+            try:
+                from core import wmi_memory
+                procs = wmi_memory.get_top_processes(15)
+                for proc in procs:
+                    row = tk.Frame(rows_f, bg=BG_SECT, padx=10, pady=1)
+                    row.pack(fill="x")
+                    for val, w in [(proc["name"][:30], 28),
+                                   (f"{proc['rss_mb']:.0f}", 12),
+                                   (f"{proc['rss_pct']:.1f}%", 10)]:
+                        tk.Label(row, text=val, font=("Segoe UI", 8),
+                                 bg=BG_SECT, fg=FG, width=w, anchor="w"
+                                 ).pack(side="left")
+                trim_status.set(f"Top {len(procs)} processes by RAM usage.")
+            except Exception as e:
+                trim_status.set(f"Error: {e}")
+
+        def _trim():
+            trim_status.set("Trimming working sets...")
+            def _work():
+                from core import wmi_memory
+                result = wmi_memory.trim_working_sets()
+                msg = (f"Trimmed {result['trimmed']} process(es). "
+                       f"Est. {result['freed_mb_estimate']:.0f} MB freed to standby.")
+                parent.after(0, lambda: (trim_status.set(msg), _load_procs()))
+            threading.Thread(target=_work, daemon=True).start()
+
+        self._btn(ctrl, "Refresh List", _load_procs, ACCENT).pack(side="left", padx=(0, 8))
+        self._btn(ctrl, "Trim All Working Sets", _trim, ACCENT2, bold=True).pack(side="left")
+        _load_procs()
+
+    def _ram_leak_watchdog_panel(self, parent):
+        self._section(parent, "Memory Leak Watchdog")
+        self._note(parent,
+            "Monitors per-process RSS growth over time. If any process grows faster "
+            "than the threshold rate sustained over the observation window, it appears "
+            "in the suspects list below. Useful for catching runaway browser tabs, "
+            "game memory leaks, and driver-level leaks.")
+        self._opt(parent, "ram.leak_watchdog_enabled",
+                  "Enable memory leak watchdog",
+                  "Runs in the monitor loop — negligible overhead")
+        self._slider(parent, "ram.leak_threshold_mb_per_min",
+                     "Flag if growing faster than (MB/min)", 5, 500, 5,
+                     fmt=lambda v: f"{int(v)} MB/min")
+        self._slider(parent, "ram.leak_window_minutes",
+                     "Observation window (minutes)", 1, 30, 1,
+                     fmt=lambda v: f"{int(v)} min")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=8)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+        tk.Label(panel, text="Suspects", font=("Segoe UI", 9, "bold"),
+                 bg=BG_HW, fg=FG_HEAD).pack(anchor="w", pady=(0, 4))
+
+        suspects_lbl = tk.Label(panel, text="No suspects detected.",
+                                font=("Segoe UI", 8, "italic"),
+                                bg=BG_HW, fg=FG_DIM, anchor="w", wraplength=700)
+        suspects_lbl.pack(anchor="w")
+
+        def _refresh():
+            try:
+                from core import ram_watchdog
+                suspects = ram_watchdog.get_suspects()
+                if not suspects:
+                    suspects_lbl.config(text="No suspects detected.", fg=FG_DIM)
+                else:
+                    lines = [f"  {s['name']} (PID {s['pid']})  —  "
+                             f"+{s['growth_mb_per_min']:.0f} MB/min  |  "
+                             f"current: {s['current_mb']:.0f} MB"
+                             for s in suspects]
+                    suspects_lbl.config(text="\n".join(lines), fg=DANGER)
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(5000, _refresh)
+
+        panel.after(1000, _refresh)
+
+    def _ram_dimm_protection_panel(self, parent):
+        self._section(parent, "DIMM Thermal Throttle Protection")
+        self._note(parent,
+            "Reads DIMM temperatures via LibreHardwareMonitor. If any DIMM exceeds "
+            "the threshold, AlienCore reduces the CPU ceiling to relieve memory controller "
+            "heat. DDR5 DIMMs on the i9-14900HX typically run 40–55°C under load.")
+        self._opt(parent, "ram.dimm_throttle_protection",
+                  "Enable DIMM thermal protection",
+                  "Reduces CPU ceiling when DIMM temps exceed threshold")
+        self._slider(parent, "ram.dimm_throttle_temp_c",
+                     "DIMM temp alert threshold (°C)", 40, 75, 1,
+                     fmt=lambda v: f"{int(v)}°C")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=8)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+        tk.Label(panel, text="Live DIMM Temperatures", font=("Segoe UI", 9, "bold"),
+                 bg=BG_HW, fg=FG_HEAD).pack(anchor="w", pady=(0, 4))
+        dimm_lbl = tk.Label(panel, text="—", font=("Segoe UI", 8),
+                            bg=BG_HW, fg=FG_DIM, anchor="w")
+        dimm_lbl.pack(anchor="w")
+
+        def _refresh():
+            try:
+                from core import sensors
+                threshold = self._cfg_get("ram.dimm_throttle_temp_c") or 52
+                r = sensors.get_readings()
+                ram_temps = r.get("ram_temps", [])
+                if not ram_temps:
+                    dimm_lbl.config(text="No DIMM temperature data (requires LHM bridge).",
+                                    fg=FG_DIM)
+                else:
+                    lines = []
+                    for d in ram_temps:
+                        tc = d["temp_c"]
+                        color = (DANGER if tc >= threshold else
+                                 WARN   if tc >= threshold - 5 else ACCENT2)
+                        lines.append(f"{d['name']}: {tc:.0f}°C")
+                    # Use the last temp color for the whole label
+                    hottest = max(d["temp_c"] for d in ram_temps)
+                    fg = (DANGER if hottest >= threshold else
+                          WARN   if hottest >= threshold - 5 else ACCENT2)
+                    dimm_lbl.config(text="   ".join(lines), fg=fg)
+            except Exception:
+                pass
+            if panel.winfo_exists():
+                panel.after(3000, _refresh)
+
+        panel.after(600, _refresh)
+
+    def _ram_pagefile_advisor_panel(self, parent):
+        self._section(parent, "Smart Pagefile Advisor")
+        self._note(parent,
+            "Analyzes your RAM, usage patterns, and drive type to recommend "
+            "an optimal pagefile configuration.")
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        advice_lbl = tk.Label(panel, text="Click Analyze to get a recommendation.",
+                              font=("Segoe UI", 9), bg=BG_HW, fg=FG_DIM,
+                              wraplength=720, justify="left")
+        advice_lbl.pack(anchor="w", pady=(0, 6))
+
+        rec_lbl = tk.Label(panel, text="", font=("Segoe UI Semibold", 10),
+                           bg=BG_HW, fg=ACCENT)
+        rec_lbl.pack(anchor="w")
+
+        apply_status = tk.StringVar(value="")
+        tk.Label(parent, textvariable=apply_status,
+                 font=("Segoe UI", 8, "italic"), bg=BG_HW, fg=FG_DIM,
+                 anchor="w").pack(fill="x", padx=16, pady=(0, 4))
+
+        _last_advice = [None]
+
+        ctrl = tk.Frame(parent, bg=BG_HW)
+        ctrl.pack(anchor="w", padx=16, pady=(0, 8))
+
+        def _analyze():
+            advice_lbl.config(text="Analyzing...", fg=FG_DIM)
+            rec_lbl.config(text="")
+            def _work():
+                from core import pagefile_advisor
+                adv = pagefile_advisor.get_advice(self._hw)
+                _last_advice[0] = adv
+                size_str = (f"Custom: {adv['size_mb'] // 1024:.0f} GB ({adv['size_mb']:,} MB)"
+                            if adv["recommendation"] == "custom" and adv["size_mb"]
+                            else "Windows-managed")
+                panel.after(0, lambda: (
+                    advice_lbl.config(text=adv["reason"], fg=FG),
+                    rec_lbl.config(
+                        text=f"Recommendation: {size_str}  |  "
+                             f"Current: {adv['current_mb'] or 'managed'}  |  "
+                             f"RAM: {adv['total_ram_gb']:.0f} GB  NVMe: {'Yes' if adv['has_nvme'] else 'No'}",
+                        fg=ACCENT)))
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _apply_advice():
+            if not _last_advice[0]:
+                return
+            apply_status.set("Applying pagefile recommendation...")
+            def _work():
+                from core import pagefile_advisor
+                ok, msg = pagefile_advisor.apply_recommendation(_last_advice[0])
+                parent.after(0, lambda: apply_status.set(
+                    msg if ok else f"Failed: {msg}"))
+            threading.Thread(target=_work, daemon=True).start()
+
+        self._btn(ctrl, "Analyze", _analyze, ACCENT, bold=True).pack(side="left", padx=(0, 8))
+        self._btn(ctrl, "Apply Recommendation", _apply_advice, ACCENT2).pack(side="left")
 
     def _tab_visual(self):
         t = self._make_tab("Visual")
@@ -305,9 +1307,160 @@ class SettingsWindow:
         self._section(t, "DNS")
         self._opt(t, "network.set_dns_cache_size",       "Increase DNS cache TTL",             "Caches DNS results longer — faster repeated connections")
         self._opt(t, "network.flush_dns_on_switch",      "Flush DNS on profile switch",        "Clears stale DNS entries each time a profile changes")
+        self._dns_speed_panel(t)
         self._section(t, "NIC Adapter (applied under Optimal Decisions)")
         self._opt(t, "network.nic_interrupt_moderation", "Disable interrupt moderation",       "Lowest DPC latency — NIC interrupts CPU immediately instead of batching")
         self._opt(t, "network.nic_rss_tuning",           "RSS tuning",                         "Enables Receive Side Scaling and tunes queue count to P-core count")
+
+    def _dns_speed_panel(self, parent):
+        from core import dns_bench
+        from core.constants import COLOR_COOL, COLOR_WARM, COLOR_HOT
+
+        self._section(parent, "DNS Speed Test")
+        self._note(parent,
+            "Benchmarks 9 public DNS providers from your location and applies the fastest. "
+            "Requires administrator privileges to change DNS settings.")
+
+        # ── Controls row ──────────────────────────────────────────────────────
+        ctrl = tk.Frame(parent, bg=BG_SECT, pady=4)
+        ctrl.pack(fill="x", padx=20, pady=(0, 4))
+
+        tk.Label(ctrl, text="Interface:", font=("Segoe UI", 9),
+                 bg=BG_SECT, fg=FG).pack(side="left", padx=(0, 6))
+
+        ifaces     = dns_bench.get_active_interfaces()
+        iface_var  = tk.StringVar(value=ifaces[0] if ifaces else "")
+        status_var = tk.StringVar(value="" if ifaces else "No connected interfaces found.")
+
+        if not ifaces:
+            tk.Label(ctrl, text="No connected interfaces found",
+                     font=("Segoe UI", 9), bg=BG_SECT, fg=WARN).pack(side="left")
+        elif len(ifaces) == 1:
+            tk.Label(ctrl, text=ifaces[0], font=("Segoe UI", 9),
+                     bg=BG_SECT, fg=ACCENT).pack(side="left", padx=(0, 12))
+        else:
+            combo = ttk.Combobox(ctrl, textvariable=iface_var, values=ifaces,
+                                 state="readonly", width=20, font=("Segoe UI", 9))
+            combo.pack(side="left", padx=(0, 12))
+
+        # ── Results frame (populated after benchmark) ──────────────────────
+        results_outer = tk.Frame(parent, bg=BG_SECT)
+        results_outer.pack(fill="x", padx=20, pady=(4, 0))
+
+        # ── Status label ──────────────────────────────────────────────────
+        status_lbl = tk.Label(parent, textvariable=status_var,
+                              font=("Segoe UI", 8, "italic"),
+                              bg=BG_SECT, fg=FG_DIM, anchor="w")
+        status_lbl.pack(fill="x", padx=20, pady=(2, 8))
+
+        def _apply_dns(primary, secondary, primary_v6, secondary_v6):
+            iface = iface_var.get()
+            if not iface:
+                status_var.set("No interface selected.")
+                return
+            status_var.set(f"Applying {primary}...")
+            def _worker():
+                ok, msg = dns_bench.set_dns(iface, primary, secondary, primary_v6, secondary_v6)
+                if ok:
+                    txt = (f"Applied — IPv4: {primary} / {secondary}"
+                           f"   IPv6: {primary_v6} / {secondary_v6}")
+                else:
+                    if "access" in msg.lower() or "denied" in msg.lower():
+                        txt = "Access denied — run AlienCore as administrator."
+                    else:
+                        txt = f"Failed: {msg}"
+                parent.after(0, lambda: status_var.set(txt))
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def _reset_dhcp():
+            iface = iface_var.get()
+            if not iface:
+                return
+            status_var.set("Resetting to DHCP...")
+            def _worker():
+                ok, msg = dns_bench.reset_to_dhcp(iface)
+                txt = "DNS reset to automatic (DHCP)." if ok else f"Failed: {msg}"
+                parent.after(0, lambda: status_var.set(txt))
+            threading.Thread(target=_worker, daemon=True).start()
+
+        def _show_results(results):
+            for w in results_outer.winfo_children():
+                w.destroy()
+
+            # Header row
+            hdr = tk.Frame(results_outer, bg=BG_PANEL)
+            hdr.pack(fill="x", pady=(0, 2))
+            for text, width in [("Provider", 16), ("Primary DNS", 18), ("Latency", 12)]:
+                tk.Label(hdr, text=text, font=("Segoe UI", 8, "bold"),
+                         bg=BG_PANEL, fg=FG_DIM, width=width, anchor="w"
+                         ).pack(side="left", padx=6, pady=3)
+
+            fastest_marked = False
+            for r in results:
+                row = tk.Frame(results_outer, bg=BG_SECT)
+                row.pack(fill="x", pady=1)
+
+                is_fastest = not fastest_marked and not r["failed"]
+                if is_fastest:
+                    fastest_marked = True
+                    prefix     = "★ "
+                    name_color = ACCENT
+                else:
+                    prefix     = "    "
+                    name_color = FG
+
+                tk.Label(row, text=prefix + r["name"],
+                         font=("Segoe UI", 9), bg=BG_SECT, fg=name_color,
+                         width=16, anchor="w").pack(side="left", padx=6, pady=2)
+                tk.Label(row, text=r["primary"],
+                         font=("Consolas", 9), bg=BG_SECT, fg=FG_DIM,
+                         width=18, anchor="w").pack(side="left")
+
+                if r["failed"]:
+                    lat_text  = "timeout"
+                    lat_color = DANGER
+                else:
+                    ms        = r["latency_ms"]
+                    lat_text  = f"{ms:.1f} ms"
+                    lat_color = (COLOR_COOL if ms < 30 else
+                                 COLOR_WARM if ms < 80 else COLOR_HOT)
+
+                tk.Label(row, text=lat_text, font=("Consolas", 9, "bold"),
+                         bg=BG_SECT, fg=lat_color,
+                         width=12, anchor="w").pack(side="left")
+
+                if not r["failed"]:
+                    pr, sc = r["primary"], r["secondary"]
+                    pv, sv = r["primary_v6"], r["secondary_v6"]
+                    tk.Button(row, text="Apply",
+                              font=("Segoe UI", 8), fg=ACCENT2, bg=BTN_BG,
+                              activeforeground=ACCENT2, activebackground=BTN_HOV,
+                              relief="flat", padx=8, pady=1, cursor="hand2", bd=0,
+                              highlightthickness=0,
+                              command=lambda p=pr, s=sc, p6=pv, s6=sv: _apply_dns(p, s, p6, s6)
+                              ).pack(side="right", padx=6)
+
+            run_btn.config(state="normal", text="Run Speed Test")
+            status_var.set("Done.  Click Apply on any row to use that DNS.")
+
+        def _run_bench():
+            if not iface_var.get():
+                return
+            run_btn.config(state="disabled", text="Testing...")
+            for w in results_outer.winfo_children():
+                w.destroy()
+            status_var.set("Benchmarking all providers — takes ~5 seconds...")
+
+            def _worker():
+                results = dns_bench.benchmark(count=4, timeout=2.0)
+                parent.after(0, lambda: _show_results(results))
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        run_btn = self._btn(ctrl, "Run Speed Test", _run_bench, ACCENT)
+        run_btn.pack(side="left", padx=(0, 8))
+        if ifaces:
+            self._btn(ctrl, "Reset to DHCP", _reset_dhcp, FG_DIM).pack(side="left")
 
     def _tab_storage(self):
         t = self._make_tab("Storage")
@@ -1408,7 +2561,11 @@ class SettingsWindow:
                        WARN    if plat.get("has_awcc")     else FG_DIM)
             item("nvidia-smi",  "Available" if plat.get("has_nvidia_smi") else "Not found",
                  color=ACCENT2 if plat.get("has_nvidia_smi") else WARN)
-            item("OS",          f"Windows {hw.get('os',{}).get('release','?')}")
+            os_info = hw.get("os", {})
+            os_release = os_info.get("release", "?")
+            os_edition = os_info.get("edition", "")
+            os_label = f"Windows {os_release} {os_edition}".strip()
+            item("OS", os_label)
 
     # ── Widget helpers ────────────────────────────────────────────────────────
 
@@ -1464,6 +2621,7 @@ class SettingsWindow:
         else:
             v = tk.IntVar(value=int(val) if val is not None else 0)
         self.vars[key] = v
+        v.trace_add("write", self._mark_dirty)
         return v
 
     def _cfg_get(self, dot_key: str):
@@ -1586,13 +2744,27 @@ class SettingsWindow:
                 lines = [l.strip() for l in txt.get("1.0","end").strip().splitlines() if l.strip()]
                 self._cfg_set(key, lines)
 
+    def _mark_dirty(self, *_):
+        """Recompute dirty state and update the Save/Close button accordingly."""
+        btn = getattr(self, "_save_btn", None)
+        if not btn or not btn.winfo_exists():
+            return
+        saved = getattr(self, "_saved_state", {})
+        vars_dirty = any(
+            self.vars[k].get() != saved.get(k)
+            for k in self.vars
+        )
+        theme_dirty = (
+            (self._cfg_get("display.settings_theme") or "Void")
+            != getattr(self, "_saved_theme", "Void")
+        )
+        if vars_dirty or theme_dirty:
+            btn.config(text="  Save  ", command=self._save, fg=ACCENT2)
+        else:
+            btn.config(text="  Close  ", command=self._close, fg=FG_DIM)
+
     def _save(self):
         self._collect()
-        # Debug — log all sensor values before saving
-        logger.info("DEBUG sensors at save: %s", {
-            k: v for k, v in self.config.get("sensors", {}).items()
-        })
-        logger.info("DEBUG vars keys: %s", [k for k in self.vars.keys() if "sensor" in k])
         cfg.save(self.config)
         cfg.set_value("first_run_complete", value=True)
         if self.on_save_callback:
@@ -1600,6 +2772,14 @@ class SettingsWindow:
         logger.info("Settings saved.")
         if self.is_first_run:
             messagebox.showinfo("AlienCore", "Settings saved. AlienCore is initializing.")
+            self.root.destroy()
+            return
+        # Refresh snapshot so dirty check compares against what was just saved
+        self._saved_state = {k: v.get() for k, v in self.vars.items()}
+        self._saved_theme = self._cfg_get("display.settings_theme") or "Void"
+        self._save_btn.config(text="  Close  ", command=self._close, fg=FG_DIM)
+
+    def _close(self):
         self.root.destroy()
 
     def _cancel(self):
