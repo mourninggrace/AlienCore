@@ -544,8 +544,11 @@ def _load_suggestions() -> list:
 
 
 def _save_suggestions(suggestions: list):
-    with open(SUGGESTIONS_PATH, "w", encoding="utf-8") as f:
-        json.dump(suggestions, f, indent=2)
+    try:
+        with open(SUGGESTIONS_PATH, "w", encoding="utf-8") as f:
+            json.dump(suggestions, f, indent=2)
+    except Exception as e:
+        logger.warning("Learning: could not save suggestions: %s", e)
 
 
 def _add_suggestions(new_suggestions: list):
@@ -594,13 +597,16 @@ def _send_toast(suggestion: dict):
         import subprocess
         title   = f"AlienCore Insight: {suggestion['title']}"
         message = suggestion["message"][:100] + "..." if len(suggestion["message"]) > 100 else suggestion["message"]
+        # Escape single quotes so they don't break the PowerShell string literals
+        ps_title   = title.replace("'", "''")
+        ps_message = message.replace("'", "''")
         script = (
             f"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
             f"ContentType = WindowsRuntime] | Out-Null; "
             f"$t = [Windows.UI.Notifications.ToastNotificationManager]"
             f"::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
-            f"$t.SelectSingleNode('//text[@id=1]').InnerText = '{title}'; "
-            f"$t.SelectSingleNode('//text[@id=2]').InnerText = '{message}'; "
+            f"$t.SelectSingleNode('//text[@id=1]').InnerText = '{ps_title}'; "
+            f"$t.SelectSingleNode('//text[@id=2]').InnerText = '{ps_message}'; "
             f"$n = [Windows.UI.Notifications.ToastNotification]::new($t); "
             f"[Windows.UI.Notifications.ToastNotificationManager]"
             f"::CreateToastNotifier('AlienCore').Show($n)"

@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AlienCore — User Manual</title>
+<style>
+  :root {
+    --bg:       #111115;
+    --bg2:      #18181f;
+    --bg3:      #202028;
+    --bg4:      #28282e;
+    --fg:       #e0e0e8;
+    --fg-dim:   #8888aa;
+    --fg-head:  #ffffff;
+    --accent:   #00aaff;
+    --accent2:  #00cc66;
+    --warn:     #ffaa00;
+    --danger:   #ff4444;
+    --border:   #2a2a38;
+    --code-bg:  #1a1a24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.7;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 0 0 24px 0;
+    flex-shrink: 0;
+  }
+  #sidebar-header {
+    padding: 24px 20px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  #sidebar-header .logo {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+  }
+  #sidebar-header .ver {
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+  }
+  #toc { list-style: none; padding: 8px 0; }
+  #toc li { border-left: 3px solid transparent; }
+  #toc li.active { border-left-color: var(--accent); background: rgba(0,170,255,0.07); }
+  #toc a {
+    display: block;
+    padding: 5px 20px;
+    color: var(--fg-dim);
+    text-decoration: none;
+    font-size: 13px;
+    transition: color 0.15s;
+  }
+  #toc a:hover { color: var(--fg); }
+  #toc li.active a { color: var(--accent); font-weight: 600; }
+  #toc .toc-section { padding: 12px 20px 4px; font-size: 10px; font-weight: 700;
+    color: var(--fg-dim); letter-spacing: 1.5px; text-transform: uppercase; }
+  #toc .toc-sub a { padding-left: 36px; font-size: 12px; }
+  #toc .toc-sub2 a { padding-left: 52px; font-size: 11.5px; }
+
+  /* ── Main ── */
+  #main {
+    flex: 1;
+    max-width: 900px;
+    padding: 48px 56px 80px;
+    overflow-x: hidden;
+  }
+
+  /* ── Headings ── */
+  h1 { font-size: 32px; font-weight: 800; color: var(--fg-head); margin-bottom: 6px; }
+  h1 .accent { color: var(--accent); }
+  h2 { font-size: 22px; font-weight: 700; color: var(--fg-head); margin: 48px 0 14px;
+       border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+  h3 { font-size: 17px; font-weight: 700; color: var(--accent); margin: 28px 0 10px; }
+  h4 { font-size: 14px; font-weight: 700; color: var(--warn); margin: 18px 0 6px;
+       text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* ── Text ── */
+  p { margin-bottom: 12px; }
+  .subtitle { color: var(--fg-dim); font-size: 15px; margin-bottom: 32px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  strong { color: var(--fg-head); font-weight: 700; }
+  em { color: var(--warn); font-style: normal; }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 13.5px; }
+  th { background: var(--bg3); color: var(--fg-head); font-weight: 700; font-size: 12px;
+       text-transform: uppercase; letter-spacing: 0.5px; padding: 9px 12px; text-align: left;
+       border: 1px solid var(--border); }
+  td { padding: 8px 12px; border: 1px solid var(--border); color: var(--fg); vertical-align: top; }
+  tr:nth-child(even) td { background: var(--bg2); }
+  td.setting { color: var(--accent); font-family: "Consolas", monospace; font-size: 13px; }
+  td.default { color: var(--accent2); font-family: "Consolas", monospace; font-size: 13px; }
+  td.optimal { color: var(--warn); font-size: 13px; }
+
+  /* ── Callout boxes ── */
+  .box { border-radius: 6px; padding: 14px 18px; margin: 16px 0; font-size: 14px; }
+  .box-info  { background: rgba(0,170,255,0.08); border-left: 3px solid var(--accent); }
+  .box-tip   { background: rgba(0,204,102,0.08); border-left: 3px solid var(--accent2); }
+  .box-warn  { background: rgba(255,170,0,0.08); border-left: 3px solid var(--warn); }
+  .box-danger{ background: rgba(255,68,68,0.08); border-left: 3px solid var(--danger); }
+  .box strong { display: inline-block; margin-bottom: 4px; }
+
+  /* ── Code ── */
+  code { background: var(--code-bg); color: var(--accent2); padding: 2px 7px;
+         border-radius: 4px; font-family: "Consolas", monospace; font-size: 13px; }
+  pre  { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+         padding: 14px 18px; overflow-x: auto; margin: 14px 0; }
+  pre code { background: none; padding: 0; }
+
+  /* ── Badge ── */
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px;
+           border-radius: 10px; vertical-align: middle; margin-left: 6px; letter-spacing: 0.5px; }
+  .badge-base { background: rgba(0,170,255,0.15); color: var(--accent); border: 1px solid rgba(0,170,255,0.3); }
+  .badge-pro  { background: rgba(255,170,0,0.15); color: var(--warn); border: 1px solid rgba(255,170,0,0.3); }
+  .badge-free { background: rgba(0,204,102,0.1);  color: var(--accent2); border: 1px solid rgba(0,204,102,0.25); }
+
+  /* ── Feature header ── */
+  .feature-head { display: flex; align-items: center; gap: 8px; margin: 28px 0 10px; }
+  .feature-head h3 { margin: 0; }
+
+  /* ── Section spacer ── */
+  .spacer { height: 32px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 36px 0; }
+
+  /* ── Price card ── */
+  .price-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+                gap: 14px; margin: 18px 0 24px; }
+  .price-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+                padding: 18px 20px; }
+  .price-card .price { font-size: 26px; font-weight: 800; color: var(--accent); margin-bottom: 2px; }
+  .price-card .price-label { font-size: 12px; color: var(--fg-dim); margin-bottom: 10px; }
+  .price-card ul { list-style: none; font-size: 13.5px; }
+  .price-card ul li::before { content: "✓  "; color: var(--accent2); }
+
+  /* ── Scrollbar ── */
+  #sidebar::-webkit-scrollbar { width: 4px; }
+  #sidebar::-webkit-scrollbar-track { background: var(--bg2); }
+  #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  @media (max-width: 900px) {
+    body { flex-direction: column; }
+    #sidebar { width: 100%; height: auto; position: static; }
+    #main { padding: 24px 20px 60px; }
+  }
+
+  /* ── Download button ── */
+  #btn-download {
+    display: block; width: calc(100% - 40px); margin: 14px 20px 4px;
+    padding: 8px 0; background: rgba(0,170,255,0.12);
+    border: 1px solid rgba(0,170,255,0.3); border-radius: 5px;
+    color: var(--accent); font-size: 12px; font-weight: 700;
+    text-align: center; cursor: pointer; letter-spacing: 0.5px;
+    transition: background 0.15s;
+  }
+  #btn-download:hover { background: rgba(0,170,255,0.22); }
+
+  /* ── Print / Save as PDF ── */
+  @media print {
+    @page { margin: 18mm 16mm; size: A4; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { display: block; background: #ffffff; color: #111111;
+           font-size: 11pt; line-height: 1.6; }
+    #sidebar, #btn-download { display: none !important; }
+    #main { max-width: 100%; padding: 0; }
+    h1 { font-size: 22pt; color: #000; border-bottom: 2pt solid #00aaff;
+         padding-bottom: 6pt; margin-bottom: 8pt; }
+    h1 .accent { color: #0077cc; }
+    h2 { font-size: 15pt; color: #111; border-bottom: 1pt solid #cccccc;
+         padding-bottom: 4pt; margin: 24pt 0 8pt; page-break-after: avoid; }
+    h3 { font-size: 12pt; color: #0077cc; margin: 14pt 0 5pt;
+         page-break-after: avoid; }
+    h4 { font-size: 10pt; color: #555; margin: 10pt 0 4pt; }
+    p, li { color: #222; }
+    a { color: #0077cc; text-decoration: none; }
+    strong { color: #000; }
+    em { color: #cc7700; }
+    table { border-collapse: collapse; width: 100%; font-size: 9pt;
+            margin: 8pt 0 14pt; page-break-inside: avoid; }
+    th { background: #e8f0ff !important; color: #000; border: 0.5pt solid #aaa;
+         padding: 5pt 7pt; font-size: 8pt; text-transform: uppercase; }
+    td { border: 0.5pt solid #cccccc; padding: 4pt 7pt; color: #111; }
+    tr:nth-child(even) td { background: #f7f7f7 !important; }
+    td.setting { color: #0055aa; font-family: "Consolas", monospace; }
+    td.default { color: #007733; font-family: "Consolas", monospace; }
+    td.optimal { color: #885500; }
+    .box { border-radius: 3pt; padding: 8pt 10pt; margin: 8pt 0;
+           page-break-inside: avoid; }
+    .box-info   { background: #e8f4ff !important; border-left: 3pt solid #0077cc; }
+    .box-tip    { background: #e8fff0 !important; border-left: 3pt solid #007733; }
+    .box-warn   { background: #fff8e0 !important; border-left: 3pt solid #cc7700; }
+    .box-danger { background: #ffe8e8 !important; border-left: 3pt solid #cc2200; }
+    code { background: #f0f0f0 !important; color: #005500;
+           padding: 1pt 4pt; font-size: 9pt; }
+    pre  { background: #f5f5f5 !important; border: 0.5pt solid #ccc;
+           padding: 8pt; font-size: 8.5pt; }
+    .badge { font-size: 7pt; padding: 1pt 5pt; border-radius: 8pt; }
+    .badge-base { background: #ddeeff !important; color: #0055aa;
+                  border: 0.5pt solid #99bbdd; }
+    .badge-pro  { background: #fff0cc !important; color: #885500;
+                  border: 0.5pt solid #ddaa44; }
+    .badge-free { background: #ddfff0 !important; color: #006633;
+                  border: 0.5pt solid #66cc99; }
+    .price-grid { display: block; }
+    .price-card { border: 0.5pt solid #ccc; padding: 8pt 10pt;
+                  margin-bottom: 8pt; page-break-inside: avoid; }
+    .price { font-size: 18pt; color: #0077cc; }
+    .price-label { font-size: 9pt; color: #555; }
+    .subtitle { color: #555; }
+    .spacer { height: 0; }
+    section { page-break-inside: avoid; }
+    hr { border: none; border-top: 0.5pt solid #ccc; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─── Sidebar ─── -->
+<nav id="sidebar">
+  <div id="sidebar-header">
+    <div class="logo">AlienCore</div>
+    <div class="ver">User Manual &nbsp;·&nbsp; v1.0.0</div>
+  </div>
+  <button id="btn-download" onclick="window.print()">&#8681;&nbsp; Save as PDF</button>
+  <ul id="toc">
+    <li class="toc-section">Overview</li>
+    <li><a href="#welcome">Welcome</a></li>
+    <li><a href="#requirements">System Requirements</a></li>
+    <li><a href="#firstrun">First Run</a></li>
+
+    <li class="toc-section">Account</li>
+    <li><a href="#login">Login System</a></li>
+    <li><a href="#purchasing">Purchasing</a></li>
+    <li><a href="#support">Priority Support</a></li>
+
+    <li class="toc-section">Interface</li>
+    <li><a href="#sensor-bar">Sensor Bar</a></li>
+    <li><a href="#system-tray">System Tray</a></li>
+
+    <li class="toc-section">Settings Tabs</li>
+    <li><a href="#tab-display">Display</a></li>
+    <li><a href="#tab-cpu">CPU</a></li>
+    <li><a href="#tab-gpu">GPU</a></li>
+    <li><a href="#tab-ram">RAM</a></li>
+    <li><a href="#tab-visual">Visual Effects</a></li>
+    <li><a href="#tab-network">Network</a></li>
+    <li><a href="#tab-storage">Storage</a></li>
+    <li><a href="#tab-privacy">Privacy</a></li>
+    <li><a href="#tab-profiles">Profiles</a></li>
+    <li><a href="#tab-custom">Custom Profiles</a></li>
+    <li><a href="#tab-service">Service</a></li>
+    <li><a href="#tab-thresholds">Thresholds</a></li>
+    <li><a href="#tab-ai">AI</a></li>
+    <li><a href="#tab-insights">Insights</a></li>
+    <li><a href="#tab-drivers">Drivers</a></li>
+
+    <li class="toc-section">Advanced CPU <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-sub"><a href="#cpu-tvb">TVB Optimizer</a></li>
+    <li class="toc-sub"><a href="#cpu-boost">Boost Score</a></li>
+    <li class="toc-sub"><a href="#cpu-topology">Topology &amp; Core Roles</a></li>
+    <li class="toc-sub"><a href="#cpu-irq">Interrupt Steering</a></li>
+
+    <li class="toc-section">Advanced GPU <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-sub"><a href="#gpu-dynamic-boost">Dynamic Boost Monitor</a></li>
+    <li class="toc-sub"><a href="#gpu-vram">VRAM Clock Lock</a></li>
+    <li class="toc-sub"><a href="#gpu-throttle">Throttle Log</a></li>
+    <li class="toc-sub"><a href="#gpu-efficiency">Efficiency Curve</a></li>
+    <li class="toc-sub"><a href="#gpu-driver">Driver Feature Flags</a></li>
+
+    <li class="toc-section">Advanced RAM <span class="badge badge-base">BASE</span> / <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-sub"><a href="#ram-composition">Composition</a></li>
+    <li class="toc-sub"><a href="#ram-pressure">Unified Pressure</a></li>
+    <li class="toc-sub"><a href="#ram-trimmer">Working Set Trimmer</a></li>
+    <li class="toc-sub"><a href="#ram-leak">Leak Watchdog</a></li>
+    <li class="toc-sub"><a href="#ram-dimm">DIMM Protection</a></li>
+    <li class="toc-sub"><a href="#ram-pagefile">Pagefile Advisor</a></li>
+
+    <li class="toc-section">AI Features <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-sub"><a href="#ai-chat">AI Chat</a></li>
+    <li class="toc-sub"><a href="#ai-watchdog">AI Watchdog</a></li>
+    <li class="toc-sub"><a href="#ai-advisor">AI Advisor</a></li>
+
+    <li class="toc-section">Other</li>
+    <li><a href="#profiles-detail">Profile System</a></li>
+    <li><a href="#awcc">AWCC Integration</a></li>
+    <li><a href="#about">About</a></li>
+  </ul>
+</nav>
+
+<!-- ─── Main content ─── -->
+<main id="main">
+
+<!-- ═══════════════════════════════════════════════════════════
+     WELCOME
+════════════════════════════════════════════════════════════ -->
+<section id="welcome">
+  <h1><span class="accent">Alien</span>Core &nbsp; User Manual</h1>
+  <p class="subtitle">Adaptive system optimizer for Alienware laptops &nbsp;·&nbsp; v1.0.0</p>
+
+  <p>AlienCore is an intelligent, automatic system optimizer built for Alienware gaming laptops. It continuously monitors your hardware — CPU, GPU, RAM, thermals, and storage — and applies the right settings for whatever you're doing, whether you're gaming, streaming, working, or idle.</p>
+
+  <p>Unlike static tuning tools, AlienCore switches profiles on the fly as it detects what's running. It applies dozens of Windows-level tweaks that Microsoft buries under dozens of menus (or hides entirely), and it does it all automatically in the background.</p>
+
+  <div class="box box-info">
+    <strong>Two tiers:</strong> The base license ($20 one-time) unlocks all core hardware features. The Pro add-on (+$5) adds AI-powered analysis, chat, and automated health monitoring. Priority Support (+$5/incident) gives you a direct line to the developer for technical issues.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     REQUIREMENTS
+════════════════════════════════════════════════════════════ -->
+<section id="requirements">
+  <h2>System Requirements</h2>
+  <table>
+    <tr><th>Component</th><th>Requirement</th></tr>
+    <tr><td>OS</td><td>Windows 10 21H2 or later &nbsp;·&nbsp; <strong>Windows 11 recommended</strong></td></tr>
+    <tr><td>CPU</td><td>Intel 12th Gen or newer (Alder Lake+) for full feature support</td></tr>
+    <tr><td>GPU</td><td>NVIDIA GeForce recommended; some features require RTX</td></tr>
+    <tr><td>RAM</td><td>8 GB minimum; 16 GB+ for full feature benefit</td></tr>
+    <tr><td>Python</td><td>3.11 or later (bundled with the installer)</td></tr>
+    <tr><td>Admin rights</td><td>Required — AlienCore modifies system-level registry and power settings</td></tr>
+    <tr><td>Internet</td><td>Required at first login; 72-hour offline grace period after that</td></tr>
+  </table>
+
+  <div class="box box-tip">
+    <strong>Designed for:</strong> AlienCore is designed for the Alienware m18 R2 series in any configuration. It is also broadly compatible with other PCs — features are detected and adapted automatically based on your hardware. Features that require specific hardware (TVB Optimizer, AWCC integration) are silently skipped if the hardware isn't present.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     FIRST RUN
+════════════════════════════════════════════════════════════ -->
+<section id="firstrun">
+  <h2>First Run</h2>
+  <p>When you launch AlienCore for the first time, it walks you through a short setup wizard before anything else runs:</p>
+  <ol style="padding-left:24px; line-height:2.2">
+    <li><strong>Login</strong> — sign in with your email (see the Login section below).</li>
+    <li><strong>First-run settings</strong> — the Settings window opens so you can review defaults before AlienCore starts making changes.</li>
+    <li><strong>Hardware scan</strong> — AlienCore fingerprints your CPU, GPU, RAM, and storage so it can tailor its tweaks to your exact hardware.</li>
+    <li><strong>Baseline tweaks</strong> — system-wide optimizations are applied (network stack, scheduler, storage, privacy, visual effects).</li>
+    <li><strong>Sensor bar appears</strong> — the always-on-top stat strip shows live temperatures and usage.</li>
+    <li><strong>Tray icon appears</strong> — AlienCore settles into the background from here on.</li>
+  </ol>
+
+  <p>On every subsequent launch, steps 2 and 3 are skipped (hardware cache is reused unless you enable Hardware Refresh on Startup in the Service tab).</p>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     LOGIN
+════════════════════════════════════════════════════════════ -->
+<section id="login">
+  <h2>Login System</h2>
+  <p>AlienCore uses <strong>email + one-time PIN</strong> authentication. There are no passwords to remember or create.</p>
+
+  <h3>Signing In</h3>
+  <ol style="padding-left:24px; line-height:2.4">
+    <li>Enter your email address in the login window.</li>
+    <li>Click <strong>Send PIN</strong>. A 6-digit code will be emailed to you within seconds.</li>
+    <li>Enter the PIN in the field that appears.</li>
+    <li>Click <strong>Verify &amp; Sign In</strong>.</li>
+  </ol>
+
+  <div class="box box-info">
+    <strong>PIN codes expire after 10 minutes.</strong> If yours has expired, click "Resend PIN" to get a fresh one. There's no limit to how many times you can resend.
+  </div>
+
+  <h3>Session Persistence</h3>
+  <p>Once signed in, your session is cached locally. You won't need to log in again unless:</p>
+  <ul style="padding-left:24px; line-height:2">
+    <li>You manually log out from the Account tab.</li>
+    <li>Your session token expires (30-day rolling window — automatically refreshed on each launch).</li>
+  </ul>
+
+  <h3>Offline Use</h3>
+  <p>If the AlienCore servers are temporarily unreachable (no internet, server maintenance), you can continue using AlienCore for up to <strong>72 hours</strong> from your last successful verification. After that, a reconnection is required to continue.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     PURCHASING
+════════════════════════════════════════════════════════════ -->
+<section id="purchasing">
+  <h2>Purchasing</h2>
+  <p>All purchases are <strong>one-time payments</strong>. There are no subscriptions, no monthly fees, and no license renewals. Your license is tied to your email address and covers all future versions of AlienCore forever.</p>
+
+  <div class="price-grid">
+    <div class="price-card">
+      <div class="price">$20</div>
+      <div class="price-label">AlienCore — Lifetime License</div>
+      <ul>
+        <li>All CPU, GPU, RAM, Network, Storage, Privacy &amp; Visual optimizations</li>
+        <li>Automatic profile switching (Idle / Gaming / Streaming)</li>
+        <li>RAM Composition viewer</li>
+        <li>Unified Memory Pressure meter</li>
+        <li>Insights tab</li>
+        <li>Drivers tab</li>
+        <li>Custom Profiles</li>
+        <li>All future updates included</li>
+        <li>Unlimited installs, one email</li>
+      </ul>
+    </div>
+    <div class="price-card">
+      <div class="price">+$5</div>
+      <div class="price-label">Pro Add-on (requires base license)</div>
+      <ul>
+        <li>TVB Optimizer, Boost Score, CPU Topology, Interrupt Steering</li>
+        <li>Dynamic Boost Monitor, VRAM Clock Lock, Throttle Log, Efficiency Curve, Driver Flags</li>
+        <li>Working Set Trimmer, Leak Watchdog, DIMM Protection, Pagefile Advisor</li>
+        <li>Windows Services Manager</li>
+        <li>AI Chat, AI Watchdog, AI Advisor</li>
+      </ul>
+    </div>
+    <div class="price-card">
+      <div class="price">+$5</div>
+      <div class="price-label">Priority Support — single incident</div>
+      <ul>
+        <li>Response within 24 hours</li>
+        <li>Direct developer troubleshooting</li>
+        <li>Full refund if issue can't be resolved</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>How to Purchase</h3>
+  <p>Click one of the purchase buttons on the login window — they open PayPal directly in your browser. Make sure your email is entered in the login field first, because that email is automatically linked to your license when payment completes.</p>
+
+  <p>License activation is <strong>automatic</strong> — usually within 30 seconds of payment confirmation. You don't need to do anything. Just sign in with the same email after purchasing and AlienCore will recognize your license.</p>
+
+  <div class="box box-warn">
+    <strong>Important:</strong> Use the same email address for your purchase that you use to sign in to AlienCore. The license is tied to that email.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SUPPORT
+════════════════════════════════════════════════════════════ -->
+<section id="support">
+  <h2>Priority Support</h2>
+  <p>Priority Support is a per-incident add-on ($5) that gives you direct access to the developer for help with a specific bug or technical issue.</p>
+
+  <table>
+    <tr><th>What's included</th><th>Details</th></tr>
+    <tr><td>Response time</td><td>Within 24 hours of ticket submission</td></tr>
+    <tr><td>Coverage</td><td>One specific technical issue or bug report</td></tr>
+    <tr><td>Refund policy</td><td>Full refund if the issue cannot be resolved</td></tr>
+    <tr><td>Contact</td><td><a href="mailto:mourning.grace.2014@gmail.com">mourning.grace.2014@gmail.com</a></td></tr>
+  </table>
+
+  <p>To submit a Priority Support ticket, go to <strong>Settings → Account</strong> and use the support ticket form. Your support credit is consumed when the ticket is submitted.</p>
+
+  <p>For general questions and non-urgent bug reports, use the GitHub issues page: <a href="https://github.com/mourninggrace/AlienCore/issues/new" target="_blank">github.com/mourninggrace/AlienCore/issues/new</a></p>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     SENSOR BAR
+════════════════════════════════════════════════════════════ -->
+<section id="sensor-bar">
+  <h2>Sensor Bar</h2>
+  <p>The sensor bar is a thin, always-on-top strip that floats above all other windows and displays live hardware stats. It automatically hides when a full-screen application (game) is active.</p>
+
+  <h3>Available Sensors</h3>
+  <table>
+    <tr><th>Sensor</th><th>What it shows</th><th>Default</th></tr>
+    <tr><td>CPU Temperature</td><td>Average package temp or per-core breakdown</td><td>On</td></tr>
+    <tr><td>GPU Temperature</td><td>GPU core temperature via LibreHardwareMonitor</td><td>On</td></tr>
+    <tr><td>GPU Hot Spot</td><td>Junction temperature (~15–20° hotter than core)</td><td>Off</td></tr>
+    <tr><td>GPU VRAM Temp</td><td>VRAM junction temperature</td><td>Off</td></tr>
+    <tr><td>NVMe Temperature</td><td>SSD temperature</td><td>On</td></tr>
+    <tr><td>Fan RPM</td><td>System fan speed</td><td>On</td></tr>
+    <tr><td>RAM Usage</td><td>Used / Total GB</td><td>On</td></tr>
+    <tr><td>CPU Load</td><td>Overall CPU utilization %</td><td>Off</td></tr>
+    <tr><td>GPU Load</td><td>GPU utilization %</td><td>Off</td></tr>
+    <tr><td>GPU VRAM</td><td>VRAM usage</td><td>Off</td></tr>
+    <tr><td>GPU Fan</td><td>GPU fan speed %</td><td>Off</td></tr>
+    <tr><td>CPU Frequency</td><td>Current boost clock (GHz)</td><td>Off</td></tr>
+    <tr><td>GPU Clock</td><td>GPU core clock (GHz)</td><td>Off</td></tr>
+    <tr><td>CPU Watts</td><td>CPU power draw</td><td>Off</td></tr>
+    <tr><td>GPU Watts</td><td>GPU power draw</td><td>Off</td></tr>
+    <tr><td>Battery</td><td>Battery % and charging state</td><td>On</td></tr>
+    <tr><td>Network I/O</td><td>Upload / download throughput (MB/s)</td><td>Off</td></tr>
+    <tr><td>Disk I/O</td><td>Read / write throughput (MB/s)</td><td>Off</td></tr>
+  </table>
+
+  <div class="box box-tip">
+    <strong>Tip:</strong> Double-click any value in the sensor bar to open a 90-second history chart for that sensor, with live min / avg / max stats and auto-refresh every 2 seconds.
+  </div>
+
+  <h3>Temperature Color Coding</h3>
+  <table>
+    <tr><th>Color</th><th>Meaning</th><th>CPU default</th><th>GPU default</th></tr>
+    <tr><td style="color:#00CC66">Green</td><td>Cool — normal operating range</td><td>Below 80°C</td><td>Below 80°C</td></tr>
+    <tr><td style="color:#FFAA00">Amber</td><td>Warm — approaching limit</td><td>80–94°C</td><td>80–89°C</td></tr>
+    <tr><td style="color:#FF3333">Red</td><td>Hot — thermal throttling likely</td><td>95°C+</td><td>90°C+</td></tr>
+  </table>
+
+  <p>Thresholds are adjustable in <strong>Settings → Thresholds</strong>.</p>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SYSTEM TRAY
+════════════════════════════════════════════════════════════ -->
+<section id="system-tray">
+  <h2>System Tray</h2>
+  <p>AlienCore runs in the system tray (notification area). The tray icon shows an alien-head logo that changes color based on CPU temperature — green when cool, amber when warm, red when hot. The tooltip shows the current active profile and live CPU temp.</p>
+
+  <h3>Tray Menu Options</h3>
+  <table>
+    <tr><th>Option</th><th>What it does</th></tr>
+    <tr><td>Open Settings</td><td>Opens the full Settings window</td></tr>
+    <tr><td>About AlienCore</td><td>Shows version info and contact details</td></tr>
+    <tr><td>Exit AlienCore</td><td>Stops the optimizer completely and removes from tray</td></tr>
+  </table>
+
+  <div class="box box-info">
+    AlienCore is designed to run continuously in the background. Exiting it disables all active tweaks until you relaunch it.
+  </div>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     SETTINGS TABS
+════════════════════════════════════════════════════════════ -->
+<section id="tab-display">
+  <h2>Display Tab</h2>
+  <p>Controls the sensor bar appearance and update rate.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Temperature Unit</td><td class="default">Celsius</td><td>Switch between °C and °F across all displays.</td></tr>
+    <tr><td class="setting">Update Interval</td><td class="default">2.0 seconds</td><td>How often sensor data refreshes. Can be set in seconds or milliseconds. Lower = smoother but more CPU overhead.</td></tr>
+    <tr><td class="setting">Bar Orientation</td><td class="default">Horizontal</td><td>Arrange the sensor bar horizontally (top/bottom edge) or vertically (side edge).</td></tr>
+    <tr><td class="setting">Auto-hide Fullscreen</td><td class="default">On</td><td>Automatically hides the sensor bar when a full-screen app is detected (e.g., a game).</td></tr>
+    <tr><td class="setting">Theme</td><td class="default">Void</td><td>Color theme for the Settings window. 12 themes available.</td></tr>
+    <tr><td class="setting">Sensors to Display</td><td class="default">CPU, GPU, NVMe, Fan, RAM, Battery</td><td>Toggle individual sensors on or off. Changes take effect immediately.</td></tr>
+  </table>
+
+  <div class="box box-tip">
+    <strong>Optimal:</strong> Keep the update interval at 2 seconds for everyday use. Drop to 0.5–1s if you want more responsive feedback while gaming. Avoid anything below 500ms — it adds measurable overhead.
+  </div>
+</section>
+
+<section id="tab-cpu">
+  <h2>CPU Tab</h2>
+  <p>Controls how AlienCore manages the CPU — power states, core scheduling, and adaptive throttling.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Optimal</th><th>Description</th></tr>
+    <tr><td class="setting">CPU Management</td><td class="default">On</td><td class="optimal">On</td><td>Master switch for all CPU features.</td></tr>
+    <tr><td class="setting">Dynamic Throttle</td><td class="default">On</td><td class="optimal">On</td><td>Automatically lowers the CPU power ceiling at idle. Saves power and reduces heat without impacting performance. Instantly removed when gaming or streaming starts.</td></tr>
+    <tr><td class="setting">Idle Max State %</td><td class="default">40%</td><td class="optimal">35–50%</td><td>The CPU performance ceiling (% of max) applied at idle. 40% is enough for web browsing and light tasks; lower saves more power.</td></tr>
+    <tr><td class="setting">Throttle Temp Trigger</td><td class="default">75°C</td><td class="optimal">70–80°C</td><td>If CPU hits this temp while idle, AlienCore starts dynamically lowering the ceiling. Prevents unnecessary heat buildup.</td></tr>
+    <tr><td class="setting">Full Power in Gaming</td><td class="default">On</td><td class="optimal">On</td><td>Removes all throttling immediately when a game is detected. CPU runs at 100% state.</td></tr>
+    <tr><td class="setting">Full Power in Streaming</td><td class="default">On</td><td class="optimal">On</td><td>Same as above but triggered by streaming software (OBS, Streamlabs, XSplit).</td></tr>
+    <tr><td class="setting">Hetero Scheduling</td><td class="default">On</td><td class="optimal">On</td><td>Configures Windows 11's Intel Thread Director integration to route threads correctly across P-cores and E-cores. Critical for Alder Lake and newer.</td></tr>
+    <tr><td class="setting">Core Parking (Gaming)</td><td class="default">On</td><td class="optimal">On</td><td>Unparks all logical processors during gaming to ensure no P-core or E-core is sitting idle unnecessarily.</td></tr>
+    <tr><td class="setting">TVB Optimizer</td><td class="default">Off</td><td class="optimal">On (if idle heat matters)</td><td>See <a href="#cpu-tvb">TVB Optimizer</a>. <span class="badge badge-pro">PRO</span></td></tr>
+    <tr><td class="setting">Interrupt Steering</td><td class="default">Off</td><td class="optimal">On (gaming)</td><td>See <a href="#cpu-irq">Interrupt Steering</a>. <span class="badge badge-pro">PRO</span></td></tr>
+  </table>
+</section>
+
+<section id="tab-gpu">
+  <h2>GPU Tab</h2>
+  <p>Controls GPU power states, HAGS, and VRAM management.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Optimal</th><th>Description</th></tr>
+    <tr><td class="setting">GPU Management</td><td class="default">On</td><td class="optimal">On</td><td>Master switch for all GPU features.</td></tr>
+    <tr><td class="setting">Fan Curve Enabled</td><td class="default">On</td><td class="optimal">On</td><td>Applies AlienCore's optimized fan curve based on GPU temperature.</td></tr>
+    <tr><td class="setting">HAGS</td><td class="default">On</td><td class="optimal">On</td><td>Hardware-Accelerated GPU Scheduling — required for DLSS 3 Frame Generation and generally reduces GPU input latency in DX12 games.</td></tr>
+    <tr><td class="setting">PowerMizer Max Performance</td><td class="default">On</td><td class="optimal">On (plugged in)</td><td>Tells the NVIDIA driver to prefer maximum performance P-states on AC power. Prevents the GPU from throttling down unexpectedly.</td></tr>
+    <tr><td class="setting">Optimal Decision (GPU)</td><td class="default">On</td><td class="optimal">On</td><td>Let AlienCore automatically decide power limits per profile. Disable if you want to set manual percentages.</td></tr>
+    <tr><td class="setting">VRAM Idle Clock Lock</td><td class="default">Off</td><td class="optimal">On (desktop use)</td><td>See <a href="#gpu-vram">VRAM Clock Lock</a>. <span class="badge badge-pro">PRO</span></td></tr>
+  </table>
+</section>
+
+<section id="tab-ram">
+  <h2>RAM Tab</h2>
+  <p>Controls memory management tweaks and monitoring features.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Optimal</th><th>Description</th></tr>
+    <tr><td class="setting">RAM Management</td><td class="default">On</td><td class="optimal">On</td><td>Master switch.</td></tr>
+    <tr><td class="setting">Disable SysMain</td><td class="default">On</td><td class="optimal">On (NVMe + 16 GB+)</td><td>Disables the Superfetch/SysMain service. On modern NVMe SSDs with plenty of RAM, Superfetch adds more overhead than it saves. On HDD systems, leave this Off.</td></tr>
+    <tr><td class="setting">Pagefile Managed</td><td class="default">On</td><td class="optimal">On</td><td>AlienCore manages the pagefile size. If Custom MB is 0, Windows manages the size automatically within an optimized range.</td></tr>
+    <tr><td class="setting">Clear Standby Cache (Idle)</td><td class="default">On</td><td class="optimal">On</td><td>Periodically clears the Windows standby cache when idle. Frees up "in use" memory that's actually available but unreported by Task Manager.</td></tr>
+    <tr><td class="setting">Disable Paging Executive</td><td class="default">On</td><td class="optimal">On (16 GB+)</td><td>Keeps kernel code and drivers pinned in RAM — they're never paged to disk. Reduces latency spikes caused by kernel page faults. Requires sufficient RAM.</td></tr>
+    <tr><td class="setting">DIMM Throttle Protection</td><td class="default">Off</td><td class="optimal">On (heavy workloads)</td><td>See <a href="#ram-dimm">DIMM Protection</a>. <span class="badge badge-pro">PRO</span></td></tr>
+    <tr><td class="setting">Leak Watchdog</td><td class="default">Off</td><td class="optimal">On (optional)</td><td>See <a href="#ram-leak">Leak Watchdog</a>. <span class="badge badge-pro">PRO</span></td></tr>
+  </table>
+</section>
+
+<section id="tab-visual">
+  <h2>Visual Effects Tab</h2>
+  <p>Manages Windows animation and transparency settings to reduce CPU overhead and improve responsiveness.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Disable Animations</td><td class="default">On</td><td>Turns off window open/close/minimize animations. Windows feels snappier.</td></tr>
+    <tr><td class="setting">Disable Transparency</td><td class="default">On</td><td>Removes frosted-glass transparency from the taskbar and Start menu. Reduces GPU overhead on the desktop compositor.</td></tr>
+    <tr><td class="setting">Best Performance Mode</td><td class="default">Off</td><td>Nuclear option — disables every visual effect Windows allows. Looks like Windows XP, but squeezes out maximum responsiveness. Not recommended unless you specifically want this.</td></tr>
+    <tr><td class="setting">Optimal Decision</td><td class="default">On</td><td>AlienCore adjusts visual settings per profile — more effects at idle (better looking), fewer during gaming (less overhead).</td></tr>
+  </table>
+</section>
+
+<section id="tab-network">
+  <h2>Network Tab</h2>
+  <p>Applies low-level network stack tweaks to reduce latency and improve throughput. Most of these are Windows registry and netsh changes that aren't exposed in any Windows UI.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Disable Nagle</td><td class="default">On</td><td>Disables Nagle's algorithm (TcpAckFrequency, TCPNoDelay, TcpDelAckTicks). Reduces latency for small packets — important for games.</td></tr>
+    <tr><td class="setting">DNS Cache Size</td><td class="default">On</td><td>Increases the DNS resolver cache size so frequently-visited domains are resolved faster.</td></tr>
+    <tr><td class="setting">Disable Autotuning</td><td class="default">Off</td><td><em>Leave Off.</em> Disabling TCP autotuning breaks throughput on fast connections. Only useful on legacy hardware with specific issues.</td></tr>
+    <tr><td class="setting">Disable RSC</td><td class="default">On</td><td>Disables Receive Segment Coalescing. RSC batches packets to reduce CPU interrupt load — but this adds latency. Disabling it reduces DPC latency at the cost of slightly higher CPU usage on high-throughput links.</td></tr>
+    <tr><td class="setting">Disable ECN</td><td class="default">On</td><td>Disables Explicit Congestion Notification. Some routers handle ECN poorly, causing connection issues. Safe to leave On for most users.</td></tr>
+    <tr><td class="setting">MMCSS Tuning</td><td class="default">On</td><td>Adjusts NetworkThrottlingIndex and SystemResponsiveness registry values. Gives games and real-time audio higher scheduler priority over background network traffic.</td></tr>
+    <tr><td class="setting">TCP Socket Tuning</td><td class="default">On</td><td>Sets TcpTimedWaitDelay, MaxUserPort, TcpNumConnections to higher limits — important when many simultaneous connections are open (streaming, multiplayer).</td></tr>
+    <tr><td class="setting">QoS Reserve Fix</td><td class="default">On</td><td>Windows reserves 20% of your bandwidth for QoS by default. This removes that reservation.</td></tr>
+    <tr><td class="setting">Enforce PMTUD</td><td class="default">On</td><td>Ensures Path MTU Discovery is enabled so packets don't get fragmented on large-MTU links.</td></tr>
+    <tr><td class="setting">Flush DNS on Switch</td><td class="default">On</td><td>Runs <code>ipconfig /flushdns</code> every time AlienCore switches profiles. Prevents stale DNS entries from persisting between network changes.</td></tr>
+    <tr><td class="setting">NIC Interrupt Moderation</td><td class="default">On</td><td>Disables interrupt moderation on your network adapter. This reduces DPC latency at the cost of slightly higher CPU interrupt load — the right trade-off for gaming.</td></tr>
+    <tr><td class="setting">NIC RSS Tuning</td><td class="default">On</td><td>Enforces Receive Side Scaling and tunes queue count per NIC. Spreads network processing across multiple CPU cores.</td></tr>
+  </table>
+</section>
+
+<section id="tab-storage">
+  <h2>Storage Tab</h2>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Ensure TRIM Enabled</td><td class="default">On</td><td>Verifies TRIM is active for all SSDs. TRIM maintains long-term SSD performance and prevents write amplification.</td></tr>
+    <tr><td class="setting">Disable 8.3 Names</td><td class="default">On</td><td>Disables legacy 8.3 filename generation on NTFS. Removes a per-write overhead on modern systems.</td></tr>
+    <tr><td class="setting">Disable Last Access Update</td><td class="default">On</td><td>Stops NTFS from updating the "last accessed" timestamp on every file read. Reduces unnecessary disk writes.</td></tr>
+    <tr><td class="setting">Write Cache Enabled</td><td class="default">On</td><td>Enables write caching on drives that support it. Improves write throughput significantly; safe on systems with UPS or stable power.</td></tr>
+    <tr><td class="setting">Indexing Managed</td><td class="default">On</td><td>AlienCore disables Windows Search indexing on NVMe drives (it's not needed) but leaves it on HDDs where search benefit is meaningful.</td></tr>
+    <tr><td class="setting">Disable AHCI LPM</td><td class="default">On</td><td>Disables AHCI Link Power Management on SATA drives. Prevents the drive from entering low-power states between accesses, eliminating latency spikes.</td></tr>
+  </table>
+</section>
+
+<section id="tab-privacy">
+  <h2>Privacy Tab</h2>
+  <p>Disables Windows telemetry and data collection features that run in the background and consume resources.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Disable Telemetry</td><td class="default">On</td><td>Turns off Windows Diagnostic Data collection (DiagTrack service and related registry keys).</td></tr>
+    <tr><td class="setting">Disable Advertising ID</td><td class="default">On</td><td>Turns off the per-user advertising identifier used for targeted ads in the Microsoft ecosystem.</td></tr>
+    <tr><td class="setting">Disable Activity History</td><td class="default">On</td><td>Disables Windows Timeline / Activity History (tracks apps and websites you use).</td></tr>
+    <tr><td class="setting">Disable Cortana</td><td class="default">On</td><td>Prevents Cortana from running in the background.</td></tr>
+    <tr><td class="setting">Disable Feedback Notifications</td><td class="default">On</td><td>Suppresses Windows "Give us feedback" pop-ups.</td></tr>
+  </table>
+</section>
+
+<section id="tab-profiles">
+  <h2>Profiles Tab</h2>
+  <p>Controls how AlienCore detects which mode to run in.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Detect by Process</td><td class="default">On</td><td>Watches the process list for known game launchers and streaming apps. Switches profiles the moment a matching process is detected.</td></tr>
+    <tr><td class="setting">Detect by Load</td><td class="default">On</td><td>Switches to Gaming profile if GPU load exceeds the GPU threshold, even if no known game process is found.</td></tr>
+    <tr><td class="setting">Gaming GPU Threshold</td><td class="default">40%</td><td>GPU utilization % above which AlienCore assumes a game is running.</td></tr>
+    <tr><td class="setting">Gaming CPU Threshold</td><td class="default">30%</td><td>CPU utilization % (used in combination with GPU threshold).</td></tr>
+    <tr><td class="setting">Custom Streaming Processes</td><td class="default">Empty</td><td>Add EXE names here to have them trigger the Streaming profile.</td></tr>
+    <tr><td class="setting">Custom Gaming Processes</td><td class="default">Empty</td><td>Add EXE names here to have them trigger the Gaming profile.</td></tr>
+  </table>
+
+  <h3>Automatic Profiles</h3>
+  <p>AlienCore switches between three built-in profiles automatically:</p>
+  <table>
+    <tr><th>Profile</th><th>Triggered by</th><th>Effect</th></tr>
+    <tr><td><strong>Idle</strong></td><td>No game or streaming app detected, low load</td><td>CPU throttled to idle ceiling; GPU at reduced power; animations on; background tweaks active.</td></tr>
+    <tr><td><strong>Gaming</strong></td><td>Game process detected or high GPU load</td><td>Full CPU power; full GPU power; core parking off; EcoQoS on background apps; animations off.</td></tr>
+    <tr><td><strong>Streaming</strong></td><td>OBS / Streamlabs / XSplit detected</td><td>Full CPU power; GPU at ~85%; balanced between encode and render.</td></tr>
+  </table>
+</section>
+
+<section id="tab-custom">
+  <h2>Custom Profiles Tab <span class="badge badge-base">BASE</span></h2>
+  <p>Create your own profiles that trigger based on specific applications. Each custom profile maps to one of the three built-in behavior modes (Idle, Gaming, or Streaming) but activates on your chosen process list.</p>
+
+  <p>Examples: a "Video Editing" profile that triggers on <code>premiere.exe</code> and uses Streaming behavior; or a "Compile" profile that triggers on <code>cl.exe</code> and runs at full Gaming power.</p>
+
+  <div class="box box-tip">
+    <strong>Priority:</strong> Custom profiles are evaluated in priority order. Lower priority number = checked first. If multiple profiles match simultaneously, the one with the lowest priority number wins.
+  </div>
+</section>
+
+<section id="tab-service">
+  <h2>Service Tab</h2>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Logging Enabled</td><td class="default">On</td><td>Writes a log to <code>logs/aliencore.log</code>. Useful for troubleshooting. Safe to leave on — log size is managed automatically.</td></tr>
+    <tr><td class="setting">Start with Windows</td><td class="default">On</td><td>Adds AlienCore to the startup registry so it launches automatically when you log in.</td></tr>
+    <tr><td class="setting">Notify on Profile Switch</td><td class="default">Off</td><td>Shows a Windows toast notification every time the active profile changes (idle → gaming, etc.).</td></tr>
+    <tr><td class="setting">Hardware Refresh on Startup</td><td class="default">On</td><td>Re-scans your hardware on every launch. Disable to speed up startup if your hardware never changes.</td></tr>
+  </table>
+
+  <h3>Running as a Windows Service</h3>
+  <p>AlienCore can be installed as a Windows service so it runs even before you log in:</p>
+  <pre><code>python aliencore.py --install   # run as Administrator
+python aliencore.py --uninstall # remove the service</code></pre>
+  <div class="box box-warn">
+    <strong>Note:</strong> The GUI (sensor bar, settings window) requires a logged-in desktop session and will not appear when running as a headless service.
+  </div>
+</section>
+
+<section id="tab-thresholds">
+  <h2>Thresholds Tab</h2>
+  <p>Adjust the temperature thresholds used for sensor bar color-coding and thermal alerts.</p>
+
+  <table>
+    <tr><th>Sensor</th><th>Warning default</th><th>Critical default</th></tr>
+    <tr><td>CPU</td><td class="default">80°C</td><td class="default">95°C</td></tr>
+    <tr><td>GPU</td><td class="default">80°C</td><td class="default">90°C</td></tr>
+    <tr><td>NVMe</td><td class="default">60°C</td><td class="default">70°C</td></tr>
+  </table>
+
+  <div class="box box-info">
+    The i9-14900HX thermal junction is 100°C. AlienCore's default critical threshold of 95°C gives a 5-degree buffer before the CPU is forced to throttle by hardware. Most users should leave this unchanged.
+  </div>
+</section>
+
+<section id="tab-ai">
+  <h2>AI Tab <span class="badge badge-pro">PRO</span></h2>
+  <p>The AI tab requires the Pro add-on. See <a href="#ai-chat">AI Features</a> below for full documentation of each feature.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Provider</td><td class="default">Anthropic</td><td>Choose between Anthropic (Claude) or any OpenAI-compatible API (OpenAI, Groq, local Ollama, etc.).</td></tr>
+    <tr><td class="setting">API Key</td><td class="default">Empty</td><td>Your API key. Stored locally in <code>config.json</code> — never sent to AlienCore servers.</td></tr>
+    <tr><td class="setting">Model</td><td class="default">Automatic</td><td>Leave blank to use the provider's recommended default. Or specify a model name (e.g., <code>claude-haiku-4-5</code>).</td></tr>
+    <tr><td class="setting">Watchdog Enabled</td><td class="default">Off</td><td>Automatically analyzes system health at a set interval and alerts you to anomalies.</td></tr>
+    <tr><td class="setting">Watchdog Interval</td><td class="default">300 sec</td><td>How often the AI watchdog checks your system. Minimum 60 seconds.</td></tr>
+    <tr><td class="setting">Chat History Max</td><td class="default">20 messages</td><td>How many messages to keep in the rolling chat window.</td></tr>
+  </table>
+</section>
+
+<section id="tab-insights">
+  <h2>Insights Tab <span class="badge badge-base">BASE</span></h2>
+  <p>Insights shows a read-only overview of your system's health and optimization state — what AlienCore has done, what it has detected, and any recommendations. No configuration is needed here; it's purely informational.</p>
+</section>
+
+<section id="tab-drivers">
+  <h2>Drivers Tab <span class="badge badge-base">BASE</span></h2>
+  <p>Shows the installed versions of key drivers (GPU, chipset, etc.) and flags any that are known to be outdated or have known issues. Provides direct download links to manufacturer driver pages.</p>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     ADVANCED CPU FEATURES
+════════════════════════════════════════════════════════════ -->
+<section id="cpu-tvb">
+  <h2>TVB Optimizer <span class="badge badge-pro">PRO</span></h2>
+
+  <p><strong>Intel Thermal Velocity Boost (TVB)</strong> is a feature found on high-end Intel CPUs (Core i9 Raptor Lake and newer) that grants an extra <strong>+200 MHz</strong> of boost clock when the CPU package temperature is <strong>below 70°C</strong>. Once the temperature crosses 70°C, the extra 200 MHz is instantly taken away.</p>
+
+  <p>This creates a practical problem: if the CPU is sitting at 70–73°C (common at moderate load), the boost clock oscillates between its normal max and TVB max every few seconds as heat builds and dissipates. This causes erratic performance in workloads that are sensitive to CPU clock consistency.</p>
+
+  <h3>What the TVB Optimizer Does</h3>
+  <p>When enabled, the TVB Optimizer monitors CPU package temperature in real time. When the CPU is below the TVB threshold (70°C by default), it gently raises the CPU performance ceiling to encourage the extra 200 MHz. When temperature approaches the threshold, it lowers the ceiling slightly to keep the CPU comfortably below 70°C — letting it hold the TVB bonus continuously rather than flickering.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Optimal</th></tr>
+    <tr><td class="setting">TVB Optimizer</td><td class="default">Off</td><td class="optimal">On — if idle or light-load heat matters to you</td></tr>
+  </table>
+
+  <div class="box box-tip">
+    <strong>When to enable:</strong> If your CPU frequently sits between 65–75°C during day-to-day use (not gaming), the TVB optimizer can provide a consistent free performance boost. During gaming, it has minimal effect — the CPU will be running full tilt regardless.
+  </div>
+</section>
+
+<section id="cpu-boost">
+  <h2>CPU Boost Score <span class="badge badge-pro">PRO</span></h2>
+  <p>The Boost Score panel shows a real-time quality rating for your CPU's boost behavior. It tracks how consistently the CPU is sustaining high boost clocks vs. how often it's being forced down by thermal or power limits.</p>
+
+  <p>The score is calculated from a rolling window of boost clock samples. A high score (green) means the CPU is holding boost well. A low score (red) indicates sustained throttling — useful for diagnosing cooling issues or incorrect power settings.</p>
+
+  <div class="box box-info">
+    The Boost Score is read-only. It's a diagnostic tool, not a setting. Use it alongside the Throttle Log and Efficiency Curve to understand your CPU's real-world behavior.
+  </div>
+</section>
+
+<section id="cpu-topology">
+  <h2>CPU Topology &amp; Core Roles <span class="badge badge-pro">PRO</span></h2>
+  <p>Shows a detailed map of your CPU's physical and logical layout — how many P-cores (Performance cores) and E-cores (Efficiency cores) you have, and which logical processor IDs correspond to each.</p>
+
+  <p>On the i9-14900HX: 8 P-cores (each with 2 threads = 16 logical processors) + 16 E-cores (single-threaded = 16 logical processors) = 32 logical processors total.</p>
+
+  <h3>Why This Matters</h3>
+  <p>Windows 11 with Intel Thread Director is supposed to route thread types correctly (foreground / latency-sensitive → P-cores; background / batch → E-cores). The Topology panel confirms this is configured correctly and shows you exactly which cores AlienCore is targeting for its optimizations.</p>
+
+  <p>You can also set manual affinity hints per EXE — specify whether a given application should prefer P-cores (<code>p</code>) or E-cores (<code>e</code>).</p>
+</section>
+
+<section id="cpu-irq">
+  <h2>Interrupt Steering <span class="badge badge-pro">PRO</span></h2>
+  <p>Hardware interrupts (IRQs) are signals from devices — your NIC, NVMe, USB controller — that wake up a CPU core to handle data. By default, Windows routes these interrupts somewhat randomly. During gaming, an interrupt landing on the same P-core that's running your game thread causes a micro-stutter.</p>
+
+  <h3>What Interrupt Steering Does</h3>
+  <p>When enabled, AlienCore writes to the Windows interrupt affinity registry (<code>HKLM\System\CurrentControlSet\Control\Class</code> per device) to steer high-frequency interrupts toward specific cores — typically the last P-core or E-cores — keeping your primary game cores free from interrupt handling.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Optimal</th></tr>
+    <tr><td class="setting">Interrupt Steering</td><td class="default">Off</td><td class="optimal">On (gaming-focused systems)</td></tr>
+  </table>
+
+  <div class="box box-warn">
+    <strong>Note:</strong> Interrupt steering takes effect after a reboot for most devices. A few devices (particularly USB hubs with XHCI controllers) apply immediately.
+  </div>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     ADVANCED GPU FEATURES
+════════════════════════════════════════════════════════════ -->
+<section id="gpu-dynamic-boost">
+  <h2>Dynamic Boost Monitor <span class="badge badge-pro">PRO</span></h2>
+  <p>NVIDIA Dynamic Boost is a feature on RTX mobile GPUs that dynamically reallocates power between the CPU and GPU based on workload. When the GPU is under heavy load and the CPU has headroom, it borrows from the CPU's power budget to give the GPU more wattage.</p>
+
+  <p>The Dynamic Boost Monitor in AlienCore shows you exactly how much power is being transferred between CPU and GPU in real time, and logs the history so you can see how it behaved over a session.</p>
+
+  <div class="box box-info">
+    This is a monitoring feature, not a toggle. Dynamic Boost is managed by the NVIDIA driver and AWCC; AlienCore lets you observe it.
+  </div>
+</section>
+
+<section id="gpu-vram">
+  <h2>VRAM Clock Lock <span class="badge badge-pro">PRO</span></h2>
+  <p>When the GPU is idle (desktop, media playback), the NVIDIA driver can leave VRAM running at high clocks unnecessarily — which generates heat and power draw for no benefit.</p>
+
+  <h3>What VRAM Clock Lock Does</h3>
+  <p>When enabled, AlienCore forces the VRAM clock down to an idle-appropriate frequency (default: <strong>405 MHz</strong> = P8 power state) when a game is not running. When gaming starts, the lock is released and VRAM clocks freely to its maximum.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Optimal</th></tr>
+    <tr><td class="setting">VRAM Idle Clock Lock</td><td class="default">Off</td><td class="optimal">On — for desktop / content creation use</td></tr>
+    <tr><td class="setting">VRAM Idle Clock MHz</td><td class="default">405 MHz</td><td class="optimal">405 MHz (GDDR6X P8 state)</td></tr>
+  </table>
+
+  <div class="box box-tip">
+    On RTX 4090 mobile, GDDR6X runs hot even at idle if the clock isn't managed. Enabling this can drop idle VRAM temps by 5–8°C on the desktop.
+  </div>
+</section>
+
+<section id="gpu-throttle">
+  <h2>GPU Throttle Log <span class="badge badge-pro">PRO</span></h2>
+  <p>The Throttle Log records every time the GPU was forced to reduce its clock due to a hardware limit. It captures the timestamp, the throttle reason, and the resulting clock reduction.</p>
+
+  <h3>Throttle Reasons</h3>
+  <table>
+    <tr><th>Reason</th><th>What it means</th></tr>
+    <tr><td><strong>Thermal</strong></td><td>GPU hit its temperature limit and reduced clocks to cool down.</td></tr>
+    <tr><td><strong>Power</strong></td><td>GPU hit its power limit (TDP cap). Common in laptops during sustained loads.</td></tr>
+    <tr><td><strong>Voltage</strong></td><td>GPU voltage rail sagged below the required level.</td></tr>
+    <tr><td><strong>Current</strong></td><td>Current draw exceeded the PCIe or system limit.</td></tr>
+    <tr><td><strong>Reliability</strong></td><td>Driver-imposed clock reduction for reliability/longevity.</td></tr>
+  </table>
+
+  <p>The log is stored at <code>logs/throttle_events.json</code> and can be cleared from the panel.</p>
+</section>
+
+<section id="gpu-efficiency">
+  <h2>GPU Efficiency Curve <span class="badge badge-pro">PRO</span></h2>
+  <p>Plots GPU performance (clock speed / FPS proxy) against power draw over time. The efficiency curve helps you find the "sweet spot" — the power level where you get the most performance per watt, before returns diminish.</p>
+
+  <p>This is particularly useful on power-limited mobile GPUs where running at 100% TDP often yields only 5–8% more performance than 80% TDP, but with significantly more heat. The curve makes this visible.</p>
+
+  <p>History is stored at <code>logs/efficiency_history.json</code>.</p>
+</section>
+
+<section id="gpu-driver">
+  <h2>Driver Feature Flags <span class="badge badge-pro">PRO</span></h2>
+  <p>Shows the state of key NVIDIA driver features and lets you toggle the ones that AlienCore can control. Includes HAGS, PowerMizer mode, DSR, and other driver-level registry flags.</p>
+
+  <div class="box box-warn">
+    Changes to driver feature flags require the NVIDIA display driver to be restarted (or a reboot) before they take effect.
+  </div>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     ADVANCED RAM FEATURES
+════════════════════════════════════════════════════════════ -->
+<section id="ram-composition">
+  <h2>RAM Composition <span class="badge badge-base">BASE</span></h2>
+  <p>Shows a detailed breakdown of how your physical RAM is currently being used — not just "used vs. free" (which Task Manager shows), but the full Windows memory model:</p>
+
+  <table>
+    <tr><th>Category</th><th>What it means</th></tr>
+    <tr><td><strong>In Use</strong></td><td>Memory actively mapped by running processes.</td></tr>
+    <tr><td><strong>Standby</strong></td><td>Memory that held a process's data, is now free, but hasn't been zeroed yet. Instantly reclaimable — this is what Task Manager wrongly calls "in use."</td></tr>
+    <tr><td><strong>Modified</strong></td><td>Memory that needs to be written to disk (pagefile) before it can be reused.</td></tr>
+    <tr><td><strong>Free / Zeroed</strong></td><td>Fully available memory, already zeroed and ready for allocation.</td></tr>
+    <tr><td><strong>Hardware Reserved</strong></td><td>Memory claimed by firmware/hardware (GPU, BIOS mapped regions).</td></tr>
+  </table>
+</section>
+
+<section id="ram-pressure">
+  <h2>Unified Memory Pressure <span class="badge badge-base">BASE</span></h2>
+  <p>A single composite metric that combines multiple Windows memory signals into one pressure score (0–100%). It accounts for page fault rate, modified page list size, available pages, and pagefile activity.</p>
+
+  <p>A score under 30% is healthy. 30–60% means the system is working. Over 60% is elevated — the system is paging and performance may be impacted. Over 80% is critical.</p>
+
+  <p>The pressure graph updates in real time and keeps a rolling history so you can spot patterns (e.g., pressure spikes when a specific app opens).</p>
+</section>
+
+<section id="ram-trimmer">
+  <h2>Working Set Trimmer <span class="badge badge-pro">PRO</span></h2>
+  <p>Periodically forces Windows to trim the working sets (active RAM footprint) of background processes. This pushes rarely-accessed memory pages back to the standby list, where they can be instantly reclaimed.</p>
+
+  <p>The trimmer runs automatically at idle. It doesn't kill processes or free their data — it just moves pages that haven't been touched recently to a lower-priority pool, freeing space for the foreground application.</p>
+
+  <div class="box box-tip">
+    <strong>Especially useful:</strong> Before launching a large game, the trimmer clears standby memory so the game's initial load has maximum free RAM available.
+  </div>
+</section>
+
+<section id="ram-leak">
+  <h2>Memory Leak Watchdog <span class="badge badge-pro">PRO</span></h2>
+  <p>Monitors every running process's memory footprint over time. If a process's resident memory grows continuously at a rate exceeding your configured threshold, it gets flagged as a potential memory leak.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Leak Watchdog Enabled</td><td class="default">Off</td><td>Enable per-process growth monitoring.</td></tr>
+    <tr><td class="setting">Leak Threshold (MB/min)</td><td class="default">50 MB/min</td><td>Growth rate above which a process is flagged. 50 MB/min = 3 GB/hour — clearly abnormal for most processes.</td></tr>
+    <tr><td class="setting">Observation Window</td><td class="default">5 minutes</td><td>How long growth must be sustained before flagging. Prevents false positives from processes that briefly spike on startup.</td></tr>
+  </table>
+
+  <div class="box box-warn">
+    <strong>False positives:</strong> Some processes legitimately allocate large amounts of memory during initialization (game engines, JVMs). The 5-minute window and 50 MB/min threshold filter most of these out, but you may occasionally see a false flag on a process that front-loads its allocations.
+  </div>
+</section>
+
+<section id="ram-dimm">
+  <h2>DIMM Protection <span class="badge badge-pro">PRO</span></h2>
+  <p>Monitors DIMM (RAM stick) temperatures via LibreHardwareMonitor. If any DIMM reaches the configured temperature threshold, AlienCore automatically reduces the CPU's performance ceiling to lower memory controller heat — protecting your RAM from sustained high temperatures.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">DIMM Protection</td><td class="default">Off</td><td>Enable temperature monitoring and auto-throttle protection.</td></tr>
+    <tr><td class="setting">DIMM Throttle Temp</td><td class="default">52°C</td><td>Temperature above which throttling is applied. DDR5 is spec'd to 85°C max, but sustained operation above 50–55°C degrades reliability over time.</td></tr>
+  </table>
+
+  <p>The panel shows a live readout of each DIMM's temperature with color coding (green / amber / red).</p>
+</section>
+
+<section id="ram-pagefile">
+  <h2>Pagefile Advisor <span class="badge badge-pro">PRO</span></h2>
+  <p>Analyzes your pagefile usage patterns over time and recommends an optimal pagefile size based on your actual peak usage, not Windows defaults (which are often either too small or wasteful).</p>
+
+  <p>It tracks peak pagefile consumption per session and, after enough data is collected, provides a specific recommendation: "Your peak pagefile usage over the last 30 sessions was 4.2 GB — a fixed pagefile of 6 GB is recommended."</p>
+
+  <p>History is stored at <code>logs/pagefile_sessions.json</code>.</p>
+
+  <div class="box box-tip">
+    <strong>For 32 GB+ systems:</strong> Windows defaults often set a pagefile of 4–8 GB. The Advisor will typically recommend a smaller fixed size (2–4 GB) that still covers crash dumps without wasting disk space.
+  </div>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     AI FEATURES
+════════════════════════════════════════════════════════════ -->
+<section id="ai-chat">
+  <h2>AI Chat <span class="badge badge-pro">PRO</span></h2>
+  <p>A chat interface that feeds your live system state to a large language model and lets you ask questions about your PC in plain English.</p>
+
+  <p>Examples:</p>
+  <ul style="padding-left:24px; line-height:2.2">
+    <li>"Why is my CPU running hot right now?"</li>
+    <li>"What's using all my RAM?"</li>
+    <li>"Should I enable interrupt steering for my setup?"</li>
+    <li>"My game is stuttering — what does AlienCore see?"</li>
+  </ul>
+
+  <p>The AI has access to your current sensor readings, active profile, hardware specs, and recent throttle log — it answers with context, not generic advice.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">Chat History Max</td><td class="default">20</td><td>How many messages to keep in the rolling window sent to the AI. More context = better answers, but higher token cost per query.</td></tr>
+  </table>
+
+  <div class="box box-info">
+    <strong>Your API key stays on your machine.</strong> It's stored in <code>config.json</code> and sent directly to the AI provider (Anthropic/OpenAI) — never to AlienCore servers.
+  </div>
+</section>
+
+<section id="ai-watchdog">
+  <h2>AI Watchdog <span class="badge badge-pro">PRO</span></h2>
+  <p>Runs automatically in the background at a configured interval. It feeds current system state (temps, load, throttle events, memory pressure, boost score) to the AI and checks for anything anomalous.</p>
+
+  <p>If the AI identifies a problem — sustained thermal throttling, a memory leak, an unusual CPU behavior pattern — it generates an alert that appears as a system notification and is logged in the Insights tab.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Optimal</th></tr>
+    <tr><td class="setting">Watchdog Enabled</td><td class="default">Off</td><td class="optimal">On if you want passive monitoring</td></tr>
+    <tr><td class="setting">Watchdog Interval</td><td class="default">300 sec</td><td class="optimal">300 sec (5 min) — balances responsiveness vs. API cost</td></tr>
+    <tr><td class="setting">Watchdog Model</td><td class="default">Auto</td><td class="optimal">Use the cheapest/fastest model — it's pattern matching, not deep analysis</td></tr>
+  </table>
+</section>
+
+<section id="ai-advisor">
+  <h2>AI Advisor <span class="badge badge-pro">PRO</span></h2>
+  <p>A one-shot analysis mode. Click "Run Advisor" and it performs a comprehensive review of your current settings, hardware state, and historical data, then produces a prioritized list of recommendations specific to your system.</p>
+
+  <p>The Advisor looks at:</p>
+  <ul style="padding-left:24px; line-height:2">
+    <li>Settings that are sub-optimal for your hardware</li>
+    <li>Throttle events suggesting a cooling or power issue</li>
+    <li>Memory pressure trends indicating insufficient RAM or a leak</li>
+    <li>CPU boost consistency issues</li>
+    <li>Driver version status</li>
+  </ul>
+
+  <p>Results are displayed in the AI tab and saved to the Insights tab for reference.</p>
+</section>
+
+<hr />
+
+<!-- ═══════════════════════════════════════════════════════════
+     PROFILES (DETAIL)
+════════════════════════════════════════════════════════════ -->
+<section id="profiles-detail">
+  <h2>Profile System — How It Works</h2>
+  <p>AlienCore evaluates the active profile every 10 seconds. The evaluation order is:</p>
+  <ol style="padding-left:24px; line-height:2.4">
+    <li>Check custom user profiles (lowest priority number first).</li>
+    <li>Check for streaming software in the process list.</li>
+    <li>Check for gaming processes in the process list.</li>
+    <li>Check GPU/CPU load thresholds.</li>
+    <li>Default to <strong>Idle</strong>.</li>
+  </ol>
+
+  <p>When the profile changes, AlienCore immediately:</p>
+  <ul style="padding-left:24px; line-height:2">
+    <li>Adjusts the CPU performance ceiling (throttle or release).</li>
+    <li>Updates the GPU power limit targets.</li>
+    <li>Adjusts the Windows scheduler quanta (Win32PrioritySeparation).</li>
+    <li>Enables or disables EcoQoS on background processes.</li>
+    <li>Flushes DNS (if enabled).</li>
+    <li>Syncs the AWCC thermal profile (if AWCC integration is enabled).</li>
+  </ul>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     AWCC
+════════════════════════════════════════════════════════════ -->
+<section id="awcc">
+  <h2>AWCC Integration</h2>
+  <p>Alienware Command Center (AWCC) manages some hardware controls (fan curves, G-Mode) via a WMI interface that AlienCore can call directly — no AWCC UI interaction required.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td class="setting">AWCC Enabled</td><td class="default">On</td><td>Use the AWCC WMI bridge when AWCC is installed.</td></tr>
+    <tr><td class="setting">Sync Thermal Profile</td><td class="default">On</td><td>Automatically switches the AWCC thermal profile (Quiet / Balanced / Performance) to match AlienCore's active profile.</td></tr>
+    <tr><td class="setting">G-Mode on Gaming</td><td class="default">Off</td><td>Auto-enables AWCC G-Mode when gaming is detected. G-Mode raises the fan speed to maximum and increases GPU TDP. Very loud — opt-in only.</td></tr>
+  </table>
+
+  <div class="box box-warn">
+    AWCC integration requires Alienware Command Center to be installed. If AWCC is not installed or is not running, this section has no effect.
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════
+     ABOUT
+════════════════════════════════════════════════════════════ -->
+<section id="about">
+  <h2>About AlienCore</h2>
+  <table>
+    <tr><th>Field</th><th>Details</th></tr>
+    <tr><td>Application</td><td><strong>AlienCore</strong> — Adaptive System Optimizer</td></tr>
+    <tr><td>Version</td><td>1.0.0</td></tr>
+    <tr><td>Developer</td><td>Kyle Yeroshefsky</td></tr>
+    <tr><td>Contact</td><td><a href="mailto:mourning.grace.2014@gmail.com">mourning.grace.2014@gmail.com</a></td></tr>
+    <tr><td>Bug reports</td><td><a href="https://github.com/mourninggrace/AlienCore/issues/new" target="_blank">github.com/mourninggrace/AlienCore/issues/new</a></td></tr>
+    <tr><td>License</td><td>Proprietary — see your purchase receipt for terms</td></tr>
+  </table>
+
+  <h3>Open-Source Components</h3>
+  <table>
+    <tr><th>Library</th><th>License</th><th>Purpose</th></tr>
+    <tr><td>LibreHardwareMonitor</td><td>Mozilla Public License 2.0</td><td>Hardware sensor readings (GPU temps, VRAM, fan speeds)</td></tr>
+    <tr><td>Python standard library</td><td>PSF License</td><td>Core runtime</td></tr>
+    <tr><td>psutil</td><td>BSD-3-Clause</td><td>Process and system metrics</td></tr>
+  </table>
+
+  <div class="box box-info" style="margin-top:32px">
+    <strong>Thank you for using AlienCore.</strong> Your purchase directly supports continued development. All features — past and future — are included in the one-time base license price.
+  </div>
+</section>
+
+<div class="spacer"></div>
+<p style="color:var(--fg-dim); font-size:12px; text-align:center; border-top:1px solid var(--border); padding-top:24px;">
+  AlienCore v1.0.0 &nbsp;·&nbsp; &copy; Kyle Yeroshefsky &nbsp;·&nbsp;
+  <a href="mailto:mourning.grace.2014@gmail.com">mourning.grace.2014@gmail.com</a>
+</p>
+
+</main>
+
+<script>
+// Highlight active TOC item on scroll
+const sections = document.querySelectorAll('section[id]');
+const tocLinks = document.querySelectorAll('#toc a');
+
+function onScroll() {
+  let current = '';
+  sections.forEach(s => {
+    if (window.scrollY + 100 >= s.offsetTop) current = s.id;
+  });
+  tocLinks.forEach(a => {
+    const li = a.parentElement;
+    li.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+}
+window.addEventListener('scroll', onScroll, { passive: true });
+onScroll();
+
+// Smooth scroll for TOC links
+tocLinks.forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) target.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+</script>
+</body>
+</html>

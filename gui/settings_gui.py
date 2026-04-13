@@ -16,6 +16,7 @@ from core import config_manager as cfg
 from core.constants import (
     APP_NAME, VERSION, HARDWARE_CACHE,
     COLOR_COOL, COLOR_WARM, COLOR_HOT,
+    SUPPORT_EMAIL, GITHUB_ISSUES_URL,
 )
 
 logger = logging.getLogger("aliencore.gui")
@@ -219,6 +220,8 @@ class SettingsWindow:
     def _setup_window(self):
         self.root.title(f"{APP_NAME} Settings  v{VERSION}")
         self.root.configure(bg=BG)
+        from gui.tray import set_window_icon
+        set_window_icon(self.root)
         self.root.resizable(True, True)
         self.root.minsize(1280, 600)
         self.root.geometry("1360x840")
@@ -327,6 +330,8 @@ class SettingsWindow:
         self._tab_ai()
         self._tab_insights()
         self._tab_drivers()
+        self._tab_about()
+        self._tab_account()
 
         # Footer
         tk.Frame(self.root, bg=SEP, height=1).pack(fill="x")
@@ -334,6 +339,7 @@ class SettingsWindow:
         foot.pack(fill="x", padx=16)
         tk.Label(foot, text="Changes take effect immediately.",
                  font=("Segoe UI", 9), bg=BG, fg=FG_DIM).pack(side="left")
+        self._btn(foot, "User Manual", self._open_manual, ACCENT2).pack(side="left", padx=(12, 0))
         self._btn(foot, "Cancel",           self._cancel,   FG_DIM).pack(side="right", padx=4)
         self._btn(foot, "Restore Defaults", self._defaults, WARN).pack(side="right", padx=4)
         self._save_btn = self._btn(foot, "  Close  ", self._close, FG_DIM, bold=True)
@@ -458,10 +464,10 @@ class SettingsWindow:
                      fmt=lambda v: f"{int(v)}°C")
         self._opt(t, "cpu.full_power_in_gaming",    "Full power during gaming",    "Removes ceiling when game detected")
         self._opt(t, "cpu.full_power_in_streaming", "Full power during streaming", "Removes ceiling when OBS/XSplit detected")
-        self._cpu_tvb_panel(t)
-        self._cpu_boost_score_panel(t)
-        self._cpu_core_role_panel(t)
-        self._cpu_interrupt_steering_panel(t)
+        self._gate(t, "cpu_tvb_optimizer",    self._cpu_tvb_panel)
+        self._gate(t, "cpu_boost_score",      self._cpu_boost_score_panel)
+        self._gate(t, "cpu_topology",         self._cpu_core_role_panel)
+        self._gate(t, "cpu_interrupt_steering", self._cpu_interrupt_steering_panel)
 
     def _tab_gpu(self):
         t = self._make_tab("GPU")
@@ -478,11 +484,11 @@ class SettingsWindow:
             self._note(t, "Spins fans to 100% for rapid cooling via AWCC. Auto-disables when timer OR temps cool — whichever first.")
             self._slider(t, "turbo_cool.auto_off_minutes", "Auto-disable after (minutes)", 1, 60, 1, fmt=lambda v: f"{int(v)} min")
             self._opt(t, "turbo_cool.auto_off_on_cool", "Also disable when temps drop below warning thresholds", "")
-        self._gpu_dynamic_boost_panel(t)
-        self._gpu_vram_clock_panel(t)
-        self._gpu_driver_features_panel(t)
-        self._gpu_throttle_log_panel(t)
-        self._gpu_efficiency_panel(t)
+        self._gate(t, "gpu_dynamic_boost",    self._gpu_dynamic_boost_panel)
+        self._gate(t, "gpu_vram_clock_lock",  self._gpu_vram_clock_panel)
+        self._gate(t, "gpu_driver_features",  self._gpu_driver_features_panel)
+        self._gate(t, "gpu_throttle_log",     self._gpu_throttle_log_panel)
+        self._gate(t, "gpu_efficiency_curve", self._gpu_efficiency_panel)
 
     def _tab_ram(self):
         t = self._make_tab("RAM")
@@ -494,12 +500,12 @@ class SettingsWindow:
         self._slider(t, "ram.pagefile_custom_mb", "Custom pagefile (MB)", 0, 32768, 512,
                      fmt=lambda v: "Windows managed" if int(v)==0 else f"{int(v)} MB")
         self._opt(t, "ram.clear_standby_cache_on_idle","Clear standby cache at idle",  "Frees unused RAM")
-        self._ram_composition_panel(t)
-        self._ram_unified_pressure_panel(t)
-        self._ram_working_set_panel(t)
-        self._ram_leak_watchdog_panel(t)
-        self._ram_dimm_protection_panel(t)
-        self._ram_pagefile_advisor_panel(t)
+        self._gate(t, "ram_composition",       self._ram_composition_panel)
+        self._gate(t, "ram_unified_pressure",  self._ram_unified_pressure_panel)
+        self._gate(t, "ram_working_set_trimmer", self._ram_working_set_panel)
+        self._gate(t, "ram_leak_watchdog",     self._ram_leak_watchdog_panel)
+        self._gate(t, "ram_dimm_protection",   self._ram_dimm_protection_panel)
+        self._gate(t, "ram_pagefile_advisor",  self._ram_pagefile_advisor_panel)
 
     # ─────────────────────────────────────────────────────────────────────────
     # CPU advanced panels
@@ -620,8 +626,12 @@ class SettingsWindow:
                 from core import cpu_topology
                 t = cpu_topology.get_topology()
                 confirmed = "confirmed" if t["detected"] else "estimated"
+                if t["p_cores"]:
+                    p_range = f"LPs {t['p_cores'][0]}–{t['p_cores'][-1]}"
+                else:
+                    p_range = "none detected"
                 txt = (f"P-cores: {t['p_count']} logical processors  "
-                       f"(LPs {t['p_cores'][0]}–{t['p_cores'][-1] if t['p_cores'] else '?'})  "
+                       f"({p_range})  "
                        f"|  E-cores: {t['e_count']} logical processors  "
                        f"({confirmed})")
                 if panel.winfo_exists():
@@ -857,7 +867,7 @@ class SettingsWindow:
 
         def _load_log():
             for w in rows_frame.winfo_children():
-                rows_frame.winfo_children() and w.destroy()
+                w.destroy()
             try:
                 from core import throttle_log
                 from datetime import datetime
@@ -1050,16 +1060,36 @@ class SettingsWindow:
 
         def _refresh():
             try:
-                from core import sensors
-                r = sensors.get_readings()
-                ram_pct  = r.get("ram_usage_pct") or 0
-                vram_used  = r.get("gpu_vram_used_mb") or 0
-                vram_total = r.get("gpu_vram_total_mb") or 1
-                vram_pct   = round(vram_used / vram_total * 100, 1) if vram_total else 0
+                import psutil, subprocess as _sp
+                vm        = psutil.virtual_memory()
+                ram_pct   = vm.percent
+                ram_used  = round(vm.used  / 1024**3, 1)
+                ram_total = round(vm.total / 1024**3, 1)
+
+                vram_used_mb  = 0.0
+                vram_total_mb = 1.0
+                try:
+                    p = _sp.run(
+                        ["nvidia-smi",
+                         "--query-gpu=memory.used,memory.total",
+                         "--format=csv,noheader,nounits"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    if p.returncode == 0:
+                        parts = [x.strip() for x in p.stdout.strip().split(",")]
+                        if len(parts) >= 2:
+                            vram_used_mb  = float(parts[0])
+                            vram_total_mb = float(parts[1]) or 1.0
+                except Exception:
+                    pass
+
+                vram_pct = round(vram_used_mb / vram_total_mb * 100, 1)
                 _bar(ram_bar,  ram_pct)
                 _bar(vram_bar, vram_pct)
-                ram_lbl.config(text=f"{ram_pct:.0f}%  ({r.get('ram_used_gb', 0):.1f} / {r.get('ram_total_gb', 0):.0f} GB)")
-                vram_lbl.config(text=f"{vram_pct:.0f}%  ({vram_used/1024:.1f} / {vram_total/1024:.1f} GB)")
+                ram_lbl.config(
+                    text=f"{ram_pct:.0f}%  ({ram_used:.1f} / {ram_total:.0f} GB)")
+                vram_lbl.config(
+                    text=f"{vram_pct:.0f}%  ({vram_used_mb/1024:.1f} / {vram_total_mb/1024:.1f} GB)")
             except Exception:
                 pass
             if panel.winfo_exists():
@@ -1206,8 +1236,6 @@ class SettingsWindow:
                     lines = []
                     for d in ram_temps:
                         tc = d["temp_c"]
-                        color = (DANGER if tc >= threshold else
-                                 WARN   if tc >= threshold - 5 else ACCENT2)
                         lines.append(f"{d['name']}: {tc:.0f}°C")
                     # Use the last temp color for the whole label
                     hottest = max(d["temp_c"] for d in ram_temps)
@@ -1769,6 +1797,11 @@ class SettingsWindow:
 
     def _tab_ai(self):
         t = self._make_tab("AI")
+        from core import license as lic
+        if not lic.is_allowed("ai_chat"):
+            _, reason = lic.check("ai_chat")
+            self._gate(t, "ai_chat", lambda p: None)
+            return
 
         # ── Provider ──────────────────────────────────────────────────────────
         self._section(t, "AI Provider")
@@ -2279,6 +2312,371 @@ class SettingsWindow:
                 return label, url
         return None, None
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Feature gate helper
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _gate(self, parent, feature: str, builder_fn):
+        """
+        Wrap a panel builder with a license check.
+        If the feature is allowed, call builder_fn(parent).
+        Otherwise show a compact 'locked' notice with a purchase shortcut.
+        """
+        from core import license as lic
+        ok, reason = lic.check(feature)
+        if ok:
+            builder_fn(parent)
+            return
+
+        import webbrowser, urllib.parse
+        from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL
+        from core import auth
+
+        is_pro_feature = feature in lic.PRO_FEATURES
+
+        lock = tk.Frame(parent, bg=BG_HW, padx=20, pady=14)
+        lock.pack(fill="x", padx=16, pady=(4, 8))
+
+        header_row = tk.Frame(lock, bg=BG_HW)
+        header_row.pack(fill="x")
+        tk.Label(header_row, text="\u1F512" if False else "[Pro]" if is_pro_feature else "[Base]",
+                 font=("Segoe UI", 8), bg=BG_HW, fg=WARN).pack(side="left")
+        tk.Label(header_row, text=f"  {reason}",
+                 font=("Segoe UI", 9, "italic"), bg=BG_HW, fg=FG_DIM,
+                 wraplength=700, justify="left").pack(side="left")
+
+        btn_row = tk.Frame(lock, bg=BG_HW)
+        btn_row.pack(anchor="w", pady=(8, 0))
+
+        def _open_purchase(item_number, item_name, amount):
+            email = auth.get_email()
+            params = urllib.parse.urlencode({
+                "cmd":           "_xclick",
+                "business":      PAYPAL_BUSINESS_EMAIL,
+                "item_name":     item_name,
+                "item_number":   item_number,
+                "amount":        amount,
+                "currency_code": "USD",
+                "custom":        email,
+                "notify_url":    BACKEND_URL.rstrip("/") + "/paypal/ipn",
+            })
+            webbrowser.open(f"https://www.paypal.com/cgi-bin/webscr?{params}")
+
+        if not auth.is_logged_in():
+            self._btn(btn_row, "Sign In", self._open_login, ACCENT,
+                      bold=True).pack(side="left", padx=(0, 8))
+        elif not auth.is_licensed():
+            self._btn(btn_row, "Buy AlienCore  $20",
+                      lambda: _open_purchase("AC_BASE",
+                                             "AlienCore — Lifetime License", "20.00"),
+                      ACCENT2, bold=True).pack(side="left", padx=(0, 8))
+        elif is_pro_feature and not auth.is_pro():
+            self._btn(btn_row, "Upgrade to Pro  +$5",
+                      lambda: _open_purchase("AC_PRO",
+                                             "AlienCore Pro Add-on", "5.00"),
+                      ACCENT, bold=True).pack(side="left", padx=(0, 8))
+
+        refresh_lbl = tk.Label(btn_row, text="", font=("Segoe UI", 8, "italic"),
+                               bg=BG_HW, fg=FG_DIM)
+        refresh_lbl.pack(side="left", padx=8)
+
+        def _refresh_lic():
+            refresh_lbl.config(text="Checking...", fg=FG_DIM)
+            def _work():
+                ok_r, msg = auth.refresh_license()
+                lock.after(0, lambda: refresh_lbl.config(
+                    text=msg, fg=ACCENT2 if ok_r else WARN))
+            threading.Thread(target=_work, daemon=True).start()
+
+        self._btn(btn_row, "Refresh License", _refresh_lic,
+                  FG_DIM).pack(side="left")
+
+    def _open_login(self):
+        """Open the login dialog from within settings."""
+        from gui.login_dialog import show as show_login
+        threading.Thread(target=show_login, daemon=True,
+                         name="LoginFromSettings").start()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Account tab
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _tab_account(self):
+        import webbrowser, urllib.parse
+        from core import auth
+        from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL
+
+        t = self._make_tab("Account")
+
+        # ── Login status ──────────────────────────────────────────────────────
+        self._section(t, "Account")
+
+        status_panel = tk.Frame(t, bg=BG_HW, padx=24, pady=18)
+        status_panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        email_lbl   = tk.Label(status_panel, text="—",
+                                font=("Segoe UI", 13, "bold"),
+                                bg=BG_HW, fg=FG_HEAD)
+        email_lbl.pack(anchor="w")
+        tier_lbl    = tk.Label(status_panel, text="",
+                                font=("Segoe UI", 9),
+                                bg=BG_HW, fg=FG_DIM)
+        tier_lbl.pack(anchor="w", pady=(2, 10))
+        status_msg  = tk.StringVar(value="")
+        status_feed = tk.Label(status_panel, textvariable=status_msg,
+                                font=("Segoe UI", 8, "italic"),
+                                bg=BG_HW, fg=FG_DIM, anchor="w", wraplength=800)
+        status_feed.pack(anchor="w", pady=(0, 8))
+
+        def _refresh_display():
+            if auth.is_logged_in():
+                email_lbl.config(text=auth.get_email(), fg=FG_HEAD)
+                s = auth.get_session()
+                parts = []
+                if s.get("has_base"): parts.append("Base License")
+                if s.get("has_pro"):  parts.append("Pro Add-on")
+                creds = s.get("support_credits", 0)
+                if creds:             parts.append(f"{creds}x Priority Support")
+                tier_lbl.config(
+                    text="Licensed: " + " · ".join(parts) if parts
+                    else "No active license  —  purchase below to unlock features.",
+                    fg=ACCENT2 if parts else WARN)
+            else:
+                email_lbl.config(text="Not signed in", fg=FG_DIM)
+                tier_lbl.config(text="", fg=FG_DIM)
+
+        _refresh_display()
+
+        # Action buttons row
+        act_row = tk.Frame(status_panel, bg=BG_HW)
+        act_row.pack(anchor="w")
+
+        def _do_refresh():
+            status_msg.set("Refreshing license...")
+            def _work():
+                ok, msg = auth.refresh_license()
+                status_panel.after(0, lambda: (
+                    status_msg.set(msg),
+                    status_feed.config(fg=ACCENT2 if ok else WARN),
+                    _refresh_display(),
+                ))
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _do_logout():
+            auth.logout()
+            _refresh_display()
+            status_msg.set("Signed out.")
+
+        if auth.is_logged_in():
+            self._btn(act_row, "Refresh License", _do_refresh,
+                      ACCENT, bold=True).pack(side="left", padx=(0, 8))
+            self._btn(act_row, "Sign Out", _do_logout,
+                      FG_DIM).pack(side="left")
+        else:
+            self._btn(act_row, "Sign In",
+                      self._open_login, ACCENT, bold=True).pack(side="left")
+
+        # ── Purchase / upgrade ────────────────────────────────────────────────
+        self._section(t, "Licenses & Add-ons")
+        self._note(t,
+            "One-time payments. No subscriptions. Lifetime license includes "
+            "all future updates. Enter your email in the sign-in field first — "
+            "your email is attached to the payment so your license activates automatically.")
+
+        def _paypal(item_number, item_name, amount):
+            email = auth.get_email()
+            params = urllib.parse.urlencode({
+                "cmd":           "_xclick",
+                "business":      PAYPAL_BUSINESS_EMAIL,
+                "item_name":     item_name,
+                "item_number":   item_number,
+                "amount":        amount,
+                "currency_code": "USD",
+                "custom":        email,
+                "notify_url":    BACKEND_URL.rstrip("/") + "/paypal/ipn",
+            })
+            webbrowser.open(f"https://www.paypal.com/cgi-bin/webscr?{params}")
+
+        products = tk.Frame(t, bg=BG_HW, padx=24, pady=18)
+        products.pack(fill="x", padx=16, pady=(4, 8))
+
+        for item_number, label, price, desc, color in [
+            ("AC_BASE",
+             "AlienCore  —  Lifetime License",
+             "$20.00",
+             "Full access to all core features. One payment, yours forever.",
+             ACCENT2),
+            ("AC_PRO",
+             "Pro Add-on  —  AI Integration",
+             "+$5.00",
+             "Unlocks AI Chat, AI Watchdog, and AI Config Advisor.",
+             ACCENT),
+            ("AC_SUPPORT",
+             "Priority Support  —  Single Incident",
+             "$5.00",
+             "24-hour response to one bug report or technical issue. "
+             "Full refund if I can't resolve it.",
+             WARN),
+        ]:
+            row = tk.Frame(products, bg=BG_SECT, padx=16, pady=10)
+            row.pack(fill="x", pady=(0, 6))
+            info = tk.Frame(row, bg=BG_SECT)
+            info.pack(side="left", fill="x", expand=True)
+            hdr = tk.Frame(info, bg=BG_SECT)
+            hdr.pack(anchor="w")
+            tk.Label(hdr, text=label, font=("Segoe UI", 10, "bold"),
+                     bg=BG_SECT, fg=FG_HEAD).pack(side="left")
+            tk.Label(hdr, text=f"  {price}", font=("Segoe UI", 10, "bold"),
+                     bg=BG_SECT, fg=color).pack(side="left")
+            tk.Label(info, text=desc, font=("Segoe UI", 8),
+                     bg=BG_SECT, fg=FG_DIM, wraplength=600,
+                     justify="left").pack(anchor="w", pady=(2, 0))
+            _n, _p = item_number, price
+            self._btn(row, "Purchase  \u2192",
+                      lambda n=_n, l=label, p=_p: _paypal(
+                          n, l, p.replace("+", "").replace("$", "").strip()),
+                      color, bold=True).pack(side="right", padx=(12, 0))
+
+        # ── Priority Support ticket form ───────────────────────────────────────
+        self._section(t, "Submit a Priority Support Ticket")
+        creds = auth.support_credits()
+        if creds > 0:
+            self._note(t,
+                f"You have {creds} support credit(s). Describe your issue below. "
+                f"Kyle will respond within 24 hours. If it can't be fixed, you'll receive a full refund.")
+
+            ticket_panel = tk.Frame(t, bg=BG_HW, padx=16, pady=12)
+            ticket_panel.pack(fill="x", padx=16, pady=(4, 8))
+
+            msg_box = tk.Text(ticket_panel, height=6, width=80,
+                              bg=BG_PANEL, fg=FG, insertbackground=FG,
+                              relief="flat", font=("Segoe UI", 9),
+                              padx=8, pady=6, wrap="word")
+            msg_box.pack(fill="x")
+
+            ticket_status = tk.StringVar(value="")
+            tk.Label(ticket_panel, textvariable=ticket_status,
+                     font=("Segoe UI", 8, "italic"),
+                     bg=BG_HW, fg=FG_DIM, anchor="w").pack(fill="x", pady=(6, 0))
+
+            ctrl = tk.Frame(ticket_panel, bg=BG_HW)
+            ctrl.pack(anchor="w", pady=(8, 0))
+
+            def _submit_ticket():
+                message = msg_box.get("1.0", "end").strip()
+                if not message:
+                    ticket_status.set("Please describe your issue first.")
+                    return
+                ticket_status.set("Submitting...")
+                def _work():
+                    ok, resp = auth.submit_support_ticket(message)
+                    ticket_panel.after(0, lambda: (
+                        ticket_status.set(resp),
+                        _refresh_display(),
+                    ))
+                threading.Thread(target=_work, daemon=True).start()
+
+            self._btn(ctrl, "Submit Ticket", _submit_ticket,
+                      ACCENT2, bold=True).pack(side="left")
+        else:
+            self._note(t,
+                "No support credits. Purchase Priority Support above to submit a ticket.")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # About tab
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _tab_about(self):
+        import webbrowser
+        t = self._make_tab("About")
+
+        # ── Logo / title block ────────────────────────────────────────────────
+        hero = tk.Frame(t, bg=BG_HW, padx=30, pady=24)
+        hero.pack(fill="x", padx=16, pady=(16, 8))
+
+        tk.Label(hero, text=APP_NAME,
+                 font=("Segoe UI", 32, "bold"),
+                 bg=BG_HW, fg=ACCENT).pack(anchor="w")
+        tk.Label(hero, text=f"Version {VERSION}",
+                 font=("Segoe UI", 11),
+                 bg=BG_HW, fg=FG_DIM).pack(anchor="w", pady=(0, 10))
+        tk.Label(hero,
+                 text=(
+                     "A comprehensive Windows system optimizer built for Alienware hardware.\n"
+                     "Replaces HWiNFO, MSI Afterburner, Process Lasso, and LatencyMon in one tool —\n"
+                     "automatic profile switching, real-time sensor monitoring, GPU transparency,\n"
+                     "memory management, and AI-assisted tuning. Built for the m18 R2 (i9-14900HX / RTX 4090)."
+                 ),
+                 font=("Segoe UI", 9),
+                 bg=BG_HW, fg=FG, justify="left", wraplength=860).pack(anchor="w")
+
+        # ── Author block ──────────────────────────────────────────────────────
+        self._section(t, "Author")
+        info = tk.Frame(t, bg=BG_HW, padx=30, pady=16)
+        info.pack(fill="x", padx=16, pady=(4, 8))
+
+        tk.Label(info, text="Kyle Yeroshefsky",
+                 font=("Segoe UI", 13, "bold"),
+                 bg=BG_HW, fg=FG_HEAD).pack(anchor="w")
+
+        email_row = tk.Frame(info, bg=BG_HW)
+        email_row.pack(anchor="w", pady=(4, 0))
+        tk.Label(email_row, text="Email:",
+                 font=("Segoe UI", 9), bg=BG_HW, fg=FG_DIM).pack(side="left")
+        email_lnk = tk.Label(email_row, text=f"  {SUPPORT_EMAIL}",
+                              font=("Segoe UI", 9, "underline"),
+                              bg=BG_HW, fg=ACCENT, cursor="hand2")
+        email_lnk.pack(side="left")
+        email_lnk.bind("<Button-1>",
+                       lambda e: webbrowser.open(f"mailto:{SUPPORT_EMAIL}"))
+
+        gh_row = tk.Frame(info, bg=BG_HW)
+        gh_row.pack(anchor="w", pady=(6, 0))
+        tk.Label(gh_row, text="GitHub Issues / Bug Reports:",
+                 font=("Segoe UI", 9), bg=BG_HW, fg=FG_DIM).pack(side="left")
+        gh_url = GITHUB_ISSUES_URL.split("/issues")[0]   # repo root
+        gh_lnk = tk.Label(gh_row, text=f"  {gh_url}",
+                           font=("Segoe UI", 9, "underline"),
+                           bg=BG_HW, fg=ACCENT, cursor="hand2")
+        gh_lnk.pack(side="left")
+        gh_lnk.bind("<Button-1>", lambda e: webbrowser.open(gh_url))
+
+        btn_row = tk.Frame(info, bg=BG_HW)
+        btn_row.pack(anchor="w", pady=(12, 0))
+        self._btn(btn_row, "Send Feedback",
+                  lambda: __import__("gui.feedback", fromlist=["feedback"]).open_feedback_thread(),
+                  ACCENT2).pack(side="left", padx=(0, 8))
+        self._btn(btn_row, "Open GitHub",
+                  lambda: webbrowser.open(gh_url),
+                  FG_DIM).pack(side="left")
+
+        # ── Build info ────────────────────────────────────────────────────────
+        self._section(t, "Build")
+        build = tk.Frame(t, bg=BG_HW, padx=30, pady=14)
+        build.pack(fill="x", padx=16, pady=(4, 8))
+
+        import sys, platform
+        hw = self._hw
+        cpu_name  = hw.get("cpu", {}).get("name",  "Unknown CPU")
+        gpu_list  = hw.get("gpu", [])
+        gpu_name  = gpu_list[0].get("name", "Unknown GPU") if gpu_list else "Unknown GPU"
+        ram_gb    = hw.get("ram", {}).get("total_gb", "?")
+        os_name   = hw.get("platform", {}).get("os_edition", platform.version())
+
+        for label, val in [
+            ("Python",   sys.version.split()[0]),
+            ("Platform", f"Windows  {os_name}"),
+            ("CPU",      cpu_name),
+            ("GPU",      gpu_name),
+            ("RAM",      f"{ram_gb} GB"),
+        ]:
+            row = tk.Frame(build, bg=BG_HW)
+            row.pack(anchor="w", pady=1)
+            tk.Label(row, text=f"{label}:", font=("Segoe UI", 9),
+                     bg=BG_HW, fg=FG_DIM, width=12, anchor="w").pack(side="left")
+            tk.Label(row, text=val, font=("Segoe UI", 9),
+                     bg=BG_HW, fg=FG).pack(side="left")
+
     # ── Services list ─────────────────────────────────────────────────────────
 
     def _load_services(self):
@@ -2781,6 +3179,14 @@ class SettingsWindow:
 
     def _close(self):
         self.root.destroy()
+
+    def _open_manual(self):
+        import webbrowser
+        manual = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "docs", "manual.html",
+        )
+        webbrowser.open(f"file:///{manual.replace(os.sep, '/')}")
 
     def _cancel(self):
         if self.is_first_run:

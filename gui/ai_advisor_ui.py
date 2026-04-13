@@ -74,6 +74,8 @@ class AdvisorWindow:
         self.root = tk.Tk()
         self.root.title("AlienCore  —  AI Config Advisor")
         self.root.configure(bg=BG)
+        from gui.tray import set_window_icon
+        set_window_icon(self.root)
         self.root.geometry("760x620")
         self.root.minsize(600, 480)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)

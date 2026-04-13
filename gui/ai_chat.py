@@ -72,6 +72,8 @@ class AIChatWindow:
         self.root = tk.Tk()
         self.root.title(f"AlienCore AI  —  {pname}")
         self.root.configure(bg=BG)
+        from gui.tray import set_window_icon
+        set_window_icon(self.root)
         self.root.geometry("680x560")
         self.root.minsize(480, 400)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)

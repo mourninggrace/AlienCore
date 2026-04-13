@@ -67,6 +67,8 @@ class FeedbackWindow:
         self.root = tk.Tk()
         self.root.title(f"{APP_NAME}  —  Send Feedback")
         self.root.configure(bg=BG)
+        from gui.tray import set_window_icon
+        set_window_icon(self.root)
         self.root.geometry("660x580")
         self.root.minsize(520, 460)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)

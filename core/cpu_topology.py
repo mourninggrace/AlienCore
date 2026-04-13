@@ -38,16 +38,12 @@ class _PROCESSOR_RELATIONSHIP(ctypes.Structure):
     ]
 
 class _GROUP_AFFINITY(ctypes.Structure):
+    # Mask = ULONG_PTR: 8 bytes on 64-bit Windows (c_ulong is 4 bytes on Windows)
     _fields_ = [
         ("Mask",     ctypes.c_ulong if ctypes.sizeof(ctypes.c_ulong) == 8 else ctypes.c_ulonglong),
         ("Group",    ctypes.c_ushort),
         ("Reserved", ctypes.c_ushort * 3),
     ]
-    # Use ULONG_PTR width dynamically
-    try:
-        _fields_[0] = ("Mask", ctypes.c_uint64)
-    except Exception:
-        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ Polish:
   - DWM rounded corners (Windows 11)
   - Colored profile dot (Canvas) + dim text label
   - Hover tooltip per sensor
-  - Double-click sparkline popup (60-sample history)
+  - Double-click sparkline popup (90-sample history)
   - Threshold flash on warn/crit transition
   - Fullscreen auto-hide
 """
@@ -89,53 +89,245 @@ class _Tooltip:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _Sparkline:
-    _open = {}   # config_key → Toplevel
+    _open = {}   # config_key → {"win": Toplevel, "history": deque}
+
+    # Chart layout constants
+    _W     = 600
+    _H     = 200
+    _PAD_L = 48
+    _PAD_R = 20
+    _PAD_T = 18
+    _PAD_B = 32
 
     @classmethod
     def show(cls, config_key: str, label: str,
              history: collections.deque, unit: str):
+        # Close any existing window for this key first
         if config_key in cls._open:
             try:
-                cls._open[config_key].destroy()
+                cls._open[config_key]["win"].destroy()
             except Exception:
                 pass
+
+        PL, PR     = cls._PAD_L, cls._PAD_R
+        PT, PB     = cls._PAD_T, cls._PAD_B
+        BG         = "#0c0c12"
+        BG2        = "#12121c"
+        FG         = "#e0e0f0"
+        FG_DIM     = "#44445a"
+        FG_MED     = "#666680"
+
         win = tk.Toplevel()
-        win.title(f"{label} — last {len(history)} samples")
+        win.title(f"{label}  —  90-second history")
         win.attributes("-topmost", True)
-        win.configure(bg="#0d0d0d")
-        win.resizable(False, False)
-        cls._open[config_key] = win
+        win.configure(bg=BG)
+        win.resizable(True, True)
+        win.minsize(500, 340)
+        from gui.tray import set_window_icon
+        set_window_icon(win)
 
-        W, H = 320, 110
-        canvas = tk.Canvas(win, width=W, height=H, bg="#0d0d0d",
-                           highlightthickness=0)
-        canvas.pack(padx=8, pady=8)
+        # ── Header ──────────────────────────────────────────────────────────────
+        hdr = tk.Frame(win, bg=BG)
+        hdr.pack(fill="x", padx=18, pady=(14, 0))
 
-        vals = [v for v in history if v is not None]
-        if len(vals) < 2:
-            canvas.create_text(W // 2, H // 2, text="Not enough data yet",
-                               fill="#555555", font=("Consolas", 9))
-        else:
-            mn, mx = min(vals), max(vals)
-            span   = max(mx - mn, 1)
-            pts    = []
-            n      = len(vals)
-            for i, v in enumerate(vals):
-                x = int(i * (W - 24) / max(n - 1, 1)) + 12
-                y = H - 12 - int((v - mn) / span * (H - 24))
-                pts.append((x, y))
-            # Draw lines
-            for i in range(len(pts) - 1):
-                canvas.create_line(pts[i][0], pts[i][1],
-                                   pts[i+1][0], pts[i+1][1],
-                                   fill=COLOR_COOL, width=1)
-            # Min / max / current labels
-            canvas.create_text(12, H - 4, text=f"{mn:.1f}{unit}",
-                               anchor="sw", fill="#555555", font=("Consolas", 7))
-            canvas.create_text(12, 4, text=f"{mx:.1f}{unit}",
-                               anchor="nw", fill="#555555", font=("Consolas", 7))
-            canvas.create_text(W - 4, 6, text=f"{vals[-1]:.1f}{unit}",
-                               anchor="ne", fill="#ffffff", font=("Consolas", 8))
+        tk.Label(hdr, text=label,
+                 font=("Segoe UI", 13, "bold"),
+                 bg=BG, fg=FG).pack(side="left")
+
+        cur_lbl = tk.Label(hdr, text="—",
+                           font=("Consolas", 22, "bold"),
+                           bg=BG, fg=COLOR_COOL)
+        cur_lbl.pack(side="right", padx=(0, 2))
+
+        # ── Separator ───────────────────────────────────────────────────────────
+        tk.Frame(win, bg="#1a1a28", height=1).pack(fill="x", padx=18, pady=(8, 0))
+
+        # ── Canvas — fills all available space, grows with window ────────────────
+        canvas = tk.Canvas(win, bg=BG2, highlightthickness=0, bd=0)
+        canvas.pack(padx=18, pady=(10, 0), fill="both", expand=True)
+
+        # ── Stats row ───────────────────────────────────────────────────────────
+        stats = tk.Frame(win, bg=BG)
+        stats.pack(fill="x", padx=18, pady=(8, 16))
+
+        min_lbl = tk.Label(stats, text="Min  —",
+                           font=("Segoe UI", 8), bg=BG, fg=FG_MED)
+        min_lbl.pack(side="left")
+
+        avg_lbl = tk.Label(stats, text="Avg  —",
+                           font=("Segoe UI", 8), bg=BG, fg=FG_MED)
+        avg_lbl.pack(side="left", padx=(22, 0))
+
+        max_lbl = tk.Label(stats, text="Max  —",
+                           font=("Segoe UI", 8), bg=BG, fg=FG_MED)
+        max_lbl.pack(side="left", padx=(22, 0))
+
+        cnt_lbl = tk.Label(stats, text="",
+                           font=("Segoe UI", 8), bg=BG, fg=FG_DIM)
+        cnt_lbl.pack(side="right")
+
+        cls._open[config_key] = {"win": win, "history": history}
+
+        # Stores the pending after() ID so resize events can cancel & replace it
+        _after_id = [None]
+
+        # ── Draw function (called on first render, every 2 s, and on resize) ─────
+        def _draw():
+            if config_key not in cls._open:
+                return
+
+            # Read actual canvas dimensions — fall back to defaults before first render
+            W = canvas.winfo_width()
+            H = canvas.winfo_height()
+            if W <= 1:
+                W = cls._W
+                H = cls._H
+
+            hist = cls._open[config_key]["history"]
+            vals = [v for v in hist if v is not None]
+
+            canvas.delete("all")
+            cw = W - PL - PR   # chart width
+            ch = H - PT - PB   # chart height
+
+            # Background grid lines
+            for frac, alpha_hint in [(0.25, "#141420"), (0.5, "#181826"),
+                                     (0.75, "#141420")]:
+                gy = PT + int(frac * ch)
+                canvas.create_line(PL, gy, W - PR, gy,
+                                   fill=alpha_hint, dash=(3, 8), width=1)
+
+            # X-axis baseline
+            canvas.create_line(PL, PT + ch, W - PR, PT + ch,
+                               fill="#1c1c2c", width=1)
+
+            # Y-axis line
+            canvas.create_line(PL, PT, PL, PT + ch,
+                               fill="#1c1c2c", width=1)
+
+            if len(vals) < 2:
+                canvas.create_text(
+                    PL + cw // 2, PT + ch // 2,
+                    text="Collecting data…",
+                    fill=FG_DIM, font=("Segoe UI", 11))
+                if config_key in cls._open:
+                    _after_id[0] = win.after(2000, _draw)
+                return
+
+            mn       = min(vals)
+            mx       = max(vals)
+            span     = max(mx - mn, 0.5)
+            avg_val  = sum(vals) / len(vals)
+            cur      = vals[-1]
+            n        = len(vals)
+
+            # Color based on value and unit
+            if unit in ("°", "°C", "°F"):
+                color = (COLOR_HOT  if cur >= 90 else
+                         COLOR_WARM if cur >= 75 else COLOR_COOL)
+            elif unit == "%":
+                color = (COLOR_HOT  if cur >= 90 else
+                         COLOR_WARM if cur >= 70 else COLOR_COOL)
+            else:
+                color = COLOR_COOL
+
+            # Parse accent color for fill
+            try:
+                r = int(color[1:3], 16)
+                g = int(color[3:5], 16)
+                b = int(color[5:7], 16)
+                fill_col = f"#{max(0,r//5):02x}{max(0,g//5):02x}{max(0,b//5):02x}"
+                mid_col  = f"#{max(0,r//3):02x}{max(0,g//3):02x}{max(0,b//3):02x}"
+            except Exception:
+                fill_col = "#051008"
+                mid_col  = "#0a2010"
+
+            # Build chart points
+            def _pt(i, v):
+                x = PL + int(i * cw / max(n - 1, 1))
+                y = PT + ch - int((v - mn) / span * ch)
+                return x, max(PT, min(PT + ch, y))
+
+            pts = [_pt(i, v) for i, v in enumerate(vals)]
+
+            # Filled polygon under curve
+            poly = pts + [(pts[-1][0], PT + ch), (pts[0][0], PT + ch)]
+            canvas.create_polygon(poly, fill=fill_col, outline="")
+
+            # Mid-tone top strip for pseudo-gradient feel
+            mid_h = max(2, int(ch * 0.3))
+            mid_pts = []
+            for x, y in pts:
+                mid_pts.append((x, min(y + mid_h, PT + ch)))
+            mid_poly = pts + list(reversed(mid_pts))
+            canvas.create_polygon(mid_poly, fill=mid_col, outline="")
+
+            # Main line (2 px, smooth)
+            flat = [coord for pt in pts for coord in pt]
+            canvas.create_line(flat, fill=color, width=2,
+                               smooth=True, splinesteps=24)
+
+            # Current-value dot
+            cx, cy = pts[-1]
+            canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5,
+                               fill=color, outline=BG2, width=2)
+
+            # Y-axis tick labels
+            for frac, val in [(0.0, mx), (0.5, (mn + mx) / 2), (1.0, mn)]:
+                gy = PT + int(frac * ch)
+                canvas.create_text(PL - 6, gy,
+                                   text=f"{val:.1f}",
+                                   anchor="e", fill=FG_MED,
+                                   font=("Consolas", 8))
+
+            # Time axis labels
+            elapsed = n * 2   # 2-second poll interval
+            canvas.create_text(PL, PT + ch + 14,
+                               text=f"−{elapsed}s",
+                               anchor="w", fill=FG_DIM,
+                               font=("Consolas", 8))
+            canvas.create_text(W - PR, PT + ch + 14,
+                               text="now",
+                               anchor="e", fill=FG_DIM,
+                               font=("Consolas", 8))
+            # Midpoint time label
+            canvas.create_text(PL + cw // 2, PT + ch + 14,
+                               text=f"−{elapsed // 2}s",
+                               anchor="center", fill=FG_DIM,
+                               font=("Consolas", 8))
+
+            # Update header and stats labels
+            cur_lbl.config(text=f"{cur:.1f}{unit}", fg=color)
+            min_lbl.config(text=f"Min   {mn:.1f}{unit}",  fg=FG_MED)
+            avg_lbl.config(text=f"Avg   {avg_val:.1f}{unit}", fg=color)
+            max_lbl.config(text=f"Max   {mx:.1f}{unit}", fg=FG_MED)
+            cnt_lbl.config(text=f"{n} / 90 samples")
+
+            if config_key in cls._open:
+                _after_id[0] = win.after(2000, _draw)
+
+        def _on_resize(event=None):
+            """Redraw promptly when the window is resized, cancelling any pending timer."""
+            if _after_id[0]:
+                try:
+                    win.after_cancel(_after_id[0])
+                except Exception:
+                    pass
+            _after_id[0] = win.after(80, _draw)
+
+        canvas.bind("<Configure>", _on_resize)
+
+        _draw()
+
+        # Center on screen at default size
+        win.update_idletasks()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(
+            f"{cls._W + 36}x{cls._H + 140}"
+            f"+{(sw - cls._W - 36) // 2}"
+            f"+{(sh - cls._H - 140) // 2}"
+        )
 
         win.protocol("WM_DELETE_WINDOW", lambda: cls._close(config_key))
 
@@ -143,7 +335,7 @@ class _Sparkline:
     def _close(cls, key):
         if key in cls._open:
             try:
-                cls._open[key].destroy()
+                cls._open[key]["win"].destroy()
             except Exception:
                 pass
             del cls._open[key]
@@ -203,7 +395,7 @@ class SensorBar:
         self._drag_x    = 0
         self._drag_y    = 0
         self._cells     = {}
-        self._history   = {}    # config_key → deque(maxlen=60)
+        self._history   = {}    # config_key → deque(maxlen=90)
         self._flash     = {}    # config_key → last color str
         self._fs_hidden = False
         self._gpu_warn_w, self._gpu_hot_w = self._read_gpu_tdp_thresholds()
@@ -441,7 +633,7 @@ class SensorBar:
                 "unit":         unit,
             }
             if config_key not in self._history:
-                self._history[config_key] = collections.deque(maxlen=60)
+                self._history[config_key] = collections.deque(maxlen=90)
 
     def _tooltip_text(self, label: str, config_key: str) -> str:
         hist = self._history.get(config_key)
@@ -702,7 +894,7 @@ class SensorBar:
     def _feed_history(self, readings: dict):
         for key in self._cells:
             if key not in self._history:
-                self._history[key] = collections.deque(maxlen=60)
+                self._history[key] = collections.deque(maxlen=90)
             self._history[key].append(self._extract_numeric(key, readings))
 
     # ── Threshold flash ───────────────────────────────────────────────────────

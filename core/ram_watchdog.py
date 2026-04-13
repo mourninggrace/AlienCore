@@ -15,11 +15,10 @@ from collections import defaultdict, deque
 logger = logging.getLogger("aliencore.ram_watchdog")
 
 # {pid: deque of (timestamp, rss_bytes)} — rolling window per process
-_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=60))
+# maxlen=900 → 30 min at 2s poll intervals (covers the maximum configurable window)
+_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=900))
 # {pid: {"name", "pid", "growth_mb_per_min", "current_mb", "started_at"}}
 _suspects: dict[int, dict] = {}
-
-_WINDOW_SECS = 300.0    # default observation window (configurable)
 
 
 def update(window_minutes: float = 5.0, threshold_mb_per_min: float = 50.0):

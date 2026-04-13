@@ -135,7 +135,7 @@ def _query_current_pagefile_mb() -> int:
         winreg.CloseKey(key)
         # Format: "C:\pagefile.sys MinMB MaxMB" (list, first entry)
         if isinstance(val, (list, tuple)):
-            entry = str(val[0])
+            entry = str(val[0]) if val else ""
         else:
             entry = str(val)
         parts = entry.split()

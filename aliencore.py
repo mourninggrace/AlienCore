@@ -11,6 +11,7 @@ Usage:
   python aliencore.py --restore      Restore all system defaults and exit
   python aliencore.py                Run normally (foreground, for testing)
 """
+# copykitten
 
 import sys
 import os
@@ -87,6 +88,8 @@ def main():
     # ── Settings only ─────────────────────────────────────────────────────────
     if args.settings:
         cfg.load()
+        from core import auth as _auth
+        _auth.load_session()
         from gui.settings_gui import open_settings
         open_settings(is_first_run=False)
         return
@@ -117,6 +120,18 @@ def main():
 
 def _run(firstrun: bool = False):
     """Full AlienCore startup — hardware scan, tweaks, sensors, monitor, tray."""
+
+    # 0. Auth — load cached session, show login if needed
+    from core import auth as _auth
+    _auth.load_session()
+    if not _auth.is_logged_in():
+        _show_login()
+        if not _auth.is_logged_in():
+            # User closed the window without signing in — exit gracefully
+            logging.getLogger("aliencore").info("No session — exiting.")
+            return
+    # Refresh license from server in the background (non-blocking)
+    _auth.refresh_session_async()
 
     # 1. First-run GUI (blocks until user saves or closes)
     if firstrun:
@@ -176,6 +191,11 @@ def _run(firstrun: bool = False):
 # ─────────────────────────────────────────────────────────────────────────────
 # First-run GUI
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _show_login():
+    from gui.login_dialog import show as show_login
+    show_login()
+
 
 def _show_first_run_gui():
     from gui.settings_gui import open_settings

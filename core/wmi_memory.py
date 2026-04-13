@@ -45,7 +45,6 @@ def get_composition() -> dict:
         import wmi
         c = wmi.WMI()
         for mem in c.Win32_PerfFormattedData_PerfOS_Memory():
-            total_pages  = int(mem.CacheBytes or 0) + int(mem.AvailableBytes or 0)
             # Key counters (in bytes)
             available    = int(mem.AvailableBytes or 0)
             standby      = int(mem.StandbyCacheNormalPriorityBytes or 0) + \
@@ -59,7 +58,6 @@ def get_composition() -> dict:
 
         vm      = psutil.virtual_memory()
         total_b = vm.total
-        used_b  = vm.used
 
         in_use_b  = max(0, total_b - available)
         standby_b = min(standby, available)

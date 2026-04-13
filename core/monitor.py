@@ -245,14 +245,13 @@ def _maybe_clear_standby(readings: dict):
             subprocess.run([esl, "standbylist"], capture_output=True, timeout=10)
             logger.info("Standby cache cleared (RAM was at %.0f%%)", ram_pct)
         else:
-            # PowerShell alternative (less reliable but no extra tool needed)
-            script = (
-                "[System.Runtime.InteropServices.Marshal]::FreeHGlobal("
-                "[System.Runtime.InteropServices.Marshal]::AllocHGlobal(1))"
+            # EmptyStandbyList.exe is required to clear the standby list.
+            # There is no reliable PowerShell equivalent — skip and log.
+            logger.warning(
+                "Standby cache clear skipped: EmptyStandbyList.exe not found at %s. "
+                "RAM is at %.0f%%. Place EmptyStandbyList.exe in System32 to enable "
+                "this feature.", esl, ram_pct
             )
-            subprocess.run(["powershell", "-Command", script],
-                           capture_output=True, timeout=10)
-            logger.info("Standby cache nudge sent via PowerShell")
     except Exception as e:
         logger.warning("Standby cache clear failed: %s", e)
 
@@ -292,6 +291,7 @@ def _run_tvb_optimizer(readings: dict, c: dict):
     at idle, nudge the idle ceiling down by 5% to keep temps below TVB.
     This preserves single-threaded boost by keeping the CPU cooler.
     """
+    global _current_cpu_ceiling
     from core.constants import TVB_TEMP_THRESHOLD
     cpu_temp = readings.get("cpu_temp_avg")
     if cpu_temp is None:
@@ -306,6 +306,7 @@ def _run_tvb_optimizer(readings: dict, c: dict):
                          new_ceil, cpu_temp, TVB_TEMP_THRESHOLD)
             tweaks._set_max_processor_state(new_ceil, "AC", dry_run=False)
             tweaks._set_max_processor_state(new_ceil, "DC", dry_run=False)
+            _current_cpu_ceiling = new_ceil
 
 
 def _toast(message: str):

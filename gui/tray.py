@@ -109,6 +109,23 @@ SENSOR_DEFS = [
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
+def get_app_icon(color: str = COLOR_COOL):
+    """Return the AlienCore alien-head as a PIL Image (for window iconphoto)."""
+    return _get_alien_icon(color)
+
+
+def set_window_icon(root) -> None:
+    """Set the AlienCore alien-head as the icon on any Tk window."""
+    try:
+        from PIL import ImageTk
+        _img = ImageTk.PhotoImage(_get_alien_icon(COLOR_COOL))
+        root.iconphoto(True, _img)
+        # Keep reference on the widget to prevent GC
+        root._ac_icon = _img
+    except Exception:
+        pass
+
+
 def start(on_settings_open, on_quit):
     """
     Single tray icon showing current profile.
@@ -505,6 +522,7 @@ def _build_menu(on_settings_open, on_quit):
             lambda item: _toggle_startup()
         ),
         pystray.Menu.SEPARATOR,
+        pystray.MenuItem("About AlienCore",  lambda item: _open_about()),
         pystray.MenuItem("Exit AlienCore",   lambda item: _safe(on_quit)),
     )
 
@@ -742,6 +760,71 @@ def _open_log():
 def _open_feedback():
     from gui import feedback
     feedback.open_feedback_thread()
+
+
+def _open_about():
+    """Lightweight standalone About dialog (works even when Settings is closed)."""
+    import tkinter as tk
+    import webbrowser
+    from core.constants import SUPPORT_EMAIL, GITHUB_ISSUES_URL
+
+    def _build():
+        root = tk.Tk()
+        root.title(f"About {APP_NAME}")
+        root.configure(bg="#1a1a1a")
+        root.resizable(False, False)
+
+        pad = tk.Frame(root, bg="#1a1a1a", padx=32, pady=24)
+        pad.pack()
+
+        tk.Label(pad, text=APP_NAME, font=("Segoe UI", 28, "bold"),
+                 bg="#1a1a1a", fg="#00aaff").pack(anchor="w")
+        tk.Label(pad, text=f"Version {VERSION}", font=("Segoe UI", 10),
+                 bg="#1a1a1a", fg="#888888").pack(anchor="w", pady=(0, 12))
+
+        tk.Frame(pad, bg="#333333", height=1).pack(fill="x", pady=(0, 14))
+
+        tk.Label(pad, text="Kyle Yeroshefsky",
+                 font=("Segoe UI", 12, "bold"),
+                 bg="#1a1a1a", fg="#e8e8e8").pack(anchor="w")
+
+        email_lnk = tk.Label(pad, text=SUPPORT_EMAIL,
+                              font=("Segoe UI", 9, "underline"),
+                              bg="#1a1a1a", fg="#00aaff", cursor="hand2")
+        email_lnk.pack(anchor="w", pady=(4, 0))
+        email_lnk.bind("<Button-1>",
+                       lambda e: webbrowser.open(f"mailto:{SUPPORT_EMAIL}"))
+
+        gh_url = GITHUB_ISSUES_URL.split("/issues")[0]
+        gh_lnk = tk.Label(pad, text=gh_url,
+                           font=("Segoe UI", 9, "underline"),
+                           bg="#1a1a1a", fg="#00aaff", cursor="hand2")
+        gh_lnk.pack(anchor="w", pady=(4, 12))
+        gh_lnk.bind("<Button-1>", lambda e: webbrowser.open(gh_url))
+
+        tk.Frame(pad, bg="#333333", height=1).pack(fill="x", pady=(0, 12))
+
+        tk.Label(pad,
+                 text=(
+                     "A comprehensive Windows system optimizer for Alienware hardware.\n"
+                     "CPU · GPU · RAM · Network · Storage · Privacy · AI-assisted tuning."
+                 ),
+                 font=("Segoe UI", 9), bg="#1a1a1a", fg="#888888",
+                 justify="left").pack(anchor="w", pady=(0, 14))
+
+        tk.Button(pad, text="  Close  ", command=root.destroy,
+                  font=("Segoe UI", 10), fg="#e8e8e8", bg="#333333",
+                  activeforeground="#e8e8e8", activebackground="#444444",
+                  relief="flat", padx=12, pady=5, cursor="hand2",
+                  bd=0, highlightthickness=0).pack(anchor="e")
+
+        root.update_idletasks()
+        w, h = root.winfo_width(), root.winfo_height()
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        root.geometry(f"+{(sw-w)//2}+{(sh-h)//2}")
+        root.mainloop()
+
+    threading.Thread(target=_build, daemon=True, name="AboutDialog").start()
 
 
 def _safe(fn):

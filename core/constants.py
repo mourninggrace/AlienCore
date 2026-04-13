@@ -13,6 +13,14 @@ APP_NAME = "AlienCore"
 SUPPORT_EMAIL     = "mourning.grace.2014@gmail.com"
 GITHUB_ISSUES_URL = "https://github.com/mourninggrace/AlienCore/issues/new"
 
+# ── Licensing backend ────────────────────────────────────────────────────────
+# Update this to your deployed server URL once you have a domain.
+# Example: "https://api.aliencore.app"  or  "https://yourserver.com:8765"
+BACKEND_URL = "https://api.aliencore.app"
+
+# PayPal account that receives payments
+PAYPAL_BUSINESS_EMAIL = "mourning.grace.2014@gmail.com"
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR              = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH           = os.path.join(BASE_DIR, "config.json")
@@ -120,11 +128,9 @@ DEFAULT_CONFIG = {
     "display": {
         "temp_unit": "celsius",               # "celsius" | "fahrenheit"
         "auto_hide_fullscreen": True,         # withdraw bar when a fullscreen app is active
-        "tray_cycling_enabled": True,
         "overlay_enabled": False,
         "overlay_position": "bottom_right",   # bottom_right | bottom_left | top_right | top_left
         "overlay_opacity": 0.85,
-        "tray_cycle_interval_sec": TRAY_CYCLE_INTERVAL,
         "update_interval_value": 2.0,         # numeric interval value
         "update_interval_unit": "seconds",    # "seconds" or "milliseconds"
         "bar_orientation": "horizontal",      # "horizontal" | "vertical"
