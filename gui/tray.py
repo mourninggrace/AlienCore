@@ -173,6 +173,19 @@ def stop():
     logger.info("Tray stopped.")
 
 
+def send_notification(message: str, title: str = "AlienCore"):
+    """
+    Show a Windows balloon/toast notification via the pystray tray icon.
+    No subprocess spawned — completely silent on screen.
+    Safe to call from any thread; silently ignored if tray isn't running yet.
+    """
+    try:
+        if _icons:
+            _icons[0].notify(message, title)
+    except Exception as e:
+        logger.debug("Tray notification failed: %s", e)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Update loop
 # ─────────────────────────────────────────────────────────────────────────────
@@ -532,9 +545,11 @@ def _build_menu(on_settings_open, on_quit):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _awcc_available() -> bool:
+    # Read from cached sensor readings — never call AWCC WMI from the tray thread.
+    # All WMI access must stay on the SensorThread (COM STA apartment model).
     try:
-        from core import awcc
-        return awcc.is_available()
+        from core import sensors
+        return bool(sensors.get_readings().get("awcc_available", False))
     except Exception:
         return False
 

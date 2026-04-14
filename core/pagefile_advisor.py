@@ -170,7 +170,8 @@ def apply_recommendation(advice: dict) -> tuple:
             result = subprocess.run(
                 ["wmic", "pagefileset", "where", "name='C:\\\\pagefile.sys'",
                  "set", f"InitialSize={size}", f"MaximumSize={size}"],
-                capture_output=True, text=True, timeout=15
+                capture_output=True, text=True, timeout=15,
+                creationflags=subprocess.CREATE_NO_WINDOW
             )
             if result.returncode == 0:
                 return True, f"Pagefile set to {size} MB. A reboot is required for full effect."

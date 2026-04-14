@@ -214,7 +214,8 @@ def get_service_state(service_name: str) -> dict:
     try:
         result = subprocess.run(
             ["sc", "query", service_name],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         state = "Unknown"
         if "RUNNING" in result.stdout:
@@ -253,18 +254,21 @@ def set_startup_type(service_name: str, startup_type: str) -> bool:
     try:
         result = subprocess.run(
             ["sc", "config", service_name, f"start= {sc_type}"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if result.returncode == 0:
             logger.info("Service %s startup set to %s", service_name, startup_type)
             # Stop the service if disabling
             if startup_type == DISABLED:
                 subprocess.run(["sc", "stop", service_name],
-                               capture_output=True, timeout=10)
+                               capture_output=True, timeout=10,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
             # Start if setting to auto
             elif startup_type == AUTO:
                 subprocess.run(["sc", "start", service_name],
-                               capture_output=True, timeout=10)
+                               capture_output=True, timeout=10,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
             return True
         else:
             logger.warning("Failed to set %s startup: %s",

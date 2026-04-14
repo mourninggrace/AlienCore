@@ -85,6 +85,15 @@ def fmt_temp(val_c: float) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _poll_loop():
+    # COM must be initialized on every thread that uses WMI.
+    # Doing it here ensures the AWCC WMI connection is created on this thread,
+    # which is required by the COM STA apartment model.
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception as e:
+        logger.warning("SensorThread CoInitialize failed: %s", e)
+
     while _running:
         try:
             flat = _get_lhm_sensors()
@@ -94,6 +103,7 @@ def _poll_loop():
             data.update(_parse_gpu_temp(flat))
             data.update(_parse_nvme_temp(flat))
             data.update(_parse_ram_temp(flat))
+            data.update(_parse_fan_rpm(flat))
             data.update(_parse_cpu_watts(flat))
             data.update(_read_gpu_nvidia_smi())
             data.update(_read_ram_usage())
@@ -204,6 +214,26 @@ def _parse_ram_temp(flat: list) -> dict:
     return result
 
 
+def _parse_fan_rpm(flat: list) -> dict:
+    """
+    Read fan RPMs from LHM via the Fan sensor type.
+    LHM reads Alienware fan data through the Embedded Controller (EC) when the
+    hardware exposes it.  Returns lhm_fan_rpms: list of {name, rpm} sorted by name,
+    only including fans with RPM > 0.  Empty list if LHM reports no fan data.
+    """
+    result = {"lhm_fan_rpms": []}
+    fans = [s for s in flat if s["type"] == "Fan"]
+    for s in fans:
+        rpm = s.get("value", 0)
+        if rpm is not None and rpm > 0:
+            result["lhm_fan_rpms"].append({
+                "name": s.get("name", "Fan"),
+                "rpm":  round(rpm),
+            })
+    result["lhm_fan_rpms"].sort(key=lambda f: f["name"])
+    return result
+
+
 def _parse_cpu_watts(flat: list) -> dict:
     result = {"cpu_watts": None}
     power = [s for s in flat if s["type"] == "Power"]
@@ -237,7 +267,8 @@ def _read_gpu_nvidia_smi() -> dict:
         proc = subprocess.run(
             ["nvidia-smi", f"--query-gpu={fields}",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if proc.returncode == 0:
             parts = [p.strip() for p in proc.stdout.strip().split(",")]
@@ -392,11 +423,16 @@ def _update_boost_tracker(data: dict):
 def _read_awcc_data() -> dict:
     """
     Poll AWCC WMI for fan RPMs and active thermal profile.
+    Also drains the write command queue posted by other threads (profiles,
+    turbo_cool, tray) so that all AWCC WMI calls happen on this thread only.
     Returns empty/False defaults if AWCC is unavailable so callers never KeyError.
     """
     _empty = {"awcc_available": False, "awcc_fans": [], "awcc_profile": None}
     try:
         from core import awcc
+        # Drain write commands posted by other threads BEFORE reading state.
+        # This keeps all WMI access on the SensorThread (COM STA requirement).
+        awcc.drain_queue()
         if not awcc.is_available():
             return _empty
         fans    = awcc.get_fan_rpms()

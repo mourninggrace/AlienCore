@@ -62,6 +62,12 @@ def get_cached() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _wmi_connect():
+    # COM must be initialized on the calling thread before wmi.WMI() is used.
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
     try:
         return wmi.WMI()
     except Exception as e:
@@ -177,7 +183,8 @@ def _query_nvidia_smi() -> list:
         result = subprocess.run(
             ["nvidia-smi", f"--query-gpu={fields}",
              "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if result.returncode != 0:
             return []
@@ -353,24 +360,22 @@ def _get_platform_flags() -> dict:
                 break
 
         # Check if nvidia-smi is accessible
-        r = subprocess.run(["nvidia-smi", "-L"], capture_output=True, timeout=5)
+        r = subprocess.run(["nvidia-smi", "-L"], capture_output=True, timeout=5,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
         flags["has_nvidia_smi"] = r.returncode == 0
 
-        # Check for AWCC — test both install path and live WMI accessibility
+        # Check for AWCC install path only.
+        # NOTE: do NOT call awcc.is_available() here — this runs on the main thread
+        # before the SensorThread starts, so calling into awcc._instance() would
+        # claim the COM STA WMI connection on this thread, permanently locking the
+        # SensorThread out.  Live WMI status is read from sensor readings instead.
         awcc_paths = [
             r"C:\Program Files\Alienware\AWCC",
             r"C:\Program Files (x86)\Alienware\AWCC",
         ]
         awcc_installed = any(os.path.exists(p) for p in awcc_paths)
-        awcc_wmi_live  = False
-        if awcc_installed:
-            try:
-                from core import awcc as _awcc_mod
-                awcc_wmi_live = _awcc_mod.is_available()
-            except Exception:
-                pass
         flags["has_awcc"]     = awcc_installed
-        flags["has_awcc_wmi"] = awcc_wmi_live
+        flags["has_awcc_wmi"] = False   # populated at runtime from sensor readings
 
         # Check for ThrottleStop
         ts_paths = [

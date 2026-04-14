@@ -96,7 +96,8 @@ def get_active_interfaces() -> list:
     try:
         out = subprocess.check_output(
             ["netsh", "interface", "show", "interface"],
-            text=True, stderr=subprocess.DEVNULL, timeout=5
+            text=True, stderr=subprocess.DEVNULL, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         names = []
         for line in out.splitlines():
@@ -118,10 +119,11 @@ def set_dns(interface: str, primary: str, secondary: str = None,
     """
     try:
         # ── IPv4 ─────────────────────────────────────────────────────────────
+        _cnw = subprocess.CREATE_NO_WINDOW
         r = subprocess.run(
             ["netsh", "interface", "ip", "set", "dns",
              f"name={interface}", "source=static", f"addr={primary}", "register=primary"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, creationflags=_cnw
         )
         if r.returncode != 0:
             msg = (r.stderr or r.stdout).strip() or "netsh returned non-zero"
@@ -131,7 +133,7 @@ def set_dns(interface: str, primary: str, secondary: str = None,
             subprocess.run(
                 ["netsh", "interface", "ip", "add", "dns",
                  f"name={interface}", f"addr={secondary}", "index=2"],
-                capture_output=True, timeout=10
+                capture_output=True, timeout=10, creationflags=_cnw
             )
 
         # ── IPv6 ─────────────────────────────────────────────────────────────
@@ -139,16 +141,16 @@ def set_dns(interface: str, primary: str, secondary: str = None,
             subprocess.run(
                 ["netsh", "interface", "ipv6", "set", "dns",
                  f"name={interface}", "source=static", f"addr={primary_v6}", "register=primary"],
-                capture_output=True, timeout=10
+                capture_output=True, timeout=10, creationflags=_cnw
             )
             if secondary_v6:
                 subprocess.run(
                     ["netsh", "interface", "ipv6", "add", "dns",
                      f"name={interface}", f"addr={secondary_v6}", "index=2"],
-                    capture_output=True, timeout=10
+                    capture_output=True, timeout=10, creationflags=_cnw
                 )
 
-        subprocess.run(["ipconfig", "/flushdns"], capture_output=True, timeout=10)
+        subprocess.run(["ipconfig", "/flushdns"], capture_output=True, timeout=10, creationflags=_cnw)
         return True, f"DNS set to {primary} / {primary_v6 or 'no IPv6'}"
     except Exception as e:
         return False, str(e)
@@ -161,10 +163,11 @@ def reset_to_dhcp(interface: str) -> tuple:
     """
     try:
         # ── IPv4 ─────────────────────────────────────────────────────────────
+        _cnw = subprocess.CREATE_NO_WINDOW
         r = subprocess.run(
             ["netsh", "interface", "ip", "set", "dns",
              f"name={interface}", "source=dhcp"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, text=True, timeout=10, creationflags=_cnw
         )
         if r.returncode != 0:
             msg = (r.stderr or r.stdout).strip() or "netsh returned non-zero"
@@ -174,10 +177,10 @@ def reset_to_dhcp(interface: str) -> tuple:
         subprocess.run(
             ["netsh", "interface", "ipv6", "set", "dns",
              f"name={interface}", "source=dhcp"],
-            capture_output=True, timeout=10
+            capture_output=True, timeout=10, creationflags=_cnw
         )
 
-        subprocess.run(["ipconfig", "/flushdns"], capture_output=True, timeout=10)
+        subprocess.run(["ipconfig", "/flushdns"], capture_output=True, timeout=10, creationflags=_cnw)
         return True, "DNS reset to DHCP (automatic) — IPv4 and IPv6"
     except Exception as e:
         return False, str(e)

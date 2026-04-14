@@ -134,7 +134,7 @@ DEFAULT_CONFIG = {
         "update_interval_value": 2.0,         # numeric interval value
         "update_interval_unit": "seconds",    # "seconds" or "milliseconds"
         "bar_orientation": "horizontal",      # "horizontal" | "vertical"
-        "settings_theme": "Void",             # settings window color theme
+        "settings_theme": "Venom",            # settings window color theme
     },
 
     # ── Sensors to show ──

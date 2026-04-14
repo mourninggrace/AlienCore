@@ -233,6 +233,7 @@ def _start_tray(hw: dict):
              os.path.join(BASE_DIR, "aliencore.py"),
              "--settings"],
             cwd=BASE_DIR,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
 
     def on_quit():
@@ -273,6 +274,7 @@ def _install_service():
 
         # Use sc.exe for reliability
         import subprocess
+        _cnw = subprocess.CREATE_NO_WINDOW
         cmd = [
             "sc", "create", svc_name,
             "binPath=",  f'"{python_exe}" "{script}"',
@@ -280,11 +282,12 @@ def _install_service():
             "start=", "auto",
             "type=", "own",
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                creationflags=_cnw)
         if result.returncode == 0:
             # Add description
             subprocess.run(["sc", "description", svc_name, description],
-                           capture_output=True)
+                           capture_output=True, creationflags=_cnw)
             print(f"Service '{svc_name}' installed successfully.")
             print("To start it now: sc start AlienCoreService")
             print("Or reboot — it will start automatically.")
@@ -297,10 +300,13 @@ def _install_service():
 
 def _uninstall_service():
     import subprocess
+    _cnw = subprocess.CREATE_NO_WINDOW
     svc_name = "AlienCoreService"
-    subprocess.run(["sc", "stop",   svc_name], capture_output=True)
+    subprocess.run(["sc", "stop",   svc_name], capture_output=True,
+                   creationflags=_cnw)
     result = subprocess.run(["sc", "delete", svc_name],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True,
+                            creationflags=_cnw)
     if result.returncode == 0:
         print(f"Service '{svc_name}' removed.")
     else:

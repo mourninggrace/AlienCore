@@ -23,6 +23,7 @@ def init_db():
                 has_base         INTEGER NOT NULL DEFAULT 0,
                 has_pro          INTEGER NOT NULL DEFAULT 0,
                 support_credits  INTEGER NOT NULL DEFAULT 0,
+                trial_started_at REAL    DEFAULT NULL,
                 created_at       REAL    NOT NULL DEFAULT (unixepoch())
             );
 
@@ -50,6 +51,18 @@ def init_db():
                 created_at REAL NOT NULL DEFAULT (unixepoch())
             );
 
+            -- Hardware fingerprints — one row per physical machine.
+            -- Used to prevent trial reset by reinstalling or using a new email.
+            -- A fingerprint maps to the first trial_started_at for that machine.
+            -- has_paid is set True when any purchase is linked to this fingerprint,
+            -- which prevents false positives when a paying user reinstalls.
+            CREATE TABLE IF NOT EXISTS hardware_fingerprints (
+                fingerprint      TEXT PRIMARY KEY,
+                first_email      TEXT NOT NULL,
+                trial_started_at REAL NOT NULL DEFAULT (unixepoch()),
+                has_paid         INTEGER NOT NULL DEFAULT 0
+            );
+
             -- Support tickets
             CREATE TABLE IF NOT EXISTS support_tickets (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,3 +72,7 @@ def init_db():
                 created_at REAL    NOT NULL DEFAULT (unixepoch())
             );
         """)
+        # Migration: add trial_started_at to existing databases
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+        if "trial_started_at" not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN trial_started_at REAL DEFAULT NULL")

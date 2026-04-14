@@ -82,11 +82,15 @@ def send_pin():
 # Auth — verify PIN → return token + license info
 # ─────────────────────────────────────────────────────────────────────────────
 
+_TRIAL_DAYS = 30
+
+
 @app.route("/auth/verify-pin", methods=["POST"])
 def verify_pin():
-    data  = request.get_json(force=True, silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    pin   = (data.get("pin")   or "").strip()
+    data        = request.get_json(force=True, silent=True) or {}
+    email       = (data.get("email")       or "").strip().lower()
+    pin         = (data.get("pin")         or "").strip()
+    fingerprint = (data.get("fingerprint") or "").strip()[:64]  # cap length
 
     if not email or not pin:
         return jsonify({"ok": False, "error": "Email and PIN required."}), 400
@@ -116,21 +120,73 @@ def verify_pin():
             (token, email, expires_at),
         )
 
+        conn.execute("INSERT OR IGNORE INTO users (email) VALUES (?)", (email,))
         user = conn.execute(
-            "SELECT has_base, has_pro, support_credits FROM users WHERE email=?",
+            "SELECT has_base, has_pro, support_credits, trial_started_at FROM users WHERE email=?",
             (email,),
         ).fetchone()
 
-    logger.info("Login: %s  base=%s pro=%s", email,
-                bool(user["has_base"]), bool(user["has_pro"]))
+        # ── Trial logic ───────────────────────────────────────────────────────
+        # Priority:
+        #   1. User already has a paid base license → no trial needed.
+        #   2. Email already has a trial timestamp → reuse it (returning user).
+        #   3. Fingerprint matches a previous trial → carry that trial's start
+        #      date over so reinstall / new email doesn't reset the clock.
+        #      Exception: fingerprint has_paid=True (this machine already bought)
+        #      so we don't penalise legitimate reinstalls.
+        #   4. None of the above → first login ever on this machine + email.
+
+        trial_started_at = user["trial_started_at"]
+
+        if not user["has_base"] and trial_started_at is None:
+            hw_row = None
+            if fingerprint and fingerprint != "unknown":
+                hw_row = conn.execute(
+                    "SELECT trial_started_at, has_paid FROM hardware_fingerprints"
+                    " WHERE fingerprint=?",
+                    (fingerprint,),
+                ).fetchone()
+
+            if hw_row and not hw_row["has_paid"]:
+                # This hardware already started a trial — use that start date.
+                # The trial may already be expired; the client will show it as
+                # expired and prompt the user to purchase.
+                trial_started_at = hw_row["trial_started_at"]
+                logger.info(
+                    "Trial fingerprint match for %s — trial started %s ago",
+                    email,
+                    int(time.time() - trial_started_at),
+                )
+            else:
+                # Fresh trial — record the start time
+                trial_started_at = time.time()
+
+            conn.execute(
+                "UPDATE users SET trial_started_at=? WHERE email=?",
+                (trial_started_at, email),
+            )
+
+            # Register / update the fingerprint row
+            if fingerprint and fingerprint != "unknown":
+                conn.execute(
+                    "INSERT OR IGNORE INTO hardware_fingerprints"
+                    " (fingerprint, first_email, trial_started_at)"
+                    " VALUES (?,?,?)",
+                    (fingerprint, email, trial_started_at),
+                )
+
+    logger.info("Login: %s  base=%s pro=%s  fingerprint=%s",
+                email, bool(user["has_base"]), bool(user["has_pro"]),
+                fingerprint[:8] + "…" if len(fingerprint) > 8 else fingerprint)
     return jsonify({
-        "ok":              True,
-        "token":           token,
-        "email":           email,
-        "has_base":        bool(user["has_base"]),
-        "has_pro":         bool(user["has_pro"]),
-        "support_credits": user["support_credits"],
-        "expires_at":      expires_at,
+        "ok":               True,
+        "token":            token,
+        "email":            email,
+        "has_base":         bool(user["has_base"]),
+        "has_pro":          bool(user["has_pro"]),
+        "support_credits":  user["support_credits"],
+        "trial_started_at": trial_started_at,
+        "expires_at":       expires_at,
     })
 
 
@@ -155,7 +211,7 @@ def check_token():
 
         email = row["email"]
         user  = conn.execute(
-            "SELECT has_base, has_pro, support_credits FROM users WHERE email=?",
+            "SELECT has_base, has_pro, support_credits, trial_started_at FROM users WHERE email=?",
             (email,),
         ).fetchone()
 
@@ -166,12 +222,13 @@ def check_token():
         )
 
     return jsonify({
-        "ok":              True,
-        "email":           email,
-        "has_base":        bool(user["has_base"]),
-        "has_pro":         bool(user["has_pro"]),
-        "support_credits": user["support_credits"],
-        "expires_at":      new_expiry,
+        "ok":               True,
+        "email":            email,
+        "has_base":         bool(user["has_base"]),
+        "has_pro":          bool(user["has_pro"]),
+        "support_credits":  user["support_credits"],
+        "trial_started_at": user["trial_started_at"],
+        "expires_at":       new_expiry,
     })
 
 
@@ -279,6 +336,12 @@ def paypal_ipn():
 
         if item_number == "AC_BASE":
             conn.execute("UPDATE users SET has_base=1 WHERE email=?", (email,))
+            # Mark all fingerprints tied to this email as paid so they don't
+            # get penalised by the trial-carry-over logic on reinstall.
+            conn.execute(
+                "UPDATE hardware_fingerprints SET has_paid=1 WHERE first_email=?",
+                (email,),
+            )
             logger.info("Granted BASE license to %s", email)
         elif item_number == "AC_PRO":
             conn.execute("UPDATE users SET has_pro=1 WHERE email=?", (email,))

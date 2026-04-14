@@ -21,6 +21,12 @@ logger = logging.getLogger("aliencore.profiles")
 _current_profile  = "idle"
 _manual_override  = None   # None = auto, string = locked profile name
 
+# Load-based detection hysteresis — require a condition to hold for N consecutive
+# evaluations before committing to a profile switch.  Prevents false triggers from
+# momentary GPU/CPU spikes (browser rendering, antivirus, Windows updates, etc.).
+_load_hit_count   = 0        # consecutive evaluations where load looked like gaming
+_LOAD_HIT_NEEDED  = 3        # must be true this many times in a row (~30 s at 10 s/eval)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
@@ -51,8 +57,15 @@ def evaluate(sensor_readings: dict) -> str:
     """
     Evaluate current system state and return the appropriate profile name.
     Returns the same profile if nothing changed (caller checks for change).
+
+    Hysteresis rules:
+      - Process-based detection (game/streaming exe found): switches immediately.
+      - Load-based detection: requires _LOAD_HIT_NEEDED consecutive evaluations
+        before committing to gaming, preventing false triggers from momentary spikes.
+      - Switching back to idle from a load-based gaming session is also gated: the
+        load must be gone for _LOAD_HIT_NEEDED consecutive evaluations.
     """
-    global _current_profile
+    global _current_profile, _load_hit_count
 
     if _manual_override:
         return _manual_override
@@ -66,24 +79,41 @@ def evaluate(sensor_readings: dict) -> str:
 
     running = _get_running_processes() if by_process else set()
 
-    # ── Check streaming first (highest priority if both OBS and a game run) ──
+    # ── Process-based detection — always immediate, no hysteresis needed ──
+    user_match = _check_user_profiles(running, c) if by_process else None
     if by_process and _is_streaming(running, c):
+        _load_hit_count = 0
         new = "streaming"
-    elif by_process:
-        # User custom profiles checked before built-in gaming detection
-        custom = _check_user_profiles(running, c) if by_process else None
-        if custom:
-            new = custom
-        elif _is_gaming_by_process(running, c):
-            new = "gaming"
-        elif by_load and _is_gaming_by_load(sensor_readings, c):
+    elif user_match:
+        _load_hit_count = 0
+        new = user_match
+    elif by_process and _is_gaming_by_process(running, c):
+        _load_hit_count = 0
+        new = "gaming"
+
+    # ── Load-based detection — hysteresis required ──
+    elif by_load and _is_gaming_by_load(sensor_readings, c):
+        # Cap at _LOAD_HIT_NEEDED so the count-down on signal loss can never
+        # exceed the count-up window (otherwise long gaming sessions would
+        # require minutes of cool-down before switching back to idle).
+        if _load_hit_count < _LOAD_HIT_NEEDED:
+            _load_hit_count += 1
+        if _load_hit_count >= _LOAD_HIT_NEEDED:
             new = "gaming"
         else:
-            new = "idle"
-    elif by_load and _is_gaming_by_load(sensor_readings, c):
-        new = "gaming"
+            logger.debug("Load gaming signal: hit %d/%d (holding %s)",
+                         _load_hit_count, _LOAD_HIT_NEEDED, _current_profile)
+            new = _current_profile
     else:
-        new = "idle"
+        # Load dropped — apply same hysteresis before returning to idle
+        if _current_profile == "gaming" and _load_hit_count > 0:
+            _load_hit_count -= 1
+            logger.debug("Load gaming signal gone: count down to %d (holding gaming)",
+                         _load_hit_count)
+            new = _current_profile
+        else:
+            _load_hit_count = 0
+            new = "idle"
 
     if new != _current_profile:
         logger.info("Profile change: %s → %s", _current_profile, new)
@@ -153,8 +183,10 @@ def _is_gaming_by_load(sensors: dict, c: dict) -> bool:
 
     if gpu_load is not None and gpu_load >= gpu_thresh:
         return True
-    if cpu_load is not None and gpu_load is not None:
-        # Both CPU and GPU elevated = likely gaming even if GPU% is moderate
-        if cpu_load >= cpu_thresh and gpu_load >= (gpu_thresh * 0.6):
-            return True
+    # Both CPU and GPU elevated = likely gaming even if GPU% is moderate.
+    # Requires both readings — neither alone is sufficient at the lower bar.
+    if (cpu_load is not None and gpu_load is not None
+            and cpu_load >= cpu_thresh
+            and gpu_load >= (gpu_thresh * 0.6)):
+        return True
     return False

@@ -148,22 +148,22 @@ class _LoginDialog:
         tk.Label(outer, text="New to AlienCore?",
                  font=("Segoe UI", 10, "bold"), bg=BG, fg=FG).pack(anchor="w")
         tk.Label(outer,
-                 text="One-time payments — no subscriptions, ever.  "
-                      "Lifetime license includes all future updates.",
+                 text="First sign-in starts a free 30-day trial of all base features — no card needed.  "
+                      "One-time payments, no subscriptions, lifetime license.",
                  font=("Segoe UI", 8), bg=BG, fg=FG_DIM,
                  wraplength=420, justify="left").pack(anchor="w",
                  pady=(3, 10))
 
         purchase_row = tk.Frame(outer, bg=BG)
         purchase_row.pack(anchor="w")
-        self._buy_btn(purchase_row, "Buy AlienCore   $20",
-                      "AC_BASE",    "AlienCore — Lifetime License", "20.00",
+        self._buy_btn(purchase_row, "Buy AlienCore   $19.99",
+                      "AC_BASE",    "AlienCore — Lifetime License", "19.99",
                       self.GREEN).pack(side="left", padx=(0, 8))
-        self._buy_btn(purchase_row, "Pro Add-on   +$5",
-                      "AC_PRO",     "AlienCore Pro Add-on",          "5.00",
+        self._buy_btn(purchase_row, "Pro Add-on   +$4.99",
+                      "AC_PRO",     "AlienCore Pro Add-on",          "4.99",
                       self.ACCENT).pack(side="left", padx=(0, 8))
-        self._buy_btn(purchase_row, "Priority Support   $5",
-                      "AC_SUPPORT", "AlienCore Priority Support (1x)","5.00",
+        self._buy_btn(purchase_row, "Priority Support   $4.99",
+                      "AC_SUPPORT", "AlienCore Priority Support (1x)","4.99",
                       self.WARN).pack(side="left")
 
         # Keybinds

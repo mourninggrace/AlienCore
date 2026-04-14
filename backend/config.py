@@ -54,7 +54,7 @@ TOKEN_EXPIRY_DAYS  = 30
 
 # ── Products (item_number must match what you set in PayPal button) ───────────
 PRODUCTS = {
-    "AC_BASE":    {"name": "AlienCore — Lifetime License",      "amount": "20.00"},
-    "AC_PRO":     {"name": "AlienCore Pro Add-on",              "amount": "5.00"},
-    "AC_SUPPORT": {"name": "AlienCore Priority Support (1x)",   "amount": "5.00"},
+    "AC_BASE":    {"name": "AlienCore — Lifetime License",      "amount": "19.99"},
+    "AC_PRO":     {"name": "AlienCore Pro Add-on",              "amount": "4.99"},
+    "AC_SUPPORT": {"name": "AlienCore Priority Support (1x)",   "amount": "4.99"},
 }

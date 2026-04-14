@@ -23,6 +23,7 @@ Requirements:
 """
 
 import logging
+import queue as _queue
 import threading
 import time
 from typing import Optional
@@ -69,17 +70,65 @@ _fans         = []            # discovered [(fan_id, [sensor_ids])]
 _fans_ready   = False
 _prev_profile = None          # profile saved before Turbo Cool activates
 
+# ── Owning thread ────────────────────────────────────────────────────────────
+# COM STA objects may only be used on the thread that created them.
+# We track which thread owns the current _awcc connection.  If a different
+# thread tries to use it, we reset and reconnect on that thread instead.
+_owning_thread_id: int | None = None
+
+# ── WMI call-failure backoff ──────────────────────────────────────────────────
+# When AWCC WMI calls repeatedly fail (provider unhealthy), backing off prevents
+# WmiPrvSE.exe from accumulating error-recovery work at 2-second poll intervals.
+_fail_count      = 0
+_backoff_until   = 0.0     # epoch time — skip calls until this timestamp
+_FAIL_THRESHOLD  = 5       # consecutive failures before backing off
+_BACKOFF_SECS    = 120     # back off for 2 minutes, then retry once
+
+# ── Write command queue ───────────────────────────────────────────────────────
+# COM STA objects belong to the thread that created them (the SensorThread).
+# Callers on other threads (tray, profiles, turbo_cool) MUST NOT call AWCC
+# WMI methods directly — they post callables here instead.
+# The SensorThread drains this queue each poll cycle via drain_queue().
+_cmd_queue: _queue.Queue = _queue.Queue()
+
+
+def _record_awcc_failure():
+    """Track consecutive WMI failures; engage backoff when threshold is reached."""
+    global _fail_count, _backoff_until
+    _fail_count += 1
+    if _fail_count >= _FAIL_THRESHOLD:
+        _backoff_until = time.time() + _BACKOFF_SECS
+        logger.warning(
+            "AWCC WMI: %d consecutive failures — backing off for %ds to reduce WmiPrvSE load",
+            _fail_count, _BACKOFF_SECS
+        )
+        _fail_count = 0   # reset so next backoff period is a fresh count
+
+
+def _record_awcc_success():
+    global _fail_count
+    _fail_count = 0
+
+
+def _awcc_backed_off() -> bool:
+    """Return True if we are currently in a backoff window."""
+    return time.time() < _backoff_until
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────────────────────────
 
 def is_available() -> bool:
-    """Return True if AWCC WMI interface is accessible."""
-    global _available
-    if _available is None:
-        _available = _try_connect()
-    return _available
+    """Return True if AWCC WMI interface is accessible and not in backoff.
+
+    Routes through _instance() so the connection is established (or rebuilt)
+    on the calling thread.  COM STA objects belong to the thread that created
+    them — bypassing this check causes CO_E_NOTINITIALIZED on cross-thread reuse.
+    """
+    if _awcc_backed_off():
+        return False
+    return _instance() is not None
 
 
 def get_profile_name(profile_id: int) -> str:
@@ -93,9 +142,14 @@ def get_active_profile() -> Optional[int]:
         return None
     try:
         val = inst.Thermal_Information(0x0B)[0]
-        return None if val in _WMI_FAIL else val
+        if val in _WMI_FAIL:
+            _record_awcc_failure()
+            return None
+        _record_awcc_success()
+        return val
     except Exception as e:
         logger.debug("AWCC get_active_profile error: %s", e)
+        _record_awcc_failure()
         return None
 
 
@@ -153,9 +207,14 @@ def get_fan_rpm(fan_id: int) -> Optional[int]:
         return None
     try:
         val = inst.Thermal_Information((fan_id << 8) | 0x05)[0]
-        return None if val in _WMI_FAIL else val
+        if val in _WMI_FAIL:
+            _record_awcc_failure()
+            return None
+        _record_awcc_success()
+        return val
     except Exception as e:
         logger.debug("AWCC get_fan_rpm error (fan_id=0x%X): %s", fan_id, e)
+        _record_awcc_failure()
         return None
 
 
@@ -353,17 +412,24 @@ def get_system_info() -> dict:
 def _try_connect() -> bool:
     """Attempt to connect to the AWCC WMI interface. Returns True on success."""
     try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    try:
         import wmi
         wmi_obj = wmi.WMI(namespace=r"root\WMI")
         instances = wmi_obj.AWCCWmiMethodFunction()
         if not instances:
             logger.warning("AWCC WMI: AWCCWmiMethodFunction has no instances")
             return False
-        global _awcc
+        global _awcc, _owning_thread_id
         _awcc = instances[0]
+        _owning_thread_id = threading.current_thread().ident
         # Quick health check
         _awcc.Thermal_Information(0x0B)
-        logger.info("AWCC WMI interface connected successfully")
+        logger.info("AWCC WMI interface connected successfully (thread %d)",
+                    _owning_thread_id)
         return True
     except AttributeError:
         logger.info("AWCC WMI: AWCCWmiMethodFunction not found "
@@ -374,11 +440,49 @@ def _try_connect() -> bool:
         return False
 
 
+def enqueue(fn) -> None:
+    """
+    Post a callable to be executed on the SensorThread (AWCC owner).
+    Use this from any thread other than SensorThread when you need to make
+    a write call (set_profile, set_gmode, fan boost, etc.).
+    The callable will run during the next sensor poll cycle.
+    """
+    _cmd_queue.put(fn)
+
+
+def drain_queue() -> None:
+    """
+    Execute all pending AWCC write commands.
+    Must be called exclusively from the SensorThread each poll cycle.
+    """
+    while not _cmd_queue.empty():
+        try:
+            fn = _cmd_queue.get_nowait()
+            fn()
+        except Exception as e:
+            logger.debug("AWCC queued command error: %s", e)
+
+
 def _instance():
-    """Return the AWCC WMI instance, connecting lazily if needed."""
-    global _awcc, _available
+    """
+    Return the AWCC WMI instance.
+    Must only be called from the SensorThread (the COM STA owner).
+    Calls from other threads return None immediately — they must use enqueue()
+    for writes and sensors.get_readings() for reads.
+    """
+    global _awcc, _available, _owning_thread_id, _fans, _fans_ready
     if _available is False:
         return None
+
+    current_tid = threading.current_thread().ident
+
+    # Wrong-thread call: return None silently.
+    # Do NOT reconnect — that causes COM ping-pong and WmiPrvSE.exe CPU spikes.
+    if _awcc is not None and _owning_thread_id != current_tid:
+        logger.debug("AWCC: _instance() called from non-owner thread %d (owner=%d) — returning None",
+                     current_tid, _owning_thread_id)
+        return None
+
     if _awcc is None:
         _available = _try_connect()
     return _awcc if _available else None

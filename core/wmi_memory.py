@@ -42,6 +42,11 @@ def get_composition() -> dict:
 
     result = {}
     try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    try:
         import wmi
         c = wmi.WMI()
         for mem in c.Win32_PerfFormattedData_PerfOS_Memory():

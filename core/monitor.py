@@ -59,6 +59,16 @@ def request_config_reload():
 def _loop():
     global _last_profile
 
+    # COM must be initialized on every thread that uses WMI (wmi library uses win32com).
+    # Without this, every AWCC WMI call fails with CO_E_NOTINITIALIZED (-2147221008).
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+        _com_initialized = True
+    except Exception as e:
+        logger.warning("pythoncom.CoInitialize failed: %s", e)
+        _com_initialized = False
+
     from core.constants import (
         PROFILE_EVAL_INTERVAL, SENSOR_POLL_INTERVAL
     )
@@ -139,6 +149,13 @@ def _loop():
 
         time.sleep(SENSOR_POLL_INTERVAL)
 
+    # Thread is exiting — release COM
+    if _com_initialized:
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Dynamic CPU ceiling
@@ -147,7 +164,7 @@ def _loop():
 _current_cpu_ceiling  = None
 _pending_cpu_ceiling  = None   # target we're waiting to confirm
 _pending_since        = None   # time we first saw this target
-_HYSTERESIS_SECS      = 10     # must hold target for this long before applying
+_HYSTERESIS_SECS      = 30     # must hold target for this long before applying
 
 
 def _adjust_cpu_ceiling_dynamically(readings: dict, c: dict):
@@ -242,7 +259,8 @@ def _maybe_clear_standby(readings: dict):
         esl = os.path.join(os.environ.get("WINDIR","C:\\Windows"),
                            "System32", "EmptyStandbyList.exe")
         if os.path.exists(esl):
-            subprocess.run([esl, "standbylist"], capture_output=True, timeout=10)
+            subprocess.run([esl, "standbylist"], capture_output=True, timeout=10,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
             logger.info("Standby cache cleared (RAM was at %.0f%%)", ram_pct)
         else:
             # EmptyStandbyList.exe is required to clear the standby list.
@@ -260,18 +278,30 @@ def _maybe_clear_standby(readings: dict):
 # Toast notification
 # ─────────────────────────────────────────────────────────────────────────────
 
+_dimm_throttle_last: float = 0.0
+_DIMM_THROTTLE_COOLDOWN = 60.0   # seconds between repeated throttle applications
+
+
 def _check_dimm_temps(readings: dict, c: dict):
     """Alert + reduce CPU ceiling when DIMM temps exceed threshold."""
+    global _dimm_throttle_last, _current_cpu_ceiling
     threshold = c["ram"].get("dimm_throttle_temp_c", 52)
     ram_temps = readings.get("ram_temps", [])
     hot_dimms = [d for d in ram_temps if d.get("temp_c", 0) >= threshold]
     if hot_dimms:
+        now = time.time()
+        if now - _dimm_throttle_last < _DIMM_THROTTLE_COOLDOWN:
+            return  # already applied recently — don't flash powercfg repeatedly
         hottest = max(d["temp_c"] for d in hot_dimms)
         logger.warning("DIMM thermal alert: %.0f°C (threshold %.0f°C) — reducing CPU ceiling",
                        hottest, threshold)
-        # Reduce CPU ceiling to relieve memory controller heat
+        # Reduce CPU ceiling to relieve memory controller heat.
+        # Update _current_cpu_ceiling so _adjust_cpu_ceiling_dynamically
+        # knows the actual state and won't immediately undo this.
         tweaks._set_max_processor_state(60, "AC", dry_run=False)
         tweaks._set_max_processor_state(60, "DC", dry_run=False)
+        _current_cpu_ceiling = 60
+        _dimm_throttle_last = now
 
 
 def _run_leak_watchdog(c: dict):
@@ -310,18 +340,9 @@ def _run_tvb_optimizer(readings: dict, c: dict):
 
 
 def _toast(message: str):
+    """Send a Windows notification via the pystray tray icon (no subprocess)."""
     try:
-        script = (
-            f"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
-            f"ContentType = WindowsRuntime] | Out-Null; "
-            f"$template = [Windows.UI.Notifications.ToastNotificationManager]"
-            f"::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText01); "
-            f"$template.SelectSingleNode('//text[@id=1]').InnerText = '{message}'; "
-            f"$toast = [Windows.UI.Notifications.ToastNotification]::new($template); "
-            f"[Windows.UI.Notifications.ToastNotificationManager]"
-            f"::CreateToastNotifier('AlienCore').Show($toast)"
-        )
-        subprocess.run(["powershell", "-Command", script],
-                       capture_output=True, timeout=5)
+        from gui import tray as _tray
+        _tray.send_notification(message, "AlienCore")
     except Exception:
         pass   # Toast is optional — never crash over it

@@ -89,7 +89,26 @@ def _machine_label() -> str:
         os_n = hw.get("os",  {}).get("name", "Windows")
         gpus = hw.get("gpu", [])
         gpu  = gpus[0].get("name", "Unknown GPU") if gpus else "Unknown GPU"
-        return f"{cpu}, {gpu}, {ram}GB RAM, {os_n}"
+
+        parts = [f"{cpu}, {gpu}, {ram}GB RAM, {os_n}"]
+
+        # DIMM slots + speed
+        slots = hw.get("ram", {}).get("slots", [])
+        if slots:
+            speed = slots[0].get("speed_mhz")
+            dimm_str = f"{len(slots)} DIMM(s)"
+            if speed:
+                dimm_str += f" @ {speed} MHz"
+            parts.append(dimm_str)
+
+        # Storage drives (skip RAM disks)
+        drives = hw.get("drives", [])
+        real   = [d for d in drives if not d.get("is_ramdisk")]
+        if real:
+            parts.append(f"{len(real)} drive(s): "
+                         + ", ".join(d.get("name", "?") for d in real[:4]))
+
+        return "; ".join(parts)
     except Exception:
         return "Alienware gaming laptop, Windows 11"
 
@@ -102,23 +121,59 @@ def get_system_context() -> str:
     c        = cfg.get()
     thresh   = c.get("thresholds", {})
 
+    # NVMe temps — per drive and max
+    nvme_list  = readings.get("nvme_temps", [])
+    nvme_max   = max((n["temp_c"] for n in nvme_list), default=None)
+    nvme_each  = {n["name"]: n["temp_c"] for n in nvme_list} if nvme_list else None
+
+    # DIMM temps — per slot and max
+    dimm_list  = readings.get("ram_temps", [])
+    dimm_max   = max((d["temp_c"] for d in dimm_list), default=None)
+    dimm_each  = {d["name"]: d["temp_c"] for d in dimm_list} if dimm_list else None
+
+    # Fan data — AWCC physical fans preferred, GPU fan as fallback
+    fan_data = None
+    if readings.get("awcc_available") and readings.get("awcc_fans"):
+        fan_data = {f"fan_{f['fan_id']}": f["rpm"]
+                    for f in readings["awcc_fans"] if f.get("rpm") is not None}
+    elif readings.get("gpu_fan_pct") is not None:
+        fan_data = {"gpu_fan_pct": readings["gpu_fan_pct"]}
+
+    # GPU throttle state
+    gpu_throttled = readings.get("gpu_throttle_perf_lost")
+
+    # CPU boost score
+    boost_score = None
+    try:
+        from core import boost_tracker
+        boost_score = boost_tracker.get_score()
+    except Exception:
+        pass
+
     snap = {
-        "ts":          datetime.now().strftime("%H:%M:%S"),
-        "profile":     profile,
-        "cpu_temp":    readings.get("cpu_temp_avg"),
-        "cpu_load":    readings.get("cpu_load_pct"),
-        "cpu_freq_ghz":readings.get("cpu_freq_ghz"),
-        "cpu_watts":   readings.get("cpu_watts"),
-        "gpu_temp":    readings.get("gpu_temp"),
-        "gpu_hotspot": readings.get("gpu_temp_hotspot"),
-        "gpu_load":    readings.get("gpu_load"),
-        "gpu_watts":   readings.get("gpu_watts"),
-        "ram_pct":     readings.get("ram_usage_pct"),
-        "nvme_max_c":  max((n["temp_c"] for n in readings.get("nvme_temps", [])), default=None),
-        "battery_pct": readings.get("battery_pct"),
-        "battery_chg": readings.get("battery_charging"),
-        "thresholds":  thresh,
-        "machine":     _machine_label(),
+        "ts":           datetime.now().strftime("%H:%M:%S"),
+        "profile":      profile,
+        "cpu_temp_c":   readings.get("cpu_temp_avg"),
+        "cpu_load_pct": readings.get("cpu_load_pct"),
+        "cpu_freq_ghz": readings.get("cpu_freq_ghz"),
+        "cpu_watts":    readings.get("cpu_watts"),
+        "gpu_temp_c":   readings.get("gpu_temp"),
+        "gpu_hotspot_c":readings.get("gpu_temp_hotspot"),
+        "gpu_mem_temp_c":readings.get("gpu_temp_memory"),
+        "gpu_load_pct": readings.get("gpu_load"),
+        "gpu_watts":    readings.get("gpu_watts"),
+        "gpu_throttled":gpu_throttled if gpu_throttled else None,
+        "ram_pct":      readings.get("ram_usage_pct"),
+        "nvme_max_c":   nvme_max,
+        "nvme_temps":   nvme_each,
+        "dimm_max_c":   dimm_max,
+        "dimm_temps":   dimm_each,
+        "fans":         fan_data,
+        "boost_score":  boost_score,
+        "battery_pct":  readings.get("battery_pct"),
+        "battery_chg":  readings.get("battery_charging"),
+        "thresholds":   thresh,
+        "machine":      _machine_label(),
     }
     return json.dumps({k: v for k, v in snap.items() if v is not None},
                       separators=(",", ":"))
@@ -213,6 +268,9 @@ def watchdog_analyze() -> str | None:
 
 def _watchdog_loop():
     while _running:
+        # Initialise outside the try so a config-read failure can never leave
+        # `interval` undefined when we reach the time.sleep() below.
+        interval = 300
         try:
             c        = cfg.get().get("ai", {})
             enabled  = c.get("watchdog_enabled", False)

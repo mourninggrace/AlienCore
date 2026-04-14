@@ -139,29 +139,33 @@ def _set_gpu_fan(pct: int):
 
 
 def _activate_awcc_fans():
-    """Activate AWCC Turbo Cool mode — sets all chassis fans to max via WMI."""
+    """Queue AWCC fan max boost on the SensorThread (COM STA owner)."""
     try:
-        from core import awcc
-        if awcc.is_available():
+        from core import awcc, sensors
+        if not sensors.get_readings().get("awcc_available", False):
+            logger.debug("AWCC WMI unavailable — chassis fans not boosted")
+            return
+        def _do():
             if awcc.turbo_cool_activate():
                 logger.info("AWCC fans: max boost active via WMI")
             else:
                 logger.warning("AWCC turbo cool: WMI boost returned failure")
-        else:
-            logger.debug("AWCC WMI unavailable — chassis fans not boosted")
+        awcc.enqueue(_do)
     except Exception as e:
         logger.debug("AWCC fan boost error: %s", e)
 
 
 def _restore_fans():
-    """Restore all fans to automatic control via AWCC WMI."""
+    """Queue AWCC fan restore on the SensorThread (COM STA owner)."""
     _set_gpu_fan(0)
     try:
-        from core import awcc
-        if awcc.is_available():
+        from core import awcc, sensors
+        if not sensors.get_readings().get("awcc_available", False):
+            logger.debug("AWCC WMI unavailable — fan restore skipped")
+            return
+        def _do():
             awcc.turbo_cool_deactivate()
             logger.info("AWCC fans: restored via WMI")
-        else:
-            logger.debug("AWCC WMI unavailable — fan restore skipped")
+        awcc.enqueue(_do)
     except Exception as e:
         logger.debug("AWCC fan restore error: %s", e)

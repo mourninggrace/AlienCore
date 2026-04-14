@@ -592,29 +592,14 @@ def _make_suggestion(sid: str, title: str, message: str,
 
 
 def _send_toast(suggestion: dict):
-    """Send a Windows toast notification for a new suggestion."""
+    """Send a notification for a new suggestion via the pystray tray icon (no subprocess)."""
     try:
-        import subprocess
+        from gui import tray as _tray
         title   = f"AlienCore Insight: {suggestion['title']}"
         message = suggestion["message"][:100] + "..." if len(suggestion["message"]) > 100 else suggestion["message"]
-        # Escape single quotes so they don't break the PowerShell string literals
-        ps_title   = title.replace("'", "''")
-        ps_message = message.replace("'", "''")
-        script = (
-            f"[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, "
-            f"ContentType = WindowsRuntime] | Out-Null; "
-            f"$t = [Windows.UI.Notifications.ToastNotificationManager]"
-            f"::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
-            f"$t.SelectSingleNode('//text[@id=1]').InnerText = '{ps_title}'; "
-            f"$t.SelectSingleNode('//text[@id=2]').InnerText = '{ps_message}'; "
-            f"$n = [Windows.UI.Notifications.ToastNotification]::new($t); "
-            f"[Windows.UI.Notifications.ToastNotificationManager]"
-            f"::CreateToastNotifier('AlienCore').Show($n)"
-        )
-        subprocess.Popen(["powershell", "-Command", script],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _tray.send_notification(message, title)
     except Exception as e:
-        logger.debug("Toast notification failed: %s", e)
+        logger.debug("Tray notification failed: %s", e)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

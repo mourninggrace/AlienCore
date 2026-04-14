@@ -24,6 +24,7 @@ _SESSION_PATH = os.path.join(_SESSION_DIR, "session.json")
 
 # Grace period: if server is unreachable, allow this many seconds of offline use
 _OFFLINE_GRACE_SECS = 72 * 3600   # 72 hours
+_TRIAL_DAYS         = 30           # free trial length for new accounts
 
 _lock    = threading.Lock()
 _session: dict = {}   # in-memory cache
@@ -101,12 +102,42 @@ def is_logged_in() -> bool:
 
 
 def is_licensed() -> bool:
-    """True if the user has paid for the base license ($20)."""
+    """True if the user has paid for the base license ($19.99)."""
     return is_logged_in() and bool(get_session().get("has_base"))
 
 
+def is_on_trial() -> bool:
+    """
+    True if the user is within their 30-day free trial window.
+    Trial grants access to base features only — Pro features remain locked.
+    Trial begins on first login and is stored server-side; the timestamp is
+    cached locally in the session file so it survives offline restarts.
+    """
+    if not is_logged_in():
+        return False
+    if is_licensed():
+        return False   # paid users are never "on trial"
+    s = get_session()
+    started = s.get("trial_started_at")
+    if started is None:
+        return False
+    return (time.time() - started) < (_TRIAL_DAYS * 86400)
+
+
+def trial_days_left() -> int:
+    """
+    Days remaining in the free trial.  Returns 0 if trial expired or not active.
+    """
+    s = get_session()
+    started = s.get("trial_started_at")
+    if started is None:
+        return 0
+    remaining = _TRIAL_DAYS - int((time.time() - started) / 86400)
+    return max(0, remaining)
+
+
 def is_pro() -> bool:
-    """True if the user has the Pro add-on (+$5)."""
+    """True if the user has the Pro add-on (+$4.99)."""
     return is_licensed() and bool(get_session().get("has_pro"))
 
 
@@ -155,9 +186,11 @@ def verify_pin(email: str, pin: str) -> tuple[bool, str]:
         })
         return True, "Signed in successfully."
     try:
+        from core import fingerprint as fp
         resp = _post("/auth/verify-pin", {
-            "email": email.strip().lower(),
-            "pin":   _p,
+            "email":       email.strip().lower(),
+            "pin":         _p,
+            "fingerprint": fp.get(),
         })
         if resp.get("ok"):
             _save_session(resp)
@@ -249,12 +282,18 @@ def _post(endpoint: str, payload: dict) -> dict:
 
 def _save_session(data: dict):
     global _session
+    # Preserve existing trial_started_at if server didn't send one
+    # (e.g. offline dev / backdoor login)
+    with _lock:
+        existing_trial = _session.get("trial_started_at")
+    trial = data.get("trial_started_at") or existing_trial
     session = {
         "email":            data.get("email", ""),
         "token":            data.get("token", ""),
         "has_base":         bool(data.get("has_base")),
         "has_pro":          bool(data.get("has_pro")),
         "support_credits":  int(data.get("support_credits", 0)),
+        "trial_started_at": trial,
         "expires_at":       float(data.get("expires_at", 0)),
         "last_verified_at": time.time(),
     }
@@ -266,10 +305,12 @@ def _save_session(data: dict):
 def _merge_session(data: dict):
     """Update license fields without touching the token."""
     with _lock:
+        existing_trial = _session.get("trial_started_at")
         _session.update({
             "has_base":         bool(data.get("has_base")),
             "has_pro":          bool(data.get("has_pro")),
             "support_credits":  int(data.get("support_credits", 0)),
+            "trial_started_at": data.get("trial_started_at") or existing_trial,
             "expires_at":       float(data.get("expires_at", _session.get("expires_at", 0))),
             "last_verified_at": time.time(),
         })

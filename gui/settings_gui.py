@@ -170,7 +170,7 @@ def open_settings(on_save_callback=None, is_first_run=False):
 
     # Always load config fresh from disk
     cfg.load()
-    _apply_theme(cfg.get_value("display", "settings_theme", default="Void"))
+    _apply_theme(cfg.get_value("display", "settings_theme", default="Venom"))
 
     root = tk.Tk()
     SettingsWindow(root, on_save_callback=on_save_callback,
@@ -235,6 +235,19 @@ class SettingsWindow:
         self.root.focus_force()
         self.root.attributes("-topmost", True)
         self.root.after(200, lambda: self.root.attributes("-topmost", False))
+        # Force the window to the foreground via Win32 — needed when launched
+        # from a subprocess because Windows focus-stealing prevention blocks
+        # the normal lift()/focus_force() path.
+        def _force_foreground():
+            try:
+                import ctypes as _ct
+                hwnd = _ct.windll.user32.GetParent(self.root.winfo_id())
+                if not hwnd:
+                    hwnd = int(self.root.winfo_id())
+                _ct.windll.user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+        self.root.after(50, _force_foreground)
         self._configure_styles()
 
     def _configure_styles(self):
@@ -989,35 +1002,44 @@ class SettingsWindow:
                    "standby": "#4488cc", "free": "#33aa66"}
 
         def _refresh():
-            try:
-                from core import wmi_memory
-                comp = wmi_memory.get_composition()
-                total = comp["total_gb"] or 1
-                segments = [
-                    ("in_use",   comp["in_use_gb"],   comp["in_use_pct"]),
-                    ("modified", comp["modified_gb"],  0),
-                    ("standby",  comp["standby_gb"],   comp["standby_pct"]),
-                    ("free",     comp["free_gb"],       comp["free_pct"]),
-                ]
-                bar_c.delete("all")
-                x = 0
-                for key, gb, pct in segments:
-                    w = int(500 * gb / total)
-                    if w > 0:
-                        bar_c.create_rectangle(x, 0, x + w, 18,
-                                               fill=_COLORS[key], outline="")
-                    x += w
-                mod_str = f"{comp['modified_gb']:.1f} GB modified" if comp["modified_gb"] > 0.1 else ""
-                detail_lbl.config(
-                    text=f"In Use: {comp['in_use_gb']:.1f} GB ({comp['in_use_pct']:.0f}%)  "
-                         f"Standby: {comp['standby_gb']:.1f} GB  "
-                         f"Free: {comp['free_gb']:.1f} GB  "
-                         + (f"  {mod_str}" if mod_str else ""),
-                    fg=FG_DIM)
-            except Exception:
-                pass
-            if panel.winfo_exists():
-                panel.after(3000, _refresh)
+            import threading as _t
+            def _worker():
+                comp = None
+                try:
+                    from core import wmi_memory
+                    comp = wmi_memory.get_composition()
+                except Exception:
+                    pass
+                def _apply():
+                    if not panel.winfo_exists():
+                        return
+                    if comp:
+                        total = comp["total_gb"] or 1
+                        segments = [
+                            ("in_use",   comp["in_use_gb"],  comp["in_use_pct"]),
+                            ("modified", comp["modified_gb"], 0),
+                            ("standby",  comp["standby_gb"],  comp["standby_pct"]),
+                            ("free",     comp["free_gb"],      comp["free_pct"]),
+                        ]
+                        bar_c.delete("all")
+                        x = 0
+                        for key, gb, pct in segments:
+                            w = int(500 * gb / total)
+                            if w > 0:
+                                bar_c.create_rectangle(x, 0, x + w, 18,
+                                                       fill=_COLORS[key], outline="")
+                            x += w
+                        mod_str = (f"{comp['modified_gb']:.1f} GB modified"
+                                   if comp["modified_gb"] > 0.1 else "")
+                        detail_lbl.config(
+                            text=f"In Use: {comp['in_use_gb']:.1f} GB ({comp['in_use_pct']:.0f}%)  "
+                                 f"Standby: {comp['standby_gb']:.1f} GB  "
+                                 f"Free: {comp['free_gb']:.1f} GB  "
+                                 + (f"  {mod_str}" if mod_str else ""),
+                            fg=FG_DIM)
+                    panel.after(3000, _refresh)
+                panel.after(0, _apply)
+            _t.Thread(target=_worker, daemon=True).start()
 
         panel.after(400, _refresh)
 
@@ -1059,21 +1081,24 @@ class SettingsWindow:
                 canvas.create_rectangle(0, 0, w, 12, fill=color, outline="")
 
         def _refresh():
-            try:
-                import psutil, subprocess as _sp
-                vm        = psutil.virtual_memory()
-                ram_pct   = vm.percent
-                ram_used  = round(vm.used  / 1024**3, 1)
-                ram_total = round(vm.total / 1024**3, 1)
-
-                vram_used_mb  = 0.0
-                vram_total_mb = 1.0
+            import threading as _t, subprocess as _sp, psutil as _ps
+            def _worker():
+                ram_pct = ram_used = ram_total = None
+                vram_used_mb = vram_total_mb = None
+                try:
+                    vm        = _ps.virtual_memory()
+                    ram_pct   = vm.percent
+                    ram_used  = round(vm.used  / 1024**3, 1)
+                    ram_total = round(vm.total / 1024**3, 1)
+                except Exception:
+                    pass
                 try:
                     p = _sp.run(
                         ["nvidia-smi",
                          "--query-gpu=memory.used,memory.total",
                          "--format=csv,noheader,nounits"],
                         capture_output=True, text=True, timeout=5,
+                        creationflags=_sp.CREATE_NO_WINDOW,
                     )
                     if p.returncode == 0:
                         parts = [x.strip() for x in p.stdout.strip().split(",")]
@@ -1082,18 +1107,23 @@ class SettingsWindow:
                             vram_total_mb = float(parts[1]) or 1.0
                 except Exception:
                     pass
-
-                vram_pct = round(vram_used_mb / vram_total_mb * 100, 1)
-                _bar(ram_bar,  ram_pct)
-                _bar(vram_bar, vram_pct)
-                ram_lbl.config(
-                    text=f"{ram_pct:.0f}%  ({ram_used:.1f} / {ram_total:.0f} GB)")
-                vram_lbl.config(
-                    text=f"{vram_pct:.0f}%  ({vram_used_mb/1024:.1f} / {vram_total_mb/1024:.1f} GB)")
-            except Exception:
-                pass
-            if panel.winfo_exists():
-                panel.after(2000, _refresh)
+                def _apply():
+                    if not panel.winfo_exists():
+                        return
+                    if ram_pct is not None:
+                        _bar(ram_bar, ram_pct)
+                        ram_lbl.config(
+                            text=f"{ram_pct:.0f}%  ({ram_used:.1f} / {ram_total:.0f} GB)")
+                    if vram_used_mb is not None and vram_total_mb:
+                        vram_pct = round(vram_used_mb / vram_total_mb * 100, 1)
+                        _bar(vram_bar, vram_pct)
+                        vram_lbl.config(
+                            text=f"{vram_pct:.0f}%  "
+                                 f"({vram_used_mb/1024:.1f} / {vram_total_mb/1024:.1f} GB)")
+                    panel.after(2000, _refresh)
+                if panel.winfo_exists():
+                    panel.after(0, _apply)
+            _t.Thread(target=_worker, daemon=True).start()
 
         panel.after(300, _refresh)
 
@@ -2141,7 +2171,8 @@ class SettingsWindow:
         )
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            capture_output=True, text=True, timeout=60
+            capture_output=True, text=True, timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "PowerShell query failed")
@@ -2339,8 +2370,12 @@ class SettingsWindow:
 
         header_row = tk.Frame(lock, bg=BG_HW)
         header_row.pack(fill="x")
-        tk.Label(header_row, text="\u1F512" if False else "[Pro]" if is_pro_feature else "[Base]",
-                 font=("Segoe UI", 8), bg=BG_HW, fg=WARN).pack(side="left")
+        badge_text  = " PRO " if is_pro_feature else " BASE "
+        badge_color = "#cc44ff" if is_pro_feature else ACCENT2
+        badge = tk.Label(header_row, text=badge_text,
+                         font=("Segoe UI", 7, "bold"),
+                         bg=badge_color, fg="#000000", padx=3, pady=1)
+        badge.pack(side="left")
         tk.Label(header_row, text=f"  {reason}",
                  font=("Segoe UI", 9, "italic"), bg=BG_HW, fg=FG_DIM,
                  wraplength=700, justify="left").pack(side="left")
@@ -2366,15 +2401,15 @@ class SettingsWindow:
             self._btn(btn_row, "Sign In", self._open_login, ACCENT,
                       bold=True).pack(side="left", padx=(0, 8))
         elif not auth.is_licensed():
-            self._btn(btn_row, "Buy AlienCore  $20",
+            self._btn(btn_row, "Buy AlienCore  $19.99",
                       lambda: _open_purchase("AC_BASE",
-                                             "AlienCore — Lifetime License", "20.00"),
+                                             "AlienCore — Lifetime License", "19.99"),
                       ACCENT2, bold=True).pack(side="left", padx=(0, 8))
         elif is_pro_feature and not auth.is_pro():
-            self._btn(btn_row, "Upgrade to Pro  +$5",
+            self._btn(btn_row, "Upgrade to Pro  +$4.99",
                       lambda: _open_purchase("AC_PRO",
-                                             "AlienCore Pro Add-on", "5.00"),
-                      ACCENT, bold=True).pack(side="left", padx=(0, 8))
+                                             "AlienCore Pro Add-on", "4.99"),
+                      "#cc44ff", bold=True).pack(side="left", padx=(0, 8))
 
         refresh_lbl = tk.Label(btn_row, text="", font=("Segoe UI", 8, "italic"),
                                bg=BG_HW, fg=FG_DIM)
@@ -2437,10 +2472,19 @@ class SettingsWindow:
                 if s.get("has_pro"):  parts.append("Pro Add-on")
                 creds = s.get("support_credits", 0)
                 if creds:             parts.append(f"{creds}x Priority Support")
-                tier_lbl.config(
-                    text="Licensed: " + " · ".join(parts) if parts
-                    else "No active license  —  purchase below to unlock features.",
-                    fg=ACCENT2 if parts else WARN)
+                if parts:
+                    tier_lbl.config(text="Licensed: " + " · ".join(parts),
+                                    fg=ACCENT2)
+                elif auth.is_on_trial():
+                    days = auth.trial_days_left()
+                    tier_lbl.config(
+                        text=f"Free trial active — {days} day(s) remaining  "
+                             f"(base features only, Pro features grayed out)",
+                        fg=WARN)
+                else:
+                    tier_lbl.config(
+                        text="No active license  —  trial expired or purchase below.",
+                        fg=WARN)
             else:
                 email_lbl.config(text="Not signed in", fg=FG_DIM)
                 tier_lbl.config(text="", fg=FG_DIM)
@@ -2503,17 +2547,17 @@ class SettingsWindow:
         for item_number, label, price, desc, color in [
             ("AC_BASE",
              "AlienCore  —  Lifetime License",
-             "$20.00",
+             "$19.99",
              "Full access to all core features. One payment, yours forever.",
              ACCENT2),
             ("AC_PRO",
              "Pro Add-on  —  AI Integration",
-             "+$5.00",
+             "+$4.99",
              "Unlocks AI Chat, AI Watchdog, and AI Config Advisor.",
-             ACCENT),
+             "#cc44ff"),
             ("AC_SUPPORT",
              "Priority Support  —  Single Incident",
-             "$5.00",
+             "$4.99",
              "24-hour response to one bug report or technical issue. "
              "Full refund if I can't resolve it.",
              WARN),
@@ -2602,10 +2646,12 @@ class SettingsWindow:
                  bg=BG_HW, fg=FG_DIM).pack(anchor="w", pady=(0, 10))
         tk.Label(hero,
                  text=(
-                     "A comprehensive Windows system optimizer built for Alienware hardware.\n"
-                     "Replaces HWiNFO, MSI Afterburner, Process Lasso, and LatencyMon in one tool —\n"
+                     "A comprehensive adaptive system optimizer built for Windows.\n"
+                     "Replaces many other programs already available for download in one tool —\n"
                      "automatic profile switching, real-time sensor monitoring, GPU transparency,\n"
-                     "memory management, and AI-assisted tuning. Built for the m18 R2 (i9-14900HX / RTX 4090)."
+                     "memory management, AI-assisted tuning & more.\n"
+                     "This program was built on and for Alienware M18 R2 laptops (2024) —\n"
+                     "any configuration, but still works well on any Windows system."
                  ),
                  font=("Segoe UI", 9),
                  bg=BG_HW, fg=FG, justify="left", wraplength=860).pack(anchor="w")
@@ -2951,12 +2997,20 @@ class SettingsWindow:
             item("Form factor", "Laptop" if plat.get("is_laptop") else "Desktop")
             item("Alienware",   "Yes" if plat.get("is_alienware") else "No",
                  color=ACCENT2 if plat.get("is_alienware") else FG_DIM)
-            awcc_status = ("WMI connected" if plat.get("has_awcc_wmi")
+            # has_awcc_wmi is always False in the hardware profile (intentionally —
+            # we don't call awcc.is_available() at scan time to avoid claiming the
+            # COM STA connection on the wrong thread).  Read live status from sensors.
+            try:
+                from core import sensors as _sens
+                _awcc_live = bool(_sens.get_readings().get("awcc_available", False))
+            except Exception:
+                _awcc_live = False
+            awcc_status = ("WMI connected"        if _awcc_live
                            else "Installed (WMI offline)" if plat.get("has_awcc")
                            else "Not found")
             item("AWCC", awcc_status,
-                 color=ACCENT2 if plat.get("has_awcc_wmi") else
-                       WARN    if plat.get("has_awcc")     else FG_DIM)
+                 color=ACCENT2 if _awcc_live else
+                       WARN    if plat.get("has_awcc") else FG_DIM)
             item("nvidia-smi",  "Available" if plat.get("has_nvidia_smi") else "Not found",
                  color=ACCENT2 if plat.get("has_nvidia_smi") else WARN)
             os_info = hw.get("os", {})

@@ -319,8 +319,10 @@ class _Sparkline:
 
         _draw()
 
-        # Center on screen at default size
-        win.update_idletasks()
+        # Center on screen at default size — use winfo_screenwidth/height directly
+        # (they query the display and don't need update_idletasks; calling
+        # update_idletasks here would process pending geometry events for the
+        # entire Tk instance including the bar, causing it to flicker)
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
         win.geometry(
@@ -741,16 +743,36 @@ class SensorBar:
         return sensors.fmt_temp(t1), self._temp_color(t1, warn, crit)
 
     def _get_fan_or_dimm(self, readings, thresh):
-        """Returns (label, text, color) — 3-tuple for dynamic label update."""
+        """
+        Returns (label, text, color) — 3-tuple for dynamic label update.
+
+        Fan data priority:
+          1. AWCC WMI physical fans (most accurate RPM for Alienware hardware)
+          2. LHM Embedded Controller fans (fallback when AWCC is unavailable or
+             when all AWCC fans report 0 RPM — firmware fan-stop mode)
+          3. DIMM temperature (when no fan data is available from either source)
+        """
+        # ── AWCC fans (only when at least one is spinning) ───────────────────
         if readings.get("awcc_available") and readings.get("awcc_fans"):
             rpms = [f["rpm"] for f in readings["awcc_fans"]
                     if f.get("rpm") is not None]
-            if rpms:
+            if rpms and max(rpms) > 0:
                 mx    = max(rpms)
                 text  = f"{mx/1000:.1f}K" if mx >= 1000 else str(mx)
                 color = (COLOR_HOT  if mx > 4500 else
                          COLOR_WARM if mx > 3000 else COLOR_COOL)
                 return "FAN", text, color
+
+        # ── LHM EC fans (fallback) ───────────────────────────────────────────
+        lhm_fans = readings.get("lhm_fan_rpms", [])
+        if lhm_fans:
+            mx    = max(f["rpm"] for f in lhm_fans)
+            text  = f"{mx/1000:.1f}K" if mx >= 1000 else str(mx)
+            color = (COLOR_HOT  if mx > 4500 else
+                     COLOR_WARM if mx > 3000 else COLOR_COOL)
+            return "FAN", text, color
+
+        # ── DIMM temperature (last resort) ───────────────────────────────────
         dimms = readings.get("ram_temps", [])
         if not dimms:
             return "DIMM", "---", COLOR_COOL
@@ -883,10 +905,18 @@ class SensorBar:
             if used and total and total > 0:
                 return (used / total) * 100
         if config_key == "fan_rpm":
+            # AWCC first
             fans = readings.get("awcc_fans", [])
             if fans:
                 rpms = [f["rpm"] for f in fans if f.get("rpm")]
-                return max(rpms) if rpms else None
+                mx = max(rpms) if rpms else 0
+                if mx > 0:
+                    return float(mx)
+            # LHM EC fans fallback
+            lhm_fans = readings.get("lhm_fan_rpms", [])
+            if lhm_fans:
+                return float(max(f["rpm"] for f in lhm_fans))
+            # DIMM temp as last resort
             dimms = readings.get("ram_temps", [])
             return max(d["temp_c"] for d in dimms) if dimms else None
         return None
@@ -1028,8 +1058,10 @@ class SensorBar:
                 except Exception:
                     pass
 
-            # Fullscreen auto-hide
-            self._check_fullscreen_hide()
+            # Fullscreen auto-hide — skip while any sparkline is open so the
+            # sparkline window doesn't confuse the foreground-window check
+            if not _Sparkline._open:
+                self._check_fullscreen_hide()
 
         except Exception as e:
             logger.debug("Bar update error: %s", e)
