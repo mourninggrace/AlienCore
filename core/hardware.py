@@ -252,7 +252,7 @@ def _get_drive_info() -> list:
                 pnpid  = (disk.PNPDeviceID or "").strip().lower()
                 is_ramdisk = _detect_ramdisk(name, pnpid)
                 is_nvme    = not is_ramdisk and (
-                    "nvme" in name.lower() or "nvme" in iface.lower()
+                    "nvme" in name.lower() or "nvme" in iface.lower() or "nvme" in pnpid
                 )
                 is_ssd     = not is_ramdisk and any(
                     x in name.lower() for x in ["ssd", "nvme", "solid"]

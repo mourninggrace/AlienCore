@@ -120,10 +120,10 @@ def _poll_loop():
             data.update(_parse_cpu_watts(flat))
             data.update(_read_gpu_nvidia_smi())
             data.update(_read_ram_usage())
+            data.update(_read_cpu_freq())
             # Feed boost tracker with latest CPU freq + temp
             _update_boost_tracker(data)
             data.update(_read_cpu_load())
-            data.update(_read_cpu_freq())
             data.update(_read_battery())
             data.update(_read_network_io())
             data.update(_read_disk_io())
