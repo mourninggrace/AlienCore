@@ -19,6 +19,7 @@ REQUIRED_PACKAGES = [
     ("wmi",                    "wmi",                     "Hardware WMI queries"),
     ("pystray",                "pystray",                 "System tray icon"),
     ("Pillow",                 "PIL",                     "Tray icon image rendering"),
+    ("nvidia-ml-py",           "pynvml",                  "NVIDIA GPU sensors (no subprocess)"),
     ("pyinstaller",            "PyInstaller",             "Optional: build standalone EXE"),
 ]
 

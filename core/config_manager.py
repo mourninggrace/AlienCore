@@ -14,6 +14,8 @@ from core.constants import CONFIG_PATH, DEFAULT_CONFIG
 logger = logging.getLogger("aliencore.config")
 _lock = Lock()
 _config = {}
+_cache: dict = {}          # pre-built snapshot returned by get(); rebuilt on writes
+_cache_valid: bool = False # False = cache must be rebuilt before next get()
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
@@ -29,12 +31,13 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 def load() -> dict:
     """Load config from disk. If missing, write defaults and return them."""
-    global _config
+    global _config, _cache_valid
     with _lock:
         if not os.path.exists(CONFIG_PATH):
             logger.info("No config found — writing defaults to %s", CONFIG_PATH)
             _config = copy.deepcopy(DEFAULT_CONFIG)
             _write_locked(_config)
+            _cache_valid = False
             return copy.deepcopy(_config)
         # Retry up to 3 times to handle race conditions
         for attempt in range(3):
@@ -43,6 +46,7 @@ def load() -> dict:
                     on_disk = json.load(f)
                 # Merge so new keys from updates are always present
                 _config = _deep_merge(DEFAULT_CONFIG, on_disk)
+                _cache_valid = False
                 logger.info("Config loaded from %s", CONFIG_PATH)
                 return copy.deepcopy(_config)
             except Exception as e:
@@ -52,13 +56,19 @@ def load() -> dict:
                 else:
                     logger.error("Failed to load config after 3 attempts: %s — using defaults", e)
                     _config = copy.deepcopy(DEFAULT_CONFIG)
+                    _cache_valid = False
                     return copy.deepcopy(_config)
 
 
 def get() -> dict:
-    """Return a snapshot of the current in-memory config (thread-safe copy)."""
+    """Return a snapshot of the current config.  Do NOT mutate the result.
+    Fast path: returns a cached deepcopy rebuilt only when config changes."""
+    global _cache, _cache_valid
     with _lock:
-        return copy.deepcopy(_config)
+        if not _cache_valid:
+            _cache = copy.deepcopy(_config)
+            _cache_valid = True
+        return _cache
 
 
 def get_value(*keys, default=None):
@@ -80,19 +90,22 @@ def set_value(*keys, value):
     Set a nested config value in memory and persist to disk immediately.
     Example: set_value("display", "overlay_enabled", value=True)
     """
+    global _cache_valid
     with _lock:
         node = _config
         for k in keys[:-1]:
             node = node.setdefault(k, {})
         node[keys[-1]] = value
+        _cache_valid = False
         _write_locked(_config)
 
 
 def save(new_config: dict):
     """Replace entire config with new_config dict and persist."""
-    global _config
+    global _config, _cache_valid
     with _lock:
         _config = _deep_merge(DEFAULT_CONFIG, new_config)
+        _cache_valid = False
         _write_locked(_config)
     logger.info("Config saved.")
 

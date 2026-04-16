@@ -1,16 +1,22 @@
 """
 AlienCore - lhm_manager.py
-Runs the lhm_bridge .NET executable to read hardware sensors.
+Manages the lhm_bridge .NET daemon process.
 
-The bridge (tools/lhm_bridge/dist/lhm_bridge.exe) uses LibreHardwareMonitorLib
-via NuGet to read all hardware sensors and writes a JSON array to stdout.
-AlienCore calls it as a short-lived subprocess — no LHM application needed.
+The bridge (tools/lhm_bridge/dist/lhm_bridge.exe) runs as a persistent daemon:
+  - computer.Open() fires once at launch (expensive — happens only at startup)
+  - AlienCore writes a newline to its stdin to request a poll
+  - The bridge responds with one compact JSON line on stdout
+  - On EOF (stdin closed), the bridge calls computer.Close() and exits
+
+This eliminates the .NET CLR startup cost that previously caused CPU spikes
+every poll cycle.  The bridge process lives for the duration of AlienCore.
 """
 
 import json
 import logging
 import os
 import subprocess
+import threading
 import time
 
 logger = logging.getLogger("aliencore.lhm")
@@ -18,8 +24,10 @@ logger = logging.getLogger("aliencore.lhm")
 _BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BRIDGE_EXE = os.path.join(_BASE_DIR, "tools", "lhm_bridge", "dist", "lhm_bridge.exe")
 
-# Failure tracking — used to control log verbosity and retry behaviour
-_fail_count     = 0   # consecutive failures since last success
+# ── daemon state ──────────────────────────────────────────────────────────────
+_lock          = threading.Lock()
+_proc          = None   # subprocess.Popen or None
+_fail_count    = 0      # consecutive poll failures since last success
 _ever_succeeded = False
 
 
@@ -29,88 +37,122 @@ _ever_succeeded = False
 
 def get_sensors() -> list:
     """
-    Run the bridge exe and return a flat list of sensor readings.
-    Each entry: {name, hardware, hardwareType, type, value}
-    where `type` is the LHM SensorType string (Temperature, Power, Load, etc.)
+    Request one sensor snapshot from the persistent bridge daemon.
+    Writes a newline to the bridge's stdin; reads one JSON line from stdout.
+    Starts (or restarts) the bridge process automatically if needed.
     Returns empty list on any error.
-
-    Retry behaviour: on the first failure (or while the bridge has never
-    succeeded yet — typical immediately after Windows boot), one automatic
-    retry is made after a short pause so transient startup errors self-heal
-    without requiring an AlienCore restart.
     """
     global _fail_count, _ever_succeeded
 
-    exe = _bridge_path()
+    exe = _bridge_exe_path()
     if not exe:
         _log_failure("lhm_bridge.exe not found at expected path")
         return []
 
-    result = _run_bridge(exe)
-    if result is not None:
-        _fail_count     = 0
-        _ever_succeeded = True
-        return result
+    with _lock:
+        proc = _ensure_running(exe)
+        if proc is None:
+            return []
 
-    # First attempt failed — retry once if bridge has never succeeded (boot
-    # transient) or this is the very first failure in a previously-good run.
-    if not _ever_succeeded or _fail_count == 0:
-        time.sleep(2)
-        result = _run_bridge(exe)
-        if result is not None:
+        try:
+            proc.stdin.write(b"\n")
+            proc.stdin.flush()
+            raw = proc.stdout.readline()
+            if not raw:
+                # EOF from bridge — it crashed; will restart next call
+                _kill_proc()
+                _log_failure("bridge sent EOF (process may have crashed)")
+                return []
+            sensors = json.loads(raw.decode("utf-8"))
             _fail_count     = 0
             _ever_succeeded = True
-            return result
+            return sensors
 
-    _fail_count += 1
-    return []
+        except json.JSONDecodeError as e:
+            _log_failure(f"bridge output was not valid JSON: {e}")
+            _kill_proc()
+            return []
+        except OSError as e:
+            _log_failure(f"pipe I/O error: {e}")
+            _kill_proc()
+            return []
+        except Exception as e:
+            _log_failure(f"poll failed: {e}")
+            _kill_proc()
+            return []
 
 
 def stop():
-    """No-op — bridge is a short-lived subprocess, nothing to stop."""
-    pass
+    """Gracefully close the bridge daemon by closing its stdin."""
+    global _proc
+    with _lock:
+        _kill_proc()
+    logger.info("lhm_bridge daemon stopped.")
 
 
 def bridge_exe_path() -> str:
     """Return the resolved bridge exe path (may not exist yet)."""
-    return _bridge_path() or _BRIDGE_EXE
+    return _bridge_exe_path() or _BRIDGE_EXE
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Internals
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _run_bridge(exe: str):
+def _ensure_running(exe: str):
     """
-    Execute the bridge and return parsed sensor list, or None on any error.
-    Logs failures at WARNING for the first occurrence and every 10th thereafter;
-    subsequent failures are logged at DEBUG to avoid log spam.
+    Return the running bridge Popen, starting it if necessary.
+    Must be called while _lock is held.  Returns None on failure.
     """
+    global _proc
+    if _proc is not None and _proc.poll() is None:
+        return _proc   # already running
+    if _proc is not None:
+        logger.warning("lhm_bridge exited (code %d) — restarting", _proc.returncode)
+        _proc = None
+
     try:
-        proc = subprocess.run(
+        env = os.environ.copy()
+        env["LHM_DIR"] = os.path.dirname(exe)
+        _proc = subprocess.Popen(
             [exe],
-            capture_output=True,
-            text=True,
-            timeout=10,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            env=env,
         )
-        if proc.returncode != 0:
-            _log_failure(f"bridge exited {proc.returncode}: {proc.stderr.strip() or '(no stderr)'}")
-            return None
-        sensors = json.loads(proc.stdout)
-        return sensors
-    except subprocess.TimeoutExpired:
-        _log_failure("bridge timed out after 10 seconds (hardware may not be ready yet)")
-        return None
-    except json.JSONDecodeError as e:
-        _log_failure(f"bridge output was not valid JSON: {e}")
-        return None
+        logger.info("lhm_bridge daemon started (pid %d)", _proc.pid)
+        # Give the .NET CLR a moment to open hardware on first start
+        time.sleep(0.5)
+        return _proc
     except FileNotFoundError:
         _log_failure(f"bridge exe missing: {exe}")
         return None
     except Exception as e:
-        _log_failure(f"bridge call failed: {e}")
+        _log_failure(f"failed to start bridge: {e}")
         return None
+
+
+def _kill_proc():
+    """Terminate the bridge process. Must be called while _lock is held."""
+    global _proc, _fail_count
+    if _proc is None:
+        return
+    try:
+        _proc.stdin.close()
+    except Exception:
+        pass
+    try:
+        _proc.wait(timeout=2)
+    except Exception:
+        pass
+    try:
+        _proc.kill()
+    except Exception:
+        pass
+    _proc = None
+    _fail_count += 1
 
 
 def _log_failure(msg: str):
@@ -121,7 +163,7 @@ def _log_failure(msg: str):
         logger.debug("lhm_bridge: %s", msg)
 
 
-def _bridge_path() -> str:
+def _bridge_exe_path() -> str:
     """Return path to bridge exe if it exists, else empty string."""
     from core import config_manager as cfg
     c = cfg.get()

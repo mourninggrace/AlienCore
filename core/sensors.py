@@ -33,6 +33,19 @@ _prev_net_time  = None
 _prev_disk_io   = None
 _prev_disk_time = None
 
+# ── pynvml lazy init (avoid nvidia-smi subprocess overhead) ──────────────────
+_nvml_ok     = None   # None = untried, True = working, False = unavailable
+_nvml_handle = None
+
+# ── AWCC WMI read throttle ────────────────────────────────────────────────────
+# Each AWCC fan/profile query is a COM round-trip to WmiPrvSE.exe.
+# Polling at full 2s rate causes visible WmiPrvSE.exe CPU load.
+# Fan RPMs and thermal profile change slowly — 10s resolution is plenty.
+# The command queue (profile switches, G-mode) is drained every cycle regardless.
+_AWCC_STRIDE = 5    # query sensors every Nth poll (5 × 2s = 10s)
+_awcc_cycle  = 0
+_awcc_cache: dict = {"awcc_available": False, "awcc_fans": [], "awcc_profile": None}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
@@ -244,10 +257,115 @@ def _parse_cpu_watts(flat: list) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GPU — nvidia-smi (more detailed than LHM for NVIDIA)
+# GPU — pynvml (direct NVML calls, no subprocess) with nvidia-smi fallback
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _nvml_reset():
+    """Mark pynvml for re-initialization on the next poll cycle."""
+    global _nvml_ok, _nvml_handle
+    _nvml_ok     = None
+    _nvml_handle = None
+
+
+def _nvml_init() -> bool:
+    """Lazy-initialize pynvml once. Returns True if ready."""
+    global _nvml_ok, _nvml_handle
+    if _nvml_ok is not None:
+        return _nvml_ok
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        _nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        _nvml_ok = True
+        logger.info("pynvml ready — GPU polling via NVML (no subprocess)")
+    except Exception as e:
+        _nvml_ok = False
+        logger.debug("pynvml unavailable (%s) — falling back to nvidia-smi subprocess", e)
+    return bool(_nvml_ok)
+
+
+def _read_gpu_via_nvml() -> dict | None:
+    """Read all GPU metrics via pynvml. Returns None if any fatal error occurs."""
+    result = {
+        "gpu_load":               None,
+        "gpu_vram_used_mb":       None,
+        "gpu_vram_total_mb":      None,
+        "gpu_watts":              None,
+        "gpu_fan_pct":            None,
+        "gpu_clock_mhz":          None,
+        "gpu_mem_clock_mhz":      None,
+        "gpu_power_limit_w":      None,
+        "gpu_throttle_reasons":   "0x0000000000000000",
+        "gpu_throttle_perf_lost": False,
+    }
+    try:
+        import pynvml
+        h = _nvml_handle
+
+        util = pynvml.nvmlDeviceGetUtilizationRates(h)
+        result["gpu_load"] = float(util.gpu)
+
+        mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+        result["gpu_vram_used_mb"]  = mem.used  / 1024 ** 2
+        result["gpu_vram_total_mb"] = mem.total / 1024 ** 2
+
+        try:
+            result["gpu_watts"] = pynvml.nvmlDeviceGetPowerUsage(h) / 1000.0
+        except pynvml.NVMLError:
+            pass
+
+        try:
+            result["gpu_fan_pct"] = float(pynvml.nvmlDeviceGetFanSpeed(h))
+        except pynvml.NVMLError:
+            pass
+
+        try:
+            result["gpu_clock_mhz"] = float(
+                pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_GRAPHICS))
+        except pynvml.NVMLError:
+            pass
+
+        try:
+            result["gpu_mem_clock_mhz"] = float(
+                pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_MEM))
+        except pynvml.NVMLError:
+            pass
+
+        try:
+            result["gpu_power_limit_w"] = (
+                pynvml.nvmlDeviceGetEnforcedPowerLimit(h) / 1000.0)
+        except pynvml.NVMLError:
+            pass
+
+        try:
+            reasons_int  = pynvml.nvmlDeviceGetCurrentClocksThrottleReasons(h)
+            throttle_hex = f"0x{reasons_int:016x}"
+            result["gpu_throttle_reasons"] = throttle_hex
+            from core import throttle_log
+            throttle_log.record(throttle_hex, gpu_temp=None,
+                                gpu_watts=result["gpu_watts"])
+            result["gpu_throttle_perf_lost"] = throttle_log.is_perf_limited(throttle_hex)
+        except pynvml.NVMLError:
+            pass
+
+        return result
+
+    except Exception as e:
+        # Stale/reset handle — mark for re-init next cycle
+        logger.debug("nvml read error: %s — will reinitialize next cycle", e)
+        _nvml_reset()
+        return None
+
+
 def _read_gpu_nvidia_smi() -> dict:
+    """GPU polling — pynvml (preferred) with nvidia-smi subprocess fallback."""
+    # pynvml: direct NVML DLL call, no process spawn, ~10 µs vs ~200 ms
+    if _nvml_init():
+        data = _read_gpu_via_nvml()
+        if data is not None:
+            return data
+
+    # Fallback: nvidia-smi subprocess (pynvml unavailable or just reset)
     result = {
         "gpu_load":               None,
         "gpu_vram_used_mb":       None,
@@ -289,11 +407,10 @@ def _read_gpu_nvidia_smi() -> dict:
             if len(parts) >= 9:
                 throttle_hex = parts[8].strip()
                 result["gpu_throttle_reasons"] = throttle_hex
-                # Record throttle events and compute efficiency
                 from core import throttle_log
                 throttle_log.record(
                     throttle_hex,
-                    gpu_temp=None,   # temp comes from LHM — will be correlated in monitor
+                    gpu_temp=None,
                     gpu_watts=result["gpu_watts"],
                 )
                 result["gpu_throttle_perf_lost"] = throttle_log.is_perf_limited(throttle_hex)
@@ -426,22 +543,34 @@ def _read_awcc_data() -> dict:
     Also drains the write command queue posted by other threads (profiles,
     turbo_cool, tray) so that all AWCC WMI calls happen on this thread only.
     Returns empty/False defaults if AWCC is unavailable so callers never KeyError.
+
+    Fan RPMs and profile ID are throttled to every _AWCC_STRIDE cycles (~10s)
+    to reduce COM/WMI round-trips to WmiPrvSE.exe.  The command queue is
+    drained every cycle so profile switches remain responsive.
     """
-    _empty = {"awcc_available": False, "awcc_fans": [], "awcc_profile": None}
+    global _awcc_cycle, _awcc_cache
     try:
         from core import awcc
-        # Drain write commands posted by other threads BEFORE reading state.
-        # This keeps all WMI access on the SensorThread (COM STA requirement).
+        # Always drain write commands — must be responsive for profile changes.
         awcc.drain_queue()
+
+        # Only query WMI sensors every _AWCC_STRIDE cycles.
+        _awcc_cycle = (_awcc_cycle + 1) % _AWCC_STRIDE
+        if _awcc_cycle != 0:
+            return _awcc_cache   # return last known data between strides
+
         if not awcc.is_available():
-            return _empty
+            _awcc_cache = {"awcc_available": False, "awcc_fans": [], "awcc_profile": None}
+            return _awcc_cache
+
         fans    = awcc.get_fan_rpms()
         profile = awcc.get_active_profile()
-        return {
+        _awcc_cache = {
             "awcc_available": True,
             "awcc_fans":      fans,      # list of {fan_id, rpm}
             "awcc_profile":   profile,   # int profile ID or None
         }
+        return _awcc_cache
     except Exception as e:
         logger.debug("AWCC sensor read error: %s", e)
-        return _empty
+        return _awcc_cache

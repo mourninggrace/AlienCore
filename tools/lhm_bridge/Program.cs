@@ -1,14 +1,14 @@
-// AlienCore LHM Bridge
-// Reads all hardware sensors via LibreHardwareMonitorLib and writes a JSON
-// array to stdout. Called by AlienCore's sensor poll loop — no GUI, no web
-// server, no tray icon. LibreHardwareMonitor itself is never launched.
+// AlienCore LHM Bridge — persistent daemon mode
 //
-// The caller (AlienCore) sets LHM_DIR env var to the folder containing
-// LibreHardwareMonitorLib.dll and its dependencies. The assembly resolver
-// below loads all LHM DLLs from that folder at runtime.
+// Starts once, stays alive, and responds to poll requests on stdin.
+// Each request: one newline written to stdin.
+// Each response: one compact JSON line written to stdout.
+//
+// This eliminates .NET CLR startup cost on every poll cycle.
+// AlienCore's lhm_manager.py sends a newline, reads one JSON line.
 //
 // Build:
-//   dotnet build lhm_bridge.csproj -c Release /p:LHMDllPath="<path to dll>" -o dist/
+//   dotnet build lhm_bridge.csproj -c Release -o dist/
 
 using System;
 using System.Collections.Generic;
@@ -19,9 +19,6 @@ using System.Text.Json.Serialization;
 using LibreHardwareMonitor.Hardware;
 
 // ── Assembly resolver — must be registered before any LHM types are touched ──
-// Loads all LHM dependencies from the directory specified by LHM_DIR env var.
-// AppContext.BaseDirectory = directory of lhm_bridge.exe (dist/)
-// LHM_DIR env var can override to load from a different location
 var lhmDir = Environment.GetEnvironmentVariable("LHM_DIR")
              ?? AppContext.BaseDirectory;
 
@@ -32,14 +29,22 @@ AppDomain.CurrentDomain.AssemblyResolve += (_, args) =>
     return File.Exists(path) ? Assembly.LoadFrom(path) : null;
 };
 
-// ── Sensor collection ──────────────────────────────────────────────────────
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.InputEncoding  = System.Text.Encoding.UTF8;
+
+var options = new JsonSerializerOptions
+{
+    PropertyNamingPolicy        = JsonNamingPolicy.CamelCase,
+    DefaultIgnoreCondition      = JsonIgnoreCondition.WhenWritingNull,
+};
+
 var computer = new Computer
 {
     IsCpuEnabled         = true,
     IsGpuEnabled         = true,
-    IsMemoryEnabled      = true,   // DIMM temps (DDR5 via RAMSPDToolkit)
-    IsMotherboardEnabled = true,   // VRM, embedded controller temps
-    IsStorageEnabled     = true,   // NVMe composite temps
+    IsMemoryEnabled      = true,
+    IsMotherboardEnabled = true,
+    IsStorageEnabled     = true,
     IsNetworkEnabled     = false,
     IsBatteryEnabled     = false,
 };
@@ -47,30 +52,51 @@ var computer = new Computer
 try
 {
     computer.Open();
-
-    var readings = new List<SensorReading>();
-    foreach (var hw in computer.Hardware)
-    {
-        hw.Update();
-        Collect(hw, readings);
-    }
-
-    computer.Close();
-
-    var options = new JsonSerializerOptions
-    {
-        PropertyNamingPolicy        = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition      = JsonIgnoreCondition.WhenWritingNull,
-    };
-    Console.OutputEncoding = System.Text.Encoding.UTF8;
-    Console.WriteLine(JsonSerializer.Serialize(readings, options));
-    return 0;
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"lhm-bridge-error: {ex.Message}");
+    Console.Error.WriteLine($"lhm-bridge-error: open failed: {ex.Message}");
     return 1;
 }
+
+// ── Daemon loop ────────────────────────────────────────────────────────────────
+// Wait for a poll request (any line) → collect sensors → write one JSON line.
+// EOF on stdin means AlienCore exited — clean up and exit.
+while (true)
+{
+    string? line;
+    try
+    {
+        line = Console.ReadLine();
+    }
+    catch
+    {
+        break;
+    }
+    if (line == null) break;   // EOF — parent process closed the pipe
+
+    try
+    {
+        var readings = new List<SensorReading>();
+        foreach (var hw in computer.Hardware)
+        {
+            hw.Update();
+            Collect(hw, readings);
+        }
+        // One compact JSON line per response — no embedded newlines
+        Console.WriteLine(JsonSerializer.Serialize(readings, options));
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"lhm-bridge-error: poll failed: {ex.Message}");
+        Console.WriteLine("[]");   // empty result so Python doesn't hang
+    }
+}
+
+computer.Close();
+return 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 static void Collect(IHardware hw, List<SensorReading> list)
 {
