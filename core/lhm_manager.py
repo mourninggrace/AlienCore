@@ -15,6 +15,7 @@ every poll cycle.  The bridge process lives for the duration of AlienCore.
 import json
 import logging
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -73,7 +74,12 @@ def get_sensors() -> list:
         try:
             proc.stdin.write(b"\n")
             proc.stdin.flush()
-            raw = proc.stdout.readline()
+            raw = _readline_timeout(proc.stdout, timeout=15)
+            if raw is None:
+                # Timeout — bridge is hanging; kill and enter backoff
+                _kill_proc()
+                _log_failure("bridge timed out (no response within 15 s)")
+                return []
             if not raw:
                 # EOF from bridge — it crashed; will restart next call
                 _kill_proc()
@@ -135,13 +141,14 @@ def _ensure_running(exe: str):
             [exe],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             creationflags=subprocess.CREATE_NO_WINDOW,
             env=env,
         )
         logger.info("lhm_bridge daemon started (pid %d)", _proc.pid)
-        # Give the .NET CLR a moment to open hardware on first start
-        time.sleep(0.5)
+        # Give the .NET CLR + LibreHardwareMonitor computer.Open() time to initialize.
+        # 2 s is the minimum; hardware with many sensors can take up to ~5 s.
+        time.sleep(2.0)
         return _proc
     except FileNotFoundError:
         _log_failure(f"bridge exe missing: {exe}")
@@ -151,11 +158,41 @@ def _ensure_running(exe: str):
         return None
 
 
+def _readline_timeout(stream, timeout: float) -> bytes | None:
+    """Read one line from *stream* with a wall-clock timeout.
+
+    Returns the raw bytes (possibly empty on EOF), or None on timeout.
+    Uses a daemon thread because Windows pipes don't support select().
+    """
+    q: queue.Queue = queue.Queue()
+
+    def _reader():
+        try:
+            q.put(stream.readline())
+        except Exception:
+            q.put(b"")
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+    try:
+        return q.get(timeout=timeout)
+    except queue.Empty:
+        return None   # timed out
+
+
 def _kill_proc():
     """Terminate the bridge process. Must be called while _lock is held."""
     global _proc, _fail_count, _last_kill_time, _restart_delay_secs
     if _proc is None:
         return
+    # Capture any stderr output the bridge wrote before dying
+    try:
+        _proc.stderr.flush()
+        err_bytes = _proc.stderr.read1(4096) if hasattr(_proc.stderr, "read1") else b""
+        if err_bytes:
+            logger.warning("lhm_bridge stderr: %s", err_bytes.decode("utf-8", errors="replace").strip())
+    except Exception:
+        pass
     try:
         _proc.stdin.close()
     except Exception:

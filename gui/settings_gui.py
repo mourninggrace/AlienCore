@@ -87,25 +87,25 @@ THEMES = {
         "BTN_BG": "#0f1f0f", "BTN_HOV": "#162816", "SEP": "#0f1f0f",
     },
     "Glacier": {
-        "BG": "#0a0e14", "BG_PANEL": "#0e1420", "BG_SECT": "#141c2a",
-        "BG_HW": "#080c10", "FG": "#d8eaf8", "FG_DIM": "#6888aa",
-        "FG_HEAD": "#eef6ff", "ACCENT": "#44aaff", "ACCENT2": "#22ddee",
-        "WARN": "#aaccff", "DANGER": "#ff4466",
-        "BTN_BG": "#141e2e", "BTN_HOV": "#1c283c", "SEP": "#141e2e",
+        "BG": "#0f1820", "BG_PANEL": "#162028", "BG_SECT": "#1e2c38",
+        "BG_HW": "#0b1218", "FG": "#e8f4ff", "FG_DIM": "#88aadd",
+        "FG_HEAD": "#f8fcff", "ACCENT": "#88ccff", "ACCENT2": "#aaddff",
+        "WARN": "#ffd88c", "DANGER": "#ff6688",
+        "BTN_BG": "#1a2838", "BTN_HOV": "#223445", "SEP": "#1a2838",
     },
     "Venom": {
-        "BG": "#0a100a", "BG_PANEL": "#0e160e", "BG_SECT": "#131e13",
-        "BG_HW": "#080d08", "FG": "#c8f0c8", "FG_DIM": "#508050",
-        "FG_HEAD": "#ddffdd", "ACCENT": "#88ff00", "ACCENT2": "#66dd00",
-        "WARN": "#ffcc00", "DANGER": "#ff3300",
-        "BTN_BG": "#152015", "BTN_HOV": "#1e2e1e", "SEP": "#152015",
+        "BG": "#12110a", "BG_PANEL": "#1a180c", "BG_SECT": "#232114",
+        "BG_HW": "#0e0d06", "FG": "#eaffaa", "FG_DIM": "#889955",
+        "FG_HEAD": "#f8ffcc", "ACCENT": "#ccff00", "ACCENT2": "#99dd22",
+        "WARN": "#ffaa00", "DANGER": "#ff4422",
+        "BTN_BG": "#1f2010", "BTN_HOV": "#2c2d18", "SEP": "#1f2010",
     },
     "Abyss": {
-        "BG": "#080c18", "BG_PANEL": "#0c1020", "BG_SECT": "#10162a",
-        "BG_HW": "#060a14", "FG": "#c8d8f8", "FG_DIM": "#5070a0",
-        "FG_HEAD": "#ddeeff", "ACCENT": "#00ccff", "ACCENT2": "#0088dd",
-        "WARN": "#ff9900", "DANGER": "#ff3344",
-        "BTN_BG": "#101828", "BTN_HOV": "#182030", "SEP": "#101828",
+        "BG": "#0a0820", "BG_PANEL": "#100e2a", "BG_SECT": "#181438",
+        "BG_HW": "#07051a", "FG": "#c8c0f0", "FG_DIM": "#6658aa",
+        "FG_HEAD": "#e8e0ff", "ACCENT": "#6644ff", "ACCENT2": "#4422cc",
+        "WARN": "#ffaa44", "DANGER": "#ff3366",
+        "BTN_BG": "#1a1438", "BTN_HOV": "#241a48", "SEP": "#1a1438",
     },
 }
 
@@ -576,11 +576,62 @@ class SettingsWindow:
 
     def _cpu_boost_score_panel(self, parent):
         self._section(parent, "Boost Clock Sustainability Score")
-        self._note(parent,
-            "Tracks how often your CPU reaches ≥90% of its max boost clock over the last 60 "
-            "seconds. 100% = sustaining boost continuously. Low scores indicate thermal or power "
-            "throttling is cutting performance short.")
 
+        _MODE_LABELS = {
+            "frequency":    "Frequency (power-driven — % of time at ≥90% max clock)",
+            "thermal":      "Thermal (% of time below TVB threshold — cooler = more boost)",
+            "core_parking": "Core parking (avg share of cores actively working — scheduler)",
+        }
+        _MODE_NOTES = {
+            "frequency":
+                "Measures how often the CPU actually reaches ≥90% of its max boost clock "
+                "over the last 60 s. High = sustaining boost. Low = thermal or power "
+                "throttling is cutting performance short.",
+            "thermal":
+                "Measures how often the CPU stays below the TVB temperature threshold "
+                "over the last 60 s. High = plenty of thermal headroom. Low = thermals "
+                "are the bottleneck limiting sustained boost.",
+            "core_parking":
+                "Measures the average share of cores doing real work (load > 2 %) over "
+                "the last 60 s. High = Windows is using the full CPU. Low = aggressive "
+                "parking is holding cores back from boost.",
+        }
+
+        # ── Mode selector ─────────────────────────────────────────────────────
+        current = cfg.get_value("cpu", "boost_score_mode", default="frequency")
+        if current not in _MODE_LABELS:
+            current = "frequency"
+
+        selector = tk.Frame(parent, bg=BG, padx=16)
+        selector.pack(fill="x", padx=16, pady=(0, 4))
+        tk.Label(selector, text="Score formula:", font=("Segoe UI", 9, "bold"),
+                 bg=BG, fg=FG_DIM).pack(side="left")
+
+        mode_var = tk.StringVar(value=_MODE_LABELS[current])
+        note_lbl = tk.Label(parent, text=_MODE_NOTES[current],
+                            font=("Segoe UI", 8), bg=BG, fg=FG_DIM,
+                            justify="left", wraplength=760, anchor="w")
+
+        def _on_mode_change(val):
+            slug = next((k for k, v in _MODE_LABELS.items() if v == val), "frequency")
+            cfg.set_value("cpu", "boost_score_mode", value=slug)
+            note_lbl.config(text=_MODE_NOTES[slug])
+            # Trigger immediate refresh so the user sees the new formula's value
+            try:
+                _refresh()
+            except Exception:
+                pass
+
+        dd = tk.OptionMenu(selector, mode_var, *_MODE_LABELS.values(),
+                           command=_on_mode_change)
+        dd.config(bg=BG_PANEL, fg=FG, activebackground=BTN_HOV, activeforeground=FG,
+                  font=("Segoe UI", 8), relief="flat", width=62, anchor="w")
+        dd["menu"].config(bg=BG_PANEL, fg=FG, font=("Segoe UI", 8))
+        dd.pack(side="left", padx=(8, 0))
+
+        note_lbl.pack(anchor="w", padx=16, pady=(0, 6), fill="x")
+
+        # ── Live score display ────────────────────────────────────────────────
         panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
         panel.pack(fill="x", padx=16, pady=(4, 8))
 
@@ -591,7 +642,6 @@ class SettingsWindow:
                               bg=BG_HW, fg=FG_DIM)
         detail_lbl.pack(anchor="w")
 
-        # Canvas bar
         bar_canvas = tk.Canvas(panel, width=400, height=14, bg=BG_PANEL,
                                highlightthickness=0, bd=0)
         bar_canvas.pack(anchor="w", pady=(4, 0))
@@ -601,8 +651,18 @@ class SettingsWindow:
                 from core import boost_tracker
                 s = boost_tracker.get_score()
                 pct   = s["score_pct"]
+                mode  = s.get("score_mode", "frequency")
                 color = (ACCENT2 if pct >= 70 else WARN if pct >= 40 else DANGER)
-                score_lbl.config(text=f"{pct:.0f}%  Boost Score", fg=color)
+                # Score label reflects the mode so the user can tell at a glance
+                # which formula produced the number.
+                label_map = {
+                    "frequency":    "Boost Score",
+                    "thermal":      "Thermal Score",
+                    "core_parking": "Core Usage Score",
+                }
+                score_lbl.config(
+                    text=f"{pct:.0f}%  {label_map.get(mode, 'Boost Score')}",
+                    fg=color)
                 detail_lbl.config(
                     text=f"Avg {s['avg_freq_ghz']:.2f} GHz over last {s['window_seconds']}s  "
                          f"({s['sample_count']} samples)")
@@ -735,18 +795,24 @@ class SettingsWindow:
                 reasons    = throttle_log.decode_reasons(throttle)
                 perf_lost  = throttle_log.is_perf_limited(throttle)
 
-                if watts is not None:
-                    pct_str = f" ({watts/limit*100:.0f}% of limit)" if limit else ""
+                if clock is not None or watts is not None:
+                    watts_str = ""
+                    if watts is not None:
+                        pct_str   = f" ({watts/limit*100:.0f}% of limit)" if limit else ""
+                        watts_str = f"Power: {watts:.0f}W{pct_str}  |  "
+                        over90    = watts and limit and watts / limit > 0.9
+                    else:
+                        over90 = False
                     boost_lbl.config(
-                        text=f"Power: {watts:.0f}W{pct_str}  |  "
+                        text=f"{watts_str}"
                              f"Core: {int(clock or 0):,} MHz  |  "
                              f"VRAM: {int(mem_clock or 0):,} MHz",
-                        fg=DANGER if perf_lost else ACCENT2 if watts and limit and watts/limit > 0.9 else ACCENT)
+                        fg=DANGER if perf_lost else ACCENT2 if over90 else ACCENT)
                     detail_lbl.config(
                         text=("Throttle: " + ", ".join(reasons)) if reasons else "Throttle: none",
                         fg=DANGER if perf_lost else FG_DIM)
                 else:
-                    boost_lbl.config(text="nvidia-smi not available", fg=FG_DIM)
+                    boost_lbl.config(text="GPU data not available (NVML / nvidia-smi not responding)", fg=FG_DIM)
             except Exception:
                 pass
             if panel.winfo_exists():
@@ -1790,6 +1856,8 @@ class SettingsWindow:
     def _tab_service(self):
         t = self._make_tab("Service")
         self._hw_panel(t, "platform")
+        self._section(t, "Administrator Rights")
+        self._admin_panel(t)
         self._section(t, "Start with Windows")
         self._startup_panel(t)
 
@@ -2813,8 +2881,62 @@ class SettingsWindow:
 
     # ── Start with Windows panel ──────────────────────────────────────────────
 
+    def _admin_panel(self, parent):
+        """Admin-rights status + Restart as Admin button."""
+        from core import elevation as _elev
+
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=12)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
+
+        is_admin = _elev.is_admin()
+
+        status_row = tk.Frame(panel, bg=BG_HW)
+        status_row.pack(fill="x", pady=(0, 8))
+        tk.Label(status_row, text="Status:", font=("Segoe UI", 9, "bold"),
+                 bg=BG_HW, fg=FG_DIM, width=16, anchor="w").pack(side="left")
+        tk.Label(
+            status_row,
+            text=("Running as Administrator — all sensors available"
+                  if is_admin else
+                  "Not running as Administrator — CPU temp, DIMM, NVMe may show '---'"),
+            font=("Segoe UI", 9), bg=BG_HW,
+            fg=ACCENT2 if is_admin else WARN,
+        ).pack(side="left")
+
+        if not is_admin:
+            btn_row = tk.Frame(panel, bg=BG_HW)
+            btn_row.pack(fill="x")
+
+            def _restart_as_admin():
+                if _elev.relaunch_as_admin(extra_args=["--settings"]):
+                    # New elevated settings window will open; close this one.
+                    try:
+                        self.root.destroy()
+                    except Exception:
+                        pass
+                else:
+                    messagebox.showwarning(
+                        "Elevation declined",
+                        "Windows did not grant admin rights.\n"
+                        "Right-click AlienCore and choose 'Run as administrator' "
+                        "to access CPU temp, DIMM, and NVMe sensors.",
+                    )
+
+            self._btn(btn_row, "Restart as Admin", _restart_as_admin,
+                      ACCENT, bold=True).pack(side="left", padx=(0, 8))
+
+        tk.Label(
+            panel,
+            text=("Admin rights are required for LibreHardwareMonitor to read "
+                  "CPU Package temperature (MSR via WinRing0), SMBus DIMM "
+                  "temperatures, and Alienware AWCC WMI controls."),
+            font=("Segoe UI", 8), bg=BG_HW, fg=FG_DIM, justify="left",
+            wraplength=760, anchor="w",
+        ).pack(anchor="w", pady=(8, 0), fill="x")
+
     def _startup_panel(self, parent):
         from core import startup as _startup
+        from core import elevation as _elev
 
         panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=12)
         panel.pack(fill="x", padx=16, pady=(4, 8))
@@ -2823,16 +2945,20 @@ class SettingsWindow:
         status_row = tk.Frame(panel, bg=BG_HW)
         status_row.pack(fill="x", pady=(0, 8))
 
-        tk.Label(status_row, text="Registry status:", font=("Segoe UI", 9, "bold"),
+        tk.Label(status_row, text="Startup status:", font=("Segoe UI", 9, "bold"),
                  bg=BG_HW, fg=FG_DIM, width=16, anchor="w").pack(side="left")
 
-        enabled = _startup.is_enabled()
+        def _status_text():
+            mode = _startup.startup_mode()
+            if mode == "task":
+                return ("Enabled — Task Scheduler (elevated, silent)", ACCENT2)
+            if mode == "registry":
+                return ("Enabled — HKCU Run (non-admin, limited sensors)", WARN)
+            return ("Disabled — AlienCore will not auto-start", WARN)
+
+        text, color = _status_text()
         self._startup_status_lbl = tk.Label(
-            status_row,
-            text="Enabled — AlienCore will launch at login" if enabled
-                 else "Disabled — AlienCore will not auto-start",
-            font=("Segoe UI", 9), bg=BG_HW,
-            fg=ACCENT2 if enabled else WARN
+            status_row, text=text, font=("Segoe UI", 9), bg=BG_HW, fg=color,
         )
         self._startup_status_lbl.pack(side="left")
 
@@ -2840,32 +2966,36 @@ class SettingsWindow:
         btn_row = tk.Frame(panel, bg=BG_HW)
         btn_row.pack(fill="x")
 
+        def _refresh_status():
+            t, c = _status_text()
+            self._startup_status_lbl.config(text=t, fg=c)
+
         def _enable():
             ok = _startup.enable()
             cfg.set_value("service", "start_with_windows", value=True)
             cfg.save(cfg.get())
             if ok:
-                self._startup_status_lbl.config(
-                    text="Enabled — AlienCore will launch at login", fg=ACCENT2)
+                _refresh_status()
             else:
                 self._startup_status_lbl.config(
-                    text="Failed to write registry key — check permissions", fg=DANGER)
+                    text="Failed to enable — check logs", fg=DANGER)
 
         def _disable():
             _startup.disable()
             cfg.set_value("service", "start_with_windows", value=False)
             cfg.save(cfg.get())
-            self._startup_status_lbl.config(
-                text="Disabled — AlienCore will not auto-start", fg=WARN)
+            _refresh_status()
 
         self._btn(btn_row, "Enable",  _enable,  ACCENT2, bold=True).pack(side="left", padx=(0, 8))
         self._btn(btn_row, "Disable", _disable, DANGER).pack(side="left")
 
-        tk.Label(panel,
-                 text="Uses HKCU\\...\\Run — no admin rights required. "
-                      "Points to launch.vbs (silent, no console window).",
-                 font=("Segoe UI", 8), bg=BG_HW, fg=FG_DIM
-                 ).pack(anchor="w", pady=(8, 0))
+        note = ("Running as admin: installs a Task Scheduler entry that launches "
+                "silently with full permissions at logon — no UAC prompt, no '---' sensors.\n"
+                "Not running as admin: falls back to HKCU\\...\\Run, which starts "
+                "without admin rights. Sensors that need kernel access will show '---'.")
+        tk.Label(panel, text=note, font=("Segoe UI", 8), bg=BG_HW, fg=FG_DIM,
+                 justify="left", wraplength=760, anchor="w"
+                 ).pack(anchor="w", pady=(8, 0), fill="x")
 
     # ── LHM bridge panel ──────────────────────────────────────────────────────
 

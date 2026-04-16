@@ -51,9 +51,15 @@ COLOR_HOT    = "#FF3333"   # red
 COLOR_WARN   = "#FFAA00"   # alias for warm
 
 # ── Monitor loop timing ───────────────────────────────────────────────────────
-SENSOR_POLL_INTERVAL   = 2    # seconds between sensor reads
+# SENSOR_POLL_INTERVAL drives everything that costs CPU on each tick:
+#   - lhm_bridge.exe hw.Update() (MSRs, NVML, SMART, SuperIO)
+#   - sensors.py full sweep (psutil + pynvml + LHM + AWCC)
+#   - monitor.py profile/thermal/DIMM evaluation loop
+# 3 s is a compromise: temps are still fresh, but the CPU-heavy Update() runs
+# 33% less often than the old 2 s baseline.
+SENSOR_POLL_INTERVAL   = 3    # seconds between sensor reads
 PROCESS_POLL_INTERVAL  = 5    # seconds between process list checks
-PROFILE_EVAL_INTERVAL  = 10   # seconds between profile decisions
+PROFILE_EVAL_INTERVAL  = 15   # seconds between profile decisions (process_iter is expensive)
 TRAY_CYCLE_INTERVAL    = 3    # seconds between tray icon stat rotations
 
 # ── CPU power plan GUIDs (Windows built-in) ───────────────────────────────────
@@ -183,6 +189,11 @@ DEFAULT_CONFIG = {
         "tvb_optimizer": False,               # nudge idle CPU ceiling to stay under TVB threshold
         "interrupt_steering": False,          # steer critical IRQs toward P-cores via registry
         "process_affinity_tags": {},          # {exe_name: "p" | "e"} manual affinity hints
+        # Boost sustainability score formula: what are we actually measuring?
+        #   frequency    — % of window with CPU at ≥90% max clock (boost realization)
+        #   thermal      — % of window with CPU temp below TVB threshold (thermal headroom)
+        #   core_parking — avg share of cores actively participating (scheduler behavior)
+        "boost_score_mode": "frequency",
     },
 
     # ── GPU management ──

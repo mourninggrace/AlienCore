@@ -3,7 +3,7 @@ AlienCore - fingerprint.py
 Hardware fingerprint for trial abuse prevention.
 
 Combines three identifiers that survive software reinstalls:
-  1. Windows MachineGuid  — set at Windows install time (HKLM\...\Cryptography)
+  1. Windows MachineGuid  — set at Windows install time (HKLM\\...\\Cryptography)
   2. BIOS UUID            — burned into firmware by the OEM (wmic csproduct)
   3. CPU processor name   — stable unless CPU is physically replaced
 

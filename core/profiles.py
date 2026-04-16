@@ -11,6 +11,7 @@ Profiles:
 """
 
 import logging
+import time
 import psutil
 from core import config_manager as cfg
 from core.constants import STREAMING_PROCESSES, GAMING_PROCESSES
@@ -26,6 +27,14 @@ _manual_override  = None   # None = auto, string = locked profile name
 # momentary GPU/CPU spikes (browser rendering, antivirus, Windows updates, etc.).
 _load_hit_count   = 0        # consecutive evaluations where load looked like gaming
 _LOAD_HIT_NEEDED  = 3        # must be true this many times in a row (~30 s at 10 s/eval)
+
+# Process-list cache.  psutil.process_iter iterates ~300 PIDs and opens each
+# for the Name attribute — measurable CPU.  Cache for a few seconds so that
+# evaluate() can check streaming + gaming + user profiles without three
+# separate enumerations.
+_proc_cache:     set | None = None
+_proc_cache_at:  float      = 0.0
+_PROC_CACHE_TTL: float      = 5.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,12 +136,27 @@ def evaluate(sensor_readings: dict) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_running_processes() -> set:
-    """Return a lowercase set of all running process names."""
+    """
+    Return a lowercase set of all running process names.
+    Cached for _PROC_CACHE_TTL seconds so multiple callers in one eval cycle
+    share a single enumeration.
+    """
+    global _proc_cache, _proc_cache_at
+    now = time.time()
+    if _proc_cache is not None and (now - _proc_cache_at) < _PROC_CACHE_TTL:
+        return _proc_cache
     try:
-        return {p.name().lower() for p in psutil.process_iter(["name"])}
+        # Use .info["name"] — psutil's bulk-attribute fetch is noticeably
+        # cheaper than calling p.name() per PID because it avoids repeated
+        # handle opens.
+        _proc_cache    = {(p.info.get("name") or "").lower()
+                          for p in psutil.process_iter(["name"])}
+        _proc_cache_at = now
     except Exception as e:
         logger.debug("Process list error: %s", e)
-        return set()
+        _proc_cache    = set()
+        _proc_cache_at = now
+    return _proc_cache
 
 
 def _is_streaming(running: set, c: dict) -> bool:

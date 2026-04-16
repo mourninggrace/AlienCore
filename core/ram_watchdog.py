@@ -20,17 +20,30 @@ _history: dict[int, deque] = defaultdict(lambda: deque(maxlen=900))
 # {pid: {"name", "pid", "growth_mb_per_min", "current_mb", "started_at"}}
 _suspects: dict[int, dict] = {}
 
+# Minimum seconds between real process_iter scans.  process_iter across ~300
+# Windows processes with memory_info is ~40–80 ms — too expensive to run on
+# every 3 s monitor tick.  Growth rates are measured in MB/min, so 15 s
+# resolution is more than enough.
+_MIN_SCAN_INTERVAL = 15.0
+_last_scan_at      = 0.0
+
 
 def update(window_minutes: float = 5.0, threshold_mb_per_min: float = 50.0):
     """
     Sample all process RSS values and update growth rate estimates.
     Flag any process exceeding threshold_mb_per_min sustained over window_minutes.
-    Call this periodically (e.g., every SENSOR_POLL_INTERVAL seconds).
+    Call this periodically (e.g., every SENSOR_POLL_INTERVAL seconds) — this
+    function internally rate-limits to at most once per _MIN_SCAN_INTERVAL.
     """
-    global _suspects
-    now          = time.time()
+    global _suspects, _last_scan_at
+    now = time.time()
+    if now - _last_scan_at < _MIN_SCAN_INTERVAL:
+        return
+    _last_scan_at = now
+
     window_secs  = window_minutes * 60.0
     new_suspects = {}
+    live_pids: set[int] = set()
 
     for proc in psutil.process_iter(["pid", "name", "memory_info"]):
         try:
@@ -40,6 +53,7 @@ def update(window_minutes: float = 5.0, threshold_mb_per_min: float = 50.0):
             pid  = proc.info["pid"]
             name = proc.info["name"] or "?"
             rss  = mi.rss
+            live_pids.add(pid)
 
             dq = _history[pid]
             dq.append((now, rss))
@@ -72,12 +86,8 @@ def update(window_minutes: float = 5.0, threshold_mb_per_min: float = 50.0):
         except Exception:
             pass
 
-    # Purge history for dead processes
-    live_pids = set()
-    try:
-        live_pids = {p.pid for p in psutil.process_iter(["pid"])}
-    except Exception:
-        pass
+    # Purge history for dead processes (live_pids collected during the scan
+    # loop above — saves a second full process_iter call per update).
     dead = [pid for pid in _history if pid not in live_pids]
     for pid in dead:
         del _history[pid]

@@ -62,6 +62,13 @@ catch (Exception ex)
 // ── Daemon loop ────────────────────────────────────────────────────────────────
 // Wait for a poll request (any line) → collect sensors → write one JSON line.
 // EOF on stdin means AlienCore exited — clean up and exit.
+//
+// Stride policy: CPU and GPU change quickly under load so they update every
+// poll.  Storage (NVMe SMART reads = actual drive I/O) and Motherboard
+// (SuperIO SMBus round-trips) change slowly and dominate CPU cost — stride
+// them 1-in-3 so they still refresh every ~9s at 3s polling but don't burn
+// the CPU on every tick.
+int pollCount = 0;
 while (true)
 {
     string? line;
@@ -77,10 +84,17 @@ while (true)
 
     try
     {
+        pollCount++;
+        bool updateSlow = (pollCount % 3) == 0;
         var readings = new List<SensorReading>();
         foreach (var hw in computer.Hardware)
         {
-            hw.Update();
+            bool isSlow = hw.HardwareType == HardwareType.Storage
+                       || hw.HardwareType == HardwareType.Motherboard;
+            if (!isSlow || updateSlow)
+            {
+                hw.Update();
+            }
             Collect(hw, readings);
         }
         // One compact JSON line per response — no embedded newlines

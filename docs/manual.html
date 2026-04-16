@@ -813,12 +813,39 @@ python aliencore.py --uninstall # remove the service</code></pre>
 
 <section id="cpu-boost">
   <h2>CPU Boost Score <span class="badge badge-pro">PRO</span></h2>
-  <p>The Boost Score panel shows a real-time quality rating for your CPU's boost behavior. It tracks how consistently the CPU is sustaining high boost clocks vs. how often it's being forced down by thermal or power limits.</p>
+  <p>The Boost Score panel shows a real-time quality rating for your CPU's boost behavior over a rolling 60-second window. A high score (green) means the CPU is performing well; a low score (red) indicates the factor you're measuring is the bottleneck.</p>
 
-  <p>The score is calculated from a rolling window of boost clock samples. A high score (green) means the CPU is holding boost well. A low score (red) indicates sustained throttling — useful for diagnosing cooling issues or incorrect power settings.</p>
+  <h3>Three Score Formulas</h3>
+  <p>The <strong>Score formula</strong> dropdown lets you pick which lens to view boost quality through. Each formula answers a different question:</p>
+
+  <table>
+    <tr><th>Formula</th><th>What it measures</th><th>Use it when you want to know…</th></tr>
+    <tr>
+      <td class="setting">Frequency <span style="color:#888;">(default)</span></td>
+      <td>% of time the CPU is at or above 90% of its max boost clock.</td>
+      <td>Is my CPU actually realizing its boost clocks?</td>
+    </tr>
+    <tr>
+      <td class="setting">Thermal</td>
+      <td>% of time the CPU temperature stays below the TVB threshold (70 °C on i9 Raptor Lake).</td>
+      <td>Are thermals the thing limiting my boost?</td>
+    </tr>
+    <tr>
+      <td class="setting">Core parking</td>
+      <td>Average share of logical processors doing real work (load &gt; 2%).</td>
+      <td>Is Windows' parking policy holding cores back from boosting?</td>
+    </tr>
+  </table>
+
+  <h3>How To Read The Modes</h3>
+  <ul>
+    <li><strong>Frequency low + Thermal low:</strong> Thermally limited. Your cooling is the constraint — improve airflow, repaste, or lower the Idle CPU ceiling.</li>
+    <li><strong>Frequency low + Thermal high:</strong> Not thermal. Check power limits (PL1/PL2), TDP throttling, or the Throttle Log for the specific reason.</li>
+    <li><strong>Core parking low during load:</strong> Windows is parking cores when you'd rather it didn't. Enable <em>Core parking (gaming)</em> in the CPU tab to unpark all 32 logical processors during detected workloads.</li>
+  </ul>
 
   <div class="box box-info">
-    The Boost Score is read-only. It's a diagnostic tool, not a setting. Use it alongside the Throttle Log and Efficiency Curve to understand your CPU's real-world behavior.
+    The Boost Score is read-only — it's a diagnostic, not a tweak. Switching the formula just changes which question you're asking. Use it alongside the Throttle Log and Efficiency Curve to understand your CPU's real-world behavior.
   </div>
 </section>
 

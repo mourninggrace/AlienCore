@@ -74,7 +74,8 @@ def _loop():
     )
 
     iteration   = 0
-    standby_counter = 0
+    # Time-based — keeps the ~5 min cadence if SENSOR_POLL_INTERVAL changes.
+    last_standby_check = 0.0
 
     while _running:
         try:
@@ -121,12 +122,11 @@ def _loop():
                     and c["cpu"]["dynamic_throttle"]):
                 _adjust_cpu_ceiling_dynamically(readings, c)
 
-            # ── Standby cache clearing ──
+            # ── Standby cache clearing (every ~5 min at idle) ──
             if c["ram"]["enabled"] and c["ram"]["clear_standby_cache_on_idle"]:
-                standby_counter += 1
-                # Check every ~5 minutes at idle
-                if _last_profile == "idle" and standby_counter >= 150:
-                    standby_counter = 0
+                if (_last_profile == "idle"
+                        and (time.time() - last_standby_check) >= 300):
+                    last_standby_check = time.time()
                     _maybe_clear_standby(readings)
 
             # ── DIMM thermal throttle protection ──

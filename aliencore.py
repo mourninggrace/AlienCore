@@ -27,6 +27,7 @@ sys.path.insert(0, BASE_DIR)
 from core import logger as log_setup
 from core import config_manager as cfg
 from core import hardware, sensors, tweaks, profiles, monitor
+from core import elevation
 from core.constants import APP_NAME, VERSION, LOG_PATH
 
 
@@ -74,8 +75,23 @@ def main():
     )
     root_logger = logging.getLogger("aliencore")
     root_logger.info("=" * 60)
-    root_logger.info("AlienCore v%s starting  (pid=%d)", VERSION, os.getpid())
+    root_logger.info("AlienCore v%s starting  (pid=%d, admin=%s)",
+                     VERSION, os.getpid(), elevation.is_admin())
     root_logger.info("=" * 60)
+
+    # ── Auto-elevate for main/firstrun runs ──────────────────────────────────
+    # LHM (CPU temps via WinRing0 MSR), SMBus DIMM temps, and AWCC WMI all
+    # require administrator rights.  Without them the sensor bar shows '---'.
+    # Only main + firstrun need elevation; --settings is a subprocess that
+    # inherits the parent's token, --dryrun/--restore/--install/--uninstall
+    # have their own privilege semantics.
+    if _should_auto_elevate(args) and not elevation.is_admin():
+        root_logger.warning("Not running as admin — requesting UAC elevation "
+                            "(pass --no-elevate to skip).")
+        if elevation.relaunch_as_admin():
+            sys.exit(0)   # elevated copy takes over; this instance exits
+        root_logger.warning("UAC declined or failed — continuing without admin. "
+                            "CPU temp, DIMM, NVMe sensors may show '---'.")
 
     # ── Service install / uninstall ───────────────────────────────────────────
     if args.install:
@@ -90,8 +106,17 @@ def main():
         cfg.load()
         from core import auth as _auth
         _auth.load_session()
+        # Load cached hardware profile so boost_tracker has correct thresholds
+        hw = hardware.build_profile(force_refresh=False)
+        from core import boost_tracker as _bt
+        _bt.configure(max_freq_mhz=hw.get("cpu", {}).get("max_freq_mhz", 0))
+        # Start sensor thread so live panels (GPU boost, DIMM temps) have real data
+        sensors.start()
         from gui.settings_gui import open_settings
         open_settings(is_first_run=False)
+        sensors.stop()
+        from core import lhm_manager
+        lhm_manager.stop()
         return
 
     # ── Restore defaults ──────────────────────────────────────────────────────
@@ -329,7 +354,23 @@ def _parse_args():
     p.add_argument("--install",   action="store_true", help="Install as Windows service (Admin)")
     p.add_argument("--uninstall", action="store_true", help="Remove Windows service (Admin)")
     p.add_argument("--restore",   action="store_true", help="Restore system defaults")
+    p.add_argument("--no-elevate", action="store_true",
+                   help="Skip the automatic UAC prompt at launch")
     return p.parse_args()
+
+
+def _should_auto_elevate(args) -> bool:
+    """
+    True when the current invocation is a main/firstrun run that needs admin.
+    Excludes subprocess modes, diagnostic modes, and explicit opt-outs.
+    """
+    if getattr(args, "no_elevate", False):
+        return False
+    if args.settings or args.dryrun or args.restore:
+        return False
+    if args.install or args.uninstall:
+        return False   # sc.exe fails loudly if not admin — let the user see that
+    return True
 
 
 if __name__ == "__main__":

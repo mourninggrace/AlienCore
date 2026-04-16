@@ -118,6 +118,7 @@ class _Sparkline:
         FG_MED     = "#666680"
 
         win = tk.Toplevel()
+        win.withdraw()   # hide during construction to prevent bar geometry flicker
         win.title(f"{label}  —  90-second history")
         win.attributes("-topmost", True)
         win.configure(bg=BG)
@@ -330,6 +331,7 @@ class _Sparkline:
             f"+{(sw - cls._W - 36) // 2}"
             f"+{(sh - cls._H - 140) // 2}"
         )
+        win.deiconify()   # show now that geometry is set and drawing is done
 
         win.protocol("WM_DELETE_WINDOW", lambda: cls._close(config_key))
 

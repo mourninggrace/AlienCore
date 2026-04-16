@@ -39,10 +39,10 @@ _nvml_handle = None
 
 # ── AWCC WMI read throttle ────────────────────────────────────────────────────
 # Each AWCC fan/profile query is a COM round-trip to WmiPrvSE.exe.
-# Polling at full 2s rate causes visible WmiPrvSE.exe CPU load.
-# Fan RPMs and thermal profile change slowly — 10s resolution is plenty.
+# Polling at full sensor rate causes visible WmiPrvSE.exe CPU load.
+# Fan RPMs and thermal profile change slowly — ~15 s resolution is plenty.
 # The command queue (profile switches, G-mode) is drained every cycle regardless.
-_AWCC_STRIDE = 5    # query sensors every Nth poll (5 × 2s = 10s)
+_AWCC_STRIDE = 5    # query sensors every Nth poll (5 × 3s = 15s)
 _awcc_cycle  = 0
 _awcc_cache: dict = {"awcc_available": False, "awcc_fans": [], "awcc_profile": None}
 
@@ -121,9 +121,10 @@ def _poll_loop():
             data.update(_read_gpu_nvidia_smi())
             data.update(_read_ram_usage())
             data.update(_read_cpu_freq())
-            # Feed boost tracker with latest CPU freq + temp
-            _update_boost_tracker(data)
             data.update(_read_cpu_load())
+            # Feed boost tracker with latest freq + temp + per-core load
+            # (must happen after _read_cpu_load so cpu_load_cores is populated)
+            _update_boost_tracker(data)
             data.update(_read_battery())
             data.update(_read_network_io())
             data.update(_read_disk_io())
@@ -526,13 +527,14 @@ def _read_disk_io() -> dict:
 
 
 def _update_boost_tracker(data: dict):
-    """Feed the latest CPU freq + package temp into boost_tracker."""
+    """Feed the latest CPU freq + package temp + per-core load into boost_tracker."""
     try:
         from core import boost_tracker
         freq_ghz = data.get("cpu_freq_ghz")
         temp_c   = data.get("cpu_temp_package") or data.get("cpu_temp_avg")
+        cores    = data.get("cpu_load_cores") or None
         if freq_ghz is not None:
-            boost_tracker.record(freq_ghz, temp_c)
+            boost_tracker.record(freq_ghz, temp_c, cores)
     except Exception:
         pass
 

@@ -242,7 +242,9 @@ def _update_loop():
         except Exception as e:
             logger.debug("Alert toast error: %s", e)
 
-        time.sleep(2)
+        # Tray colour/tooltip only needs to refresh on the same cadence as the
+        # sensor thread — sleeping less just burns CPU on cached data.
+        time.sleep(4)
 
 
 def _get_interval_ms() -> float:
