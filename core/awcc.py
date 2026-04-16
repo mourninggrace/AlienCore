@@ -94,15 +94,20 @@ _cmd_queue: _queue.Queue = _queue.Queue()
 
 def _record_awcc_failure():
     """Track consecutive WMI failures; engage backoff when threshold is reached."""
-    global _fail_count, _backoff_until
+    global _fail_count, _backoff_until, _awcc, _available, _fans, _fans_ready
     _fail_count += 1
     if _fail_count >= _FAIL_THRESHOLD:
         _backoff_until = time.time() + _BACKOFF_SECS
         logger.warning(
-            "AWCC WMI: %d consecutive failures — backing off for %ds to reduce WmiPrvSE load",
+            "AWCC WMI: %d consecutive failures — backing off for %ds, will reconnect after",
             _fail_count, _BACKOFF_SECS
         )
-        _fail_count = 0   # reset so next backoff period is a fresh count
+        _fail_count  = 0
+        # Drop the stale WMI object so _try_connect() is called fresh after backoff.
+        _awcc        = None
+        _available   = None
+        _fans        = []
+        _fans_ready  = False
 
 
 def _record_awcc_success():
@@ -411,11 +416,9 @@ def get_system_info() -> dict:
 
 def _try_connect() -> bool:
     """Attempt to connect to the AWCC WMI interface. Returns True on success."""
-    try:
-        import pythoncom
-        pythoncom.CoInitialize()
-    except Exception:
-        pass
+    # CoInitialize is the SensorThread's responsibility (_poll_loop calls it).
+    # Calling it again here imbalances the COM apartment reference count and
+    # can cause CO_E_NOTINITIALIZED on subsequent WMI calls.
     try:
         import wmi
         wmi_obj = wmi.WMI(namespace=r"root\WMI")
@@ -500,32 +503,53 @@ def _ensure_fans_discovered():
         if not inst:
             return
         discovered = []
-        # m18 fan IDs sit in 0x31–0x63 based on community findings
-        for fan_id in range(0x31, 0x64):
+        # Scan the known fan ID range for m18 R2 (0x31–0x3F covers all real fans).
+        # A wider range causes dozens of WMI calls for phantom IDs that GetFanSensors
+        # returns non-zero counts for but no real fan data.
+        for fan_id in range(0x31, 0x40):
             try:
                 arg   = (fan_id << 8) | 0x01
                 count = inst.GetFanSensors(arg)[0]
                 if count in _WMI_FAIL or count == 0:
                     continue
-                sensors = []
-                for i in range(min(count, 8)):   # cap at 8 sensors per fan
+                sensors_list = []
+                for i in range(min(count, 8)):
                     s_arg = (i << 16) | (fan_id << 8) | 0x02
                     sid   = inst.GetFanSensors(s_arg)[0]
                     if sid not in _WMI_FAIL:
-                        sensors.append(sid)
-                discovered.append((fan_id, sensors))
-                logger.debug("AWCC fan discovered: 0x%X (%d sensor(s))", fan_id, len(sensors))
+                        sensors_list.append(sid)
+                discovered.append((fan_id, sensors_list))
+                logger.debug("AWCC fan discovered: 0x%X (%d sensor(s))", fan_id, len(sensors_list))
             except Exception:
                 continue
 
-        if discovered:
+        # Validate: keep only fan IDs that actually return a live RPM reading.
+        # This prunes phantom IDs that pass the sensor-count check but return
+        # WMI_FAIL on every get_fan_rpm call, which pile up fail-count fast.
+        validated = []
+        for fan_id, sensor_ids in discovered:
+            rpm = get_fan_rpm(fan_id)
+            if rpm is not None:
+                validated.append((fan_id, sensor_ids))
+                logger.debug("AWCC fan validated: 0x%X  RPM=%d", fan_id, rpm)
+            else:
+                logger.debug("AWCC fan pruned (no RPM response): 0x%X", fan_id)
+
+        if validated:
+            _fans      = validated
+            _fans_ready = True
+            logger.info("AWCC: %d fan(s) active: %s",
+                        len(_fans),
+                        ", ".join(f"0x{fid:X}" for fid, _ in _fans))
+        elif discovered:
+            # All discovered fans failed validation — keep them anyway as fallback
             _fans      = discovered
             _fans_ready = True
-            logger.info("AWCC: %d fan(s) discovered: %s",
+            logger.info("AWCC: %d fan(s) (unvalidated): %s",
                         len(_fans),
                         ", ".join(f"0x{fid:X}" for fid, _ in _fans))
         else:
-            # Fallback: try common known IDs and use whatever responds
+            # Fallback: probe known common IDs
             for fid in (0x32, 0x33, 0x34, 0x35):
                 rpm = get_fan_rpm(fid)
                 if rpm is not None:
@@ -536,4 +560,4 @@ def _ensure_fans_discovered():
                 logger.info("AWCC: %d fan(s) via fallback probe", len(_fans))
             else:
                 logger.warning("AWCC: no fans discovered — check AWCC service is running")
-                _fans_ready = True   # don't keep retrying every poll cycle
+                _fans_ready = True

@@ -22,12 +22,38 @@ _REG_NAME = "AlienCore"
 def _launch_command() -> str:
     """Return the command that should be in the Run key."""
     if getattr(sys, "frozen", False):
-        # Compiled exe — point straight at it
         return f'"{sys.executable}"'
-    # Script mode — use the VBS launcher to avoid a visible console window
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     vbs  = os.path.join(base, "launch.vbs")
     return f'wscript.exe "{vbs}"'
+
+
+def _write_vbs() -> bool:
+    """Write launch.vbs next to aliencore.py with the current Python executable path."""
+    base   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    script = os.path.join(base, "aliencore.py")
+    vbs    = os.path.join(base, "launch.vbs")
+
+    # Prefer pythonw.exe so no console window appears at startup
+    python_dir = os.path.dirname(sys.executable)
+    pythonw    = os.path.join(python_dir, "pythonw.exe")
+    if not os.path.exists(pythonw):
+        pythonw = sys.executable
+
+    # VBS: run pythonw silently, cwd set to aliencore root
+    content = (
+        'Set oShell = CreateObject("WScript.Shell")\n'
+        f'oShell.CurrentDirectory = "{base}"\n'
+        f'oShell.Run """{pythonw}"" ""{script}""", 0, False\n'
+    )
+    try:
+        with open(vbs, "w", encoding="utf-8") as f:
+            f.write(content)
+        logger.info("launch.vbs written: %s", vbs)
+        return True
+    except Exception as e:
+        logger.error("Failed to write launch.vbs: %s", e)
+        return False
 
 
 def is_enabled() -> bool:
@@ -41,7 +67,9 @@ def is_enabled() -> bool:
 
 
 def enable() -> bool:
-    """Write the Run key entry. Returns True on success."""
+    """Write launch.vbs and the Run key entry. Returns True on success."""
+    if not getattr(sys, "frozen", False):
+        _write_vbs()   # ensure the VBS target exists before the registry points to it
     try:
         cmd = _launch_command()
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY,

@@ -2882,7 +2882,7 @@ class SettingsWindow:
         status_row.pack(fill="x", pady=(0, 6))
 
         exe = lhm_manager.bridge_exe_path()
-        found = bool(lhm_manager._bridge_path())
+        found = bool(exe)
         status_text  = "Bridge ready" if found else "Bridge exe not found"
         status_color = ACCENT2 if found else WARN
 

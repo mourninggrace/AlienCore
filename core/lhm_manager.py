@@ -30,6 +30,15 @@ _proc          = None   # subprocess.Popen or None
 _fail_count    = 0      # consecutive poll failures since last success
 _ever_succeeded = False
 
+# ── restart backoff ───────────────────────────────────────────────────────────
+# Repeated CLR + hardware.Open() launches every 2s cause visible CPU spikes.
+# After each failure, double the wait before allowing the next restart.
+# Reset to 0 on first success so future crashes re-enter the ramp from scratch.
+_last_kill_time:    float = 0.0
+_restart_delay_secs: float = 0.0
+_BACKOFF_MIN  = 5.0    # minimum wait after a failure (seconds)
+_BACKOFF_MAX  = 60.0   # cap — retry at least once per minute
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
@@ -49,6 +58,13 @@ def get_sensors() -> list:
         _log_failure("lhm_bridge.exe not found at expected path")
         return []
 
+    # Backoff: don't spawn a new CLR process until the delay has passed.
+    # Each failure doubles the wait; success resets it to zero.
+    if _last_kill_time > 0:
+        elapsed = time.time() - _last_kill_time
+        if elapsed < _restart_delay_secs:
+            return []   # still in back-off window
+
     with _lock:
         proc = _ensure_running(exe)
         if proc is None:
@@ -66,6 +82,7 @@ def get_sensors() -> list:
             sensors = json.loads(raw.decode("utf-8"))
             _fail_count     = 0
             _ever_succeeded = True
+            _reset_backoff()
             return sensors
 
         except json.JSONDecodeError as e:
@@ -136,7 +153,7 @@ def _ensure_running(exe: str):
 
 def _kill_proc():
     """Terminate the bridge process. Must be called while _lock is held."""
-    global _proc, _fail_count
+    global _proc, _fail_count, _last_kill_time, _restart_delay_secs
     if _proc is None:
         return
     try:
@@ -153,6 +170,16 @@ def _kill_proc():
         pass
     _proc = None
     _fail_count += 1
+    _last_kill_time = time.time()
+    _restart_delay_secs = _BACKOFF_MIN if _restart_delay_secs < _BACKOFF_MIN \
+        else min(_BACKOFF_MAX, _restart_delay_secs * 2)
+
+
+def _reset_backoff():
+    """Called on successful poll — resets restart backoff so future crashes start fresh."""
+    global _restart_delay_secs, _last_kill_time
+    _restart_delay_secs = 0.0
+    _last_kill_time     = 0.0
 
 
 def _log_failure(msg: str):
