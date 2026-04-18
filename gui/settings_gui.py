@@ -391,7 +391,8 @@ class SettingsWindow:
         self._opt(t, "sensors.gpu_temp",    "GPU core temperature",         "Via LHM")
         self._opt(t, "sensors.gpu_hotspot", "GPU hot spot temperature",     "Junction temp — runs ~15–20° hotter than core")
         self._opt(t, "sensors.gpu_mem_temp","GPU VRAM junction temperature","Via LHM")
-        self._opt(t, "sensors.nvme_temp",   "NVMe / SSD temperature",       "Via LibreHardwareMonitor")
+        self._opt(t, "sensors.nvme_temp",   "Primary NVMe / SSD temp",      "Via LibreHardwareMonitor")
+        self._opt(t, "sensors.nvme_temp2",  "Second NVMe / SSD temp",       "Auto-hidden if no second drive is installed")
         self._opt(t, "sensors.fan_rpm",     "Fan RPM / DIMM temperature",   "Chassis fan RPMs via AWCC, or RAM stick temps as fallback")
         self._opt(t, "sensors.ram_usage",   "RAM usage %",                  "Live memory pressure")
         self._opt(t, "sensors.cpu_load",    "CPU load %",                   "Overall utilization")
@@ -403,8 +404,17 @@ class SettingsWindow:
         self._opt(t, "sensors.cpu_watts",   "CPU power draw (W)",           "Via LibreHardwareMonitor")
         self._opt(t, "sensors.gpu_watts",   "GPU power draw (W)",           "Via nvidia-smi")
         self._opt(t, "sensors.battery",     "Battery %",                    "Charge level and charging state")
-        self._opt(t, "sensors.net_io",      "Network throughput (MB/s)",    "Upload ↑ and download ↓ speeds")
+        self._opt(t, "sensors.net_io",      "Network throughput",           "Upload ↑ and download ↓ speeds")
         self._opt(t, "sensors.disk_io",     "Disk throughput (MB/s)",       "Read and write speeds")
+
+        self._row_label(t, "Network units")
+        nu = self._var("display.net_unit", str)
+        nrow = tk.Frame(t, bg=BG_SECT); nrow.pack(fill="x", padx=20, pady=(0,8))
+        for val, lbl in [("MB/s", "MB/s"), ("Mbps", "Mbps"), ("kbps", "kbps")]:
+            tk.Radiobutton(nrow, text=lbl, variable=nu, value=val,
+                           bg=BG_SECT, fg=FG, selectcolor=BG_SECT,
+                           activebackground=BG_SECT, activeforeground=ACCENT,
+                           font=("Segoe UI",9)).pack(side="left", padx=10)
 
         self._row_label(t, "CPU temperature mode")
         mv = self._var("sensors.cpu_temp_mode", str)
@@ -2721,12 +2731,14 @@ class SettingsWindow:
                  bg=BG_HW, fg=FG_DIM).pack(anchor="w", pady=(0, 10))
         tk.Label(hero,
                  text=(
-                     "A comprehensive adaptive system optimizer built for Windows.\n"
-                     "Replaces many other programs already available for download in one tool —\n"
-                     "automatic profile switching, real-time sensor monitoring, GPU transparency,\n"
-                     "memory management, AI-assisted tuning & more.\n"
-                     "This program was built on and for Alienware M18 R2 laptops (2024) —\n"
-                     "any configuration, but still works well on any Windows system."
+                     "A comprehensive adaptive system optimizer built for Windows. "
+                     "Capabilities include, but are not limited to: real-time sensor "
+                     "monitoring, GPU transparency tools, memory management, AI-assisted "
+                     "tuning with multiple-choice suggestions, change PC settings using "
+                     "natural language, reduce heat output on powerful high-end processors "
+                     "without pinching performance, and much more.\n\n"
+                     "This program was built on the Alienware M18 R2 laptop (2024) "
+                     "(i9-14900HX; RTX 4090) and was designed to work with any Windows PC."
                  ),
                  font=("Segoe UI", 9),
                  bg=BG_HW, fg=FG, justify="left", wraplength=860).pack(anchor="w")

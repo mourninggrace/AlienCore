@@ -144,6 +144,7 @@ DEFAULT_CONFIG = {
         "update_interval_unit": "seconds",    # "seconds" or "milliseconds"
         "bar_orientation": "horizontal",      # "horizontal" | "vertical"
         "settings_theme": "Venom",            # settings window color theme
+        "net_unit":       "MB/s",             # "MB/s" | "Mbps" | "kbps"
     },
 
     # ── Sensors to show ──
@@ -153,7 +154,8 @@ DEFAULT_CONFIG = {
         "gpu_temp":       True,
         "gpu_hotspot":    False,              # GPU hot spot junction temp
         "gpu_mem_temp":   False,              # VRAM junction temp
-        "nvme_temp":      True,
+        "nvme_temp":      True,               # primary NVMe drive temp
+        "nvme_temp2":     True,               # second NVMe drive (auto-hidden if absent)
         "fan_rpm":        True,
         "ram_usage":      True,
         "cpu_load":       False,

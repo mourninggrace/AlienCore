@@ -82,13 +82,14 @@ def _eye_inner(eye_poly, shrink=0.42):
             for x, y in eye_poly]
 
 # Sensor definitions — (config_key, display_label, reading_key, unit, kind)
-# kind: 'temp' | 'pct' | 'list_temp' | 'list_rpm' | 'vram' | 'watts' | 'ram_temp'
+# kind: 'temp' | 'pct' | 'list_temp' | 'list_rpm' | 'vram' | 'watts' | 'ram_temp' | 'nvme_primary' | 'nvme_secondary'
 SENSOR_DEFS = [
     ("cpu_temp",    "CPU",  "cpu_temp_avg",      "°", "temp"),
     ("gpu_temp",    "GPU",  "gpu_temp",          "°", "temp"),
     ("gpu_hotspot", "GHOT", "gpu_temp_hotspot",  "°", "temp"),
     ("gpu_mem_temp","GMEM", "gpu_temp_memory",   "°", "temp"),
-    ("nvme_temp",   "NVM",  "nvme_temps",        "°", "list_temp"),
+    ("nvme_temp",   "NVM1", "nvme_temps",        "°", "nvme_primary"),
+    ("nvme_temp2",  "NVM2", "nvme_temps",        "°", "nvme_secondary"),
     ("fan_rpm",     "DIMM", "ram_temps",         "°", "ram_temp"),
     ("ram_usage",   "RAM",  "ram_usage_pct",     "%", "pct"),
     ("cpu_load",    "CPU%", "cpu_load_pct",      "%", "pct"),
@@ -284,6 +285,20 @@ def _get_reading(kind, reading_key, label, unit, readings, thresh):
         if not items:
             return "---", "#888888"
         val = max(t["temp_c"] for t in items)
+        return sensors.fmt_temp(val), _temp_color(label, val, thresh)
+
+    elif kind == "nvme_primary":
+        items = readings.get(reading_key, [])
+        if not items:
+            return "---", "#888888"
+        val = items[0]["temp_c"]
+        return sensors.fmt_temp(val), _temp_color(label, val, thresh)
+
+    elif kind == "nvme_secondary":
+        items = readings.get(reading_key, [])
+        if len(items) < 2:
+            return "---", "#888888"
+        val = items[1]["temp_c"]
         return sensors.fmt_temp(val), _temp_color(label, val, thresh)
 
     elif kind == "list_rpm":

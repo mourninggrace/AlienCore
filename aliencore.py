@@ -298,6 +298,13 @@ def _start_tray(hw: dict):
         from core import lhm_manager
         lhm_manager.stop()
         tray.stop()
+        # Force immediate process termination.  Python's normal interpreter
+        # shutdown waits on the Tk mainloop thread (a native Tcl_DoOneEvent
+        # call can't be interrupted even on a daemon thread), reaps every
+        # lingering Popen, and tears down COM apartments — cumulatively
+        # several seconds on some machines.  We've already run our orderly
+        # cleanup above, so a hard exit here is safe and snappy.
+        os._exit(0)
 
     tray.start(on_settings_open=on_settings_open, on_quit=on_quit)
 
@@ -333,11 +340,12 @@ def _install_service():
             "type=", "own",
         ]
         result = subprocess.run(cmd, capture_output=True, text=True,
-                                creationflags=_cnw)
+                                creationflags=_cnw, timeout=15)
         if result.returncode == 0:
             # Add description
             subprocess.run(["sc", "description", svc_name, description],
-                           capture_output=True, creationflags=_cnw)
+                           capture_output=True, creationflags=_cnw,
+                           timeout=10)
             print(f"Service '{svc_name}' installed successfully.")
             print("To start it now: sc start AlienCoreService")
             print("Or reboot — it will start automatically.")
@@ -353,10 +361,10 @@ def _uninstall_service():
     _cnw = subprocess.CREATE_NO_WINDOW
     svc_name = "AlienCoreService"
     subprocess.run(["sc", "stop",   svc_name], capture_output=True,
-                   creationflags=_cnw)
+                   creationflags=_cnw, timeout=15)
     result = subprocess.run(["sc", "delete", svc_name],
                             capture_output=True, text=True,
-                            creationflags=_cnw)
+                            creationflags=_cnw, timeout=10)
     if result.returncode == 0:
         print(f"Service '{svc_name}' removed.")
     else:

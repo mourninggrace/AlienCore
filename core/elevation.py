@@ -107,6 +107,7 @@ def task_exists() -> bool:
             ["schtasks", "/Query", "/TN", _TASK_NAME],
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10,
         )
         return result.returncode == 0
     except Exception:
@@ -142,6 +143,7 @@ def install_elevated_task() -> bool:
         result = subprocess.run(
             cmd, capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=15,
         )
         if result.returncode == 0:
             logger.info("Elevated startup task installed: %s", _TASK_NAME)
@@ -163,6 +165,7 @@ def uninstall_elevated_task() -> bool:
             ["schtasks", "/Delete", "/TN", _TASK_NAME, "/F"],
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10,
         )
         if result.returncode == 0:
             logger.info("Elevated startup task removed.")
@@ -192,6 +195,7 @@ def cleanup_legacy_tasks() -> int:
                 ["schtasks", "/Query", "/TN", name],
                 capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=10,
             )
             if query.returncode != 0:
                 continue   # doesn't exist — nothing to do
@@ -199,6 +203,7 @@ def cleanup_legacy_tasks() -> int:
                 ["schtasks", "/Delete", "/TN", name, "/F"],
                 capture_output=True, text=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=10,
             )
             if result.returncode == 0:
                 logger.info("Removed legacy startup task: %s", name)

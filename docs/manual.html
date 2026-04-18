@@ -520,7 +520,7 @@
 ════════════════════════════════════════════════════════════ -->
 <section id="sensor-bar">
   <h2>Sensor Bar</h2>
-  <p>The sensor bar is a thin, always-on-top strip that floats above all other windows and displays live hardware stats. It automatically hides when a full-screen application (game) is active.</p>
+  <p>The sensor bar is a thin, always-on-top strip that floats above all other windows and displays live hardware stats. It auto-hides when a full-screen application (game) is active, shows the current profile and a live system clock on the left, and uses a subtle green perimeter animation whose speed tracks CPU load.</p>
 
   <h3>Available Sensors</h3>
   <table>
@@ -529,7 +529,8 @@
     <tr><td>GPU Temperature</td><td>GPU core temperature via LibreHardwareMonitor</td><td>On</td></tr>
     <tr><td>GPU Hot Spot</td><td>Junction temperature (~15–20° hotter than core)</td><td>Off</td></tr>
     <tr><td>GPU VRAM Temp</td><td>VRAM junction temperature</td><td>Off</td></tr>
-    <tr><td>NVMe Temperature</td><td>SSD temperature</td><td>On</td></tr>
+    <tr><td>NVM1 (Primary NVMe)</td><td>Primary NVMe / SSD temperature</td><td>On</td></tr>
+    <tr><td>NVM2 (Second NVMe)</td><td>Second NVMe / SSD temperature — auto-hidden if no second drive is installed</td><td>On</td></tr>
     <tr><td>Fan RPM</td><td>System fan speed</td><td>On</td></tr>
     <tr><td>RAM Usage</td><td>Used / Total GB</td><td>On</td></tr>
     <tr><td>CPU Load</td><td>Overall CPU utilization %</td><td>Off</td></tr>
@@ -541,13 +542,22 @@
     <tr><td>CPU Watts</td><td>CPU power draw</td><td>Off</td></tr>
     <tr><td>GPU Watts</td><td>GPU power draw</td><td>Off</td></tr>
     <tr><td>Battery</td><td>Battery % and charging state</td><td>On</td></tr>
-    <tr><td>Network I/O</td><td>Upload / download throughput (MB/s)</td><td>Off</td></tr>
+    <tr><td>Network I/O</td><td>Upload / download throughput — unit is configurable (MB/s, Mbps, kbps)</td><td>Off</td></tr>
     <tr><td>Disk I/O</td><td>Read / write throughput (MB/s)</td><td>Off</td></tr>
   </table>
 
   <div class="box box-tip">
-    <strong>Tip:</strong> Double-click any value in the sensor bar to open a 90-second history chart for that sensor, with live min / avg / max stats and auto-refresh every 2 seconds.
+    <strong>Tip:</strong> Double-click any value in the sensor bar to open a 90-second history chart for that sensor, with live min / avg / max stats and auto-refresh every 2 seconds. Because each NVMe drive has its own cell, the history chart now shows per-drive data instead of merging both drives into one trace.
   </div>
+
+  <h3>Profile Badge &amp; System Clock</h3>
+  <p>The left-most cell on the bar stacks the current profile name (<code>IDLE</code>, <code>GAMING</code>, <code>STREAMING</code>, or any user profile) above a 12-hour system clock with seconds and AM/PM suffix. The clock updates every second at zero cost — a 30 fps animation frame simply skips the repaint until the wall-clock second rolls over. When <strong>Turbo Cool</strong> is active, the badge swaps to a cyan <code>COOL M:SS</code> readout showing how long the boost has been running.</p>
+
+  <h3>Resize &amp; Position</h3>
+  <p>Drag the body of the bar with the left mouse button to move it. The bar auto-snaps to screen edges. To resize, hover the <strong>bottom edge</strong> of a horizontal bar (or the <strong>right edge</strong> of a vertical bar) until the cursor changes to a double-arrow, then drag — the entire bar scales smoothly between roughly 65 % and 220 % of the default size. All cell fonts, paddings, and chart heights scale together, and the new size persists across restarts. The fixed size presets from earlier builds have been replaced by this continuous drag-to-resize.</p>
+
+  <h3>Animated Perimeter &amp; Breathing Dot</h3>
+  <p>A thin green comet circles the bar's perimeter. Its speed is modulated by current CPU load — nearly still at idle, briskly moving under sustained load — so the animation itself doubles as an ambient load indicator. A small breathing dot pulses next to the profile name whenever a profile switch has just occurred, then fades back to steady-state.</p>
 
   <h3>Temperature Color Coding</h3>
   <table>
@@ -594,9 +604,11 @@
     <tr><td class="setting">Temperature Unit</td><td class="default">Celsius</td><td>Switch between °C and °F across all displays.</td></tr>
     <tr><td class="setting">Update Interval</td><td class="default">2.0 seconds</td><td>How often sensor data refreshes. Can be set in seconds or milliseconds. Lower = smoother but more CPU overhead.</td></tr>
     <tr><td class="setting">Bar Orientation</td><td class="default">Horizontal</td><td>Arrange the sensor bar horizontally (top/bottom edge) or vertically (side edge).</td></tr>
+    <tr><td class="setting">Bar Size</td><td class="default">1.0×</td><td>Continuous — drag the bottom edge of a horizontal bar or the right edge of a vertical bar to resize. No fixed presets; scale range is roughly 0.65× to 2.2×.</td></tr>
     <tr><td class="setting">Auto-hide Fullscreen</td><td class="default">On</td><td>Automatically hides the sensor bar when a full-screen app is detected (e.g., a game).</td></tr>
-    <tr><td class="setting">Theme</td><td class="default">Void</td><td>Color theme for the Settings window. 12 themes available.</td></tr>
-    <tr><td class="setting">Sensors to Display</td><td class="default">CPU, GPU, NVMe, Fan, RAM, Battery</td><td>Toggle individual sensors on or off. Changes take effect immediately.</td></tr>
+    <tr><td class="setting">Theme</td><td class="default">Venom</td><td>Color theme for the Settings window. 12 distinct themes (Void, Hex, Purple, Glacier, Venom, Abyss, Aurora, Ember, Ash, Dusk, Ice, Noir).</td></tr>
+    <tr><td class="setting">Network Units</td><td class="default">MB/s</td><td>Unit used by the Network I/O cell and its history chart. Choose <strong>MB/s</strong> (default — megabytes per second), <strong>Mbps</strong> (megabits, matches ISP advertised speeds), or <strong>kbps</strong> (kilobits, useful on slow or metered links).</td></tr>
+    <tr><td class="setting">Sensors to Display</td><td class="default">CPU, GPU, NVM1, NVM2, Fan, RAM, Battery</td><td>Toggle individual sensors on or off. Changes take effect immediately. NVM2 auto-hides when no second NVMe / SSD is present.</td></tr>
   </table>
 
   <div class="box box-tip">

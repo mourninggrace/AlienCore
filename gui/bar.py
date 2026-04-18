@@ -1,48 +1,113 @@
 """
 AlienCore - bar.py
-Slim always-on-top sensor bar — floats anywhere on screen, draggable.
-Shows all enabled sensors in a horizontal row with colored values.
+HUD-style always-on-top sensor bar.
 
-Polish:
-  - DWM rounded corners (Windows 11)
-  - Colored profile dot (Canvas) + dim text label
-  - Hover tooltip per sensor
-  - Double-click sparkline popup (90-sample history)
-  - Threshold flash on warn/crit transition
-  - Fullscreen auto-hide
+Each sensor renders as a chamfered canvas cell containing:
+  · colored left accent strip (cool / warn / hot)
+  · dim label row
+  · bold value row
+  · inline micro-chart (last 30 samples, area fill + line)
+
+Preserves: drag, right-click context menu, double-click 90-sample sparkline
+popup, hover tooltip, orientation toggle, size presets (S/M/L/XL), fullscreen
+auto-hide, position persistence, DWM rounded corners, profile-aware highlight.
 """
 
 import tkinter as tk
-import threading
+import tkinter.font as tkFont
 import logging
 import collections
 import ctypes
+import math
+import time
 from core import config_manager as cfg, sensors, profiles
 from core.constants import COLOR_COOL, COLOR_WARM, COLOR_HOT
 
 logger = logging.getLogger("aliencore.bar")
 
-# ── Size presets ──────────────────────────────────────────────────────────────
-BAR_SIZES = {
-    "Small":  {"label": 8,  "value": 11, "sep": 9,  "pad_x": 4,  "pad_y": 2},
-    "Medium": {"label": 9,  "value": 13, "sep": 11, "pad_x": 6,  "pad_y": 3},
-    "Large":  {"label": 10, "value": 16, "sep": 13, "pad_x": 8,  "pad_y": 4},
-    "XL":     {"label": 12, "value": 20, "sep": 15, "pad_x": 10, "pad_y": 6},
+# ── Inline micro-chart animation ──────────────────────────────────────────────
+# Sensors are read at the sensor-poll rate (~2–3 s, cheap).  The inline chart
+# is redrawn at a much higher rate and plots samples on a time-indexed x-axis,
+# so the line flows smoothly leftward between polls.
+CHART_WINDOW_SECONDS   = 20    # time span shown inside each cell
+CHART_DRAW_INTERVAL_MS = 33    # ~30 fps
+_SAMPLE_LOG_MAXLEN     = 120   # per-sensor (t, v) ring buffer — enough for fast polling
+
+# ── Polish animation tunables ────────────────────────────────────────────────
+_PULSE_PERIOD_SECONDS  = 1.8   # breathing cycle for accent / current-value dot
+_COLOR_LERP_PER_FRAME  = 0.22  # catch-up rate when threshold color changes (~350ms)
+
+# ── Perimeter comet (green glow traveling around the bar edge) ───────────────
+# A short, faded trail of line segments walks the 1-px border ring clockwise.
+# Its speed ramps with CPU load: idle = slow drift, max load = brisk sweep.
+_COMET_HEAD_COLOR   = "#00FF88"   # bright edge of the trail
+_COMET_SEGMENT_PX   = 4           # length of each tail segment (pixels)
+_PERIMETER_SEGMENTS = 18          # segment count — total trail ≈ 72 px
+_COMET_SPEED_MIN    = 45.0        # pixels / second at  0 % CPU load
+_COMET_SPEED_MAX    = 240.0       # pixels / second at 100 % CPU load
+
+# ── Sizing ────────────────────────────────────────────────────────────────────
+# The bar is resized by dragging an edge — bottom edge for horizontal bars,
+# right edge for vertical bars.  A single continuous scale factor drives every
+# font size, chart height, and padding in the bar.  A saved scale is persisted
+# to config so the bar reopens at the user's chosen dimensions.
+_SCALE_MIN     = 0.65
+_SCALE_MAX     = 2.20
+_SCALE_DEFAULT = 1.00
+
+_RING_PX           = 5     # ring of outer-canvas pixels reserved for the comet
+_COMET_INSET       = 2     # comet line inset from the canvas edge (centers it in the ring)
+_RESIZE_EDGE_PX    = 7     # distance from edge that qualifies as the resize zone
+
+def _scaled_preset(scale: float) -> dict:
+    """Per-size parameters derived from the continuous scale factor."""
+    scale = max(_SCALE_MIN, min(_SCALE_MAX, scale))
+    return {
+        "label":   max(6, int(round(8.0  * scale))),
+        "value":   max(8, int(round(13.0 * scale))),
+        "chart_h": max(5, int(round(9.0  * scale))),
+        "accent":  max(2, int(round(3.0  * scale))),
+        "pad_x":   max(4, int(round(6.0  * scale))),
+        "pad_y":   max(2, int(round(4.0  * scale))),
+        "gap":     max(2, int(round(4.0  * scale))),
+    }
+
+# ── Color palette ─────────────────────────────────────────────────────────────
+BG           = "#0b0b12"
+CELL_BG      = "#13131e"
+CELL_OUTLINE = "#232334"
+BORDER       = "#1a1f2e"
+FG_LABEL     = "#6e6e88"
+FG_DIM       = "#44445a"
+
+# Per-sensor maximum sample values (used once at build to size each cell)
+_SAMPLE_VALUES = {
+    "cpu_temp":     "100°",
+    "gpu_temp":     "100°",
+    "gpu_hotspot":  "110°",
+    "gpu_mem_temp": "100°",
+    "nvme_temp":    "100°",
+    "nvme_temp2":   "100°",
+    "fan_rpm":      "9.9K",
+    "ram_usage":    "100%",
+    "cpu_load":     "100%",
+    "gpu_load":     "100%",
+    "gpu_vram":     "100%",
+    "cpu_watts":    "250W",
+    "gpu_watts":    "250W",
+    "gpu_fan":      "100%",
+    "cpu_freq":     "5.8G",
+    "gpu_clock":    "2850M",
+    "battery":      "100+",
+    "net_io":       "↓999k ↑999k",
+    "disk_io":      "R999 W999",
 }
-DEFAULT_SIZE = "Medium"
-BG         = "#0d0d0d"
-FG_LABEL   = "#ffffff"
-FG_DIM     = "#666666"
-BORDER     = "#1a1f2e"
-FONT_LABEL = ("Consolas", 9)
-FONT_VALUE = ("Consolas", 13, "bold")
-FONT_SEP   = ("Consolas", 11)
 
 _PROFILE_COLORS = {
-    "idle":      "#1a4a6e",
-    "gaming":    "#cc2200",
-    "streaming": "#0066cc",
-    "manual":    "#886600",
+    "idle":      "#2a6b98",
+    "gaming":    "#e63300",
+    "streaming": "#0088e0",
+    "manual":    "#b88800",
 }
 
 _instance = None
@@ -56,7 +121,7 @@ class _Tooltip:
     """Simple hover tooltip shown below a widget."""
     def __init__(self, widget, text_fn):
         self._widget  = widget
-        self._text_fn = text_fn   # callable returning tooltip string
+        self._text_fn = text_fn
         self._tip     = None
         widget.bind("<Enter>", self._show, add="+")
         widget.bind("<Leave>", self._hide, add="+")
@@ -85,13 +150,12 @@ class _Tooltip:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sparkline popup
+# Sparkline popup (double-click sensor cell to open)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class _Sparkline:
-    _open = {}   # config_key → {"win": Toplevel, "history": deque}
+    _open = {}
 
-    # Chart layout constants
     _W     = 600
     _H     = 200
     _PAD_L = 48
@@ -102,7 +166,6 @@ class _Sparkline:
     @classmethod
     def show(cls, config_key: str, label: str,
              history: collections.deque, unit: str):
-        # Close any existing window for this key first
         if config_key in cls._open:
             try:
                 cls._open[config_key]["win"].destroy()
@@ -111,73 +174,60 @@ class _Sparkline:
 
         PL, PR     = cls._PAD_L, cls._PAD_R
         PT, PB     = cls._PAD_T, cls._PAD_B
-        BG         = "#0c0c12"
+        BG_W       = "#0c0c12"
         BG2        = "#12121c"
         FG         = "#e0e0f0"
-        FG_DIM     = "#44445a"
+        FG_DIM_    = "#44445a"
         FG_MED     = "#666680"
 
         win = tk.Toplevel()
-        win.withdraw()   # hide during construction to prevent bar geometry flicker
+        win.withdraw()
         win.title(f"{label}  —  90-second history")
         win.attributes("-topmost", True)
-        win.configure(bg=BG)
+        win.configure(bg=BG_W)
         win.resizable(True, True)
         win.minsize(500, 340)
         from gui.tray import set_window_icon
         set_window_icon(win)
 
-        # ── Header ──────────────────────────────────────────────────────────────
-        hdr = tk.Frame(win, bg=BG)
+        hdr = tk.Frame(win, bg=BG_W)
         hdr.pack(fill="x", padx=18, pady=(14, 0))
-
         tk.Label(hdr, text=label,
                  font=("Segoe UI", 13, "bold"),
-                 bg=BG, fg=FG).pack(side="left")
-
+                 bg=BG_W, fg=FG).pack(side="left")
         cur_lbl = tk.Label(hdr, text="—",
                            font=("Consolas", 22, "bold"),
-                           bg=BG, fg=COLOR_COOL)
+                           bg=BG_W, fg=COLOR_COOL)
         cur_lbl.pack(side="right", padx=(0, 2))
 
-        # ── Separator ───────────────────────────────────────────────────────────
         tk.Frame(win, bg="#1a1a28", height=1).pack(fill="x", padx=18, pady=(8, 0))
 
-        # ── Canvas — fills all available space, grows with window ────────────────
         canvas = tk.Canvas(win, bg=BG2, highlightthickness=0, bd=0)
         canvas.pack(padx=18, pady=(10, 0), fill="both", expand=True)
 
-        # ── Stats row ───────────────────────────────────────────────────────────
-        stats = tk.Frame(win, bg=BG)
+        stats = tk.Frame(win, bg=BG_W)
         stats.pack(fill="x", padx=18, pady=(8, 16))
 
         min_lbl = tk.Label(stats, text="Min  —",
-                           font=("Segoe UI", 8), bg=BG, fg=FG_MED)
+                           font=("Segoe UI", 8), bg=BG_W, fg=FG_MED)
         min_lbl.pack(side="left")
-
         avg_lbl = tk.Label(stats, text="Avg  —",
-                           font=("Segoe UI", 8), bg=BG, fg=FG_MED)
+                           font=("Segoe UI", 8), bg=BG_W, fg=FG_MED)
         avg_lbl.pack(side="left", padx=(22, 0))
-
         max_lbl = tk.Label(stats, text="Max  —",
-                           font=("Segoe UI", 8), bg=BG, fg=FG_MED)
+                           font=("Segoe UI", 8), bg=BG_W, fg=FG_MED)
         max_lbl.pack(side="left", padx=(22, 0))
-
         cnt_lbl = tk.Label(stats, text="",
-                           font=("Segoe UI", 8), bg=BG, fg=FG_DIM)
+                           font=("Segoe UI", 8), bg=BG_W, fg=FG_DIM_)
         cnt_lbl.pack(side="right")
 
         cls._open[config_key] = {"win": win, "history": history}
 
-        # Stores the pending after() ID so resize events can cancel & replace it
         _after_id = [None]
 
-        # ── Draw function (called on first render, every 2 s, and on resize) ─────
         def _draw():
             if config_key not in cls._open:
                 return
-
-            # Read actual canvas dimensions — fall back to defaults before first render
             W = canvas.winfo_width()
             H = canvas.winfo_height()
             if W <= 1:
@@ -188,21 +238,17 @@ class _Sparkline:
             vals = [v for v in hist if v is not None]
 
             canvas.delete("all")
-            cw = W - PL - PR   # chart width
-            ch = H - PT - PB   # chart height
+            cw = W - PL - PR
+            ch = H - PT - PB
 
-            # Background grid lines
             for frac, alpha_hint in [(0.25, "#141420"), (0.5, "#181826"),
                                      (0.75, "#141420")]:
                 gy = PT + int(frac * ch)
                 canvas.create_line(PL, gy, W - PR, gy,
                                    fill=alpha_hint, dash=(3, 8), width=1)
 
-            # X-axis baseline
             canvas.create_line(PL, PT + ch, W - PR, PT + ch,
                                fill="#1c1c2c", width=1)
-
-            # Y-axis line
             canvas.create_line(PL, PT, PL, PT + ch,
                                fill="#1c1c2c", width=1)
 
@@ -210,7 +256,7 @@ class _Sparkline:
                 canvas.create_text(
                     PL + cw // 2, PT + ch // 2,
                     text="Collecting data…",
-                    fill=FG_DIM, font=("Segoe UI", 11))
+                    fill=FG_DIM_, font=("Segoe UI", 11))
                 if config_key in cls._open:
                     _after_id[0] = win.after(2000, _draw)
                 return
@@ -222,7 +268,6 @@ class _Sparkline:
             cur      = vals[-1]
             n        = len(vals)
 
-            # Color based on value and unit
             if unit in ("°", "°C", "°F"):
                 color = (COLOR_HOT  if cur >= 90 else
                          COLOR_WARM if cur >= 75 else COLOR_COOL)
@@ -232,7 +277,6 @@ class _Sparkline:
             else:
                 color = COLOR_COOL
 
-            # Parse accent color for fill
             try:
                 r = int(color[1:3], 16)
                 g = int(color[3:5], 16)
@@ -243,19 +287,15 @@ class _Sparkline:
                 fill_col = "#051008"
                 mid_col  = "#0a2010"
 
-            # Build chart points
             def _pt(i, v):
                 x = PL + int(i * cw / max(n - 1, 1))
                 y = PT + ch - int((v - mn) / span * ch)
                 return x, max(PT, min(PT + ch, y))
 
             pts = [_pt(i, v) for i, v in enumerate(vals)]
-
-            # Filled polygon under curve
             poly = pts + [(pts[-1][0], PT + ch), (pts[0][0], PT + ch)]
             canvas.create_polygon(poly, fill=fill_col, outline="")
 
-            # Mid-tone top strip for pseudo-gradient feel
             mid_h = max(2, int(ch * 0.3))
             mid_pts = []
             for x, y in pts:
@@ -263,17 +303,14 @@ class _Sparkline:
             mid_poly = pts + list(reversed(mid_pts))
             canvas.create_polygon(mid_poly, fill=mid_col, outline="")
 
-            # Main line (2 px, smooth)
             flat = [coord for pt in pts for coord in pt]
             canvas.create_line(flat, fill=color, width=2,
                                smooth=True, splinesteps=24)
 
-            # Current-value dot
             cx, cy = pts[-1]
             canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5,
                                fill=color, outline=BG2, width=2)
 
-            # Y-axis tick labels
             for frac, val in [(0.0, mx), (0.5, (mn + mx) / 2), (1.0, mn)]:
                 gy = PT + int(frac * ch)
                 canvas.create_text(PL - 6, gy,
@@ -281,23 +318,20 @@ class _Sparkline:
                                    anchor="e", fill=FG_MED,
                                    font=("Consolas", 8))
 
-            # Time axis labels
-            elapsed = n * 2   # 2-second poll interval
+            elapsed = n * 2
             canvas.create_text(PL, PT + ch + 14,
                                text=f"−{elapsed}s",
-                               anchor="w", fill=FG_DIM,
+                               anchor="w", fill=FG_DIM_,
                                font=("Consolas", 8))
             canvas.create_text(W - PR, PT + ch + 14,
                                text="now",
-                               anchor="e", fill=FG_DIM,
+                               anchor="e", fill=FG_DIM_,
                                font=("Consolas", 8))
-            # Midpoint time label
             canvas.create_text(PL + cw // 2, PT + ch + 14,
                                text=f"−{elapsed // 2}s",
-                               anchor="center", fill=FG_DIM,
+                               anchor="center", fill=FG_DIM_,
                                font=("Consolas", 8))
 
-            # Update header and stats labels
             cur_lbl.config(text=f"{cur:.1f}{unit}", fg=color)
             min_lbl.config(text=f"Min   {mn:.1f}{unit}",  fg=FG_MED)
             avg_lbl.config(text=f"Avg   {avg_val:.1f}{unit}", fg=color)
@@ -308,7 +342,6 @@ class _Sparkline:
                 _after_id[0] = win.after(2000, _draw)
 
         def _on_resize(event=None):
-            """Redraw promptly when the window is resized, cancelling any pending timer."""
             if _after_id[0]:
                 try:
                     win.after_cancel(_after_id[0])
@@ -317,13 +350,8 @@ class _Sparkline:
             _after_id[0] = win.after(80, _draw)
 
         canvas.bind("<Configure>", _on_resize)
-
         _draw()
 
-        # Center on screen at default size — use winfo_screenwidth/height directly
-        # (they query the display and don't need update_idletasks; calling
-        # update_idletasks here would process pending geometry events for the
-        # entire Tk instance including the bar, causing it to flicker)
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
         win.geometry(
@@ -331,7 +359,7 @@ class _Sparkline:
             f"+{(sw - cls._W - 36) // 2}"
             f"+{(sh - cls._H - 140) // 2}"
         )
-        win.deiconify()   # show now that geometry is set and drawing is done
+        win.deiconify()
 
         win.protocol("WM_DELETE_WINDOW", lambda: cls._close(config_key))
 
@@ -343,6 +371,464 @@ class _Sparkline:
             except Exception:
                 pass
             del cls._open[key]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Color helper
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _darken(hex_color: str, factor: float) -> str:
+    """Return a darker shade of a #rrggbb color (0.0 = black, 1.0 = original)."""
+    try:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        f = max(0.0, min(1.0, factor))
+        return f"#{int(r*f):02x}{int(g*f):02x}{int(b*f):02x}"
+    except Exception:
+        return "#000000"
+
+
+def _lerp_color(c1: str, c2: str, t: float) -> str:
+    """Interpolate between two #rrggbb colors by t in [0, 1]."""
+    try:
+        r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+        r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+        r = int(r1 + (r2 - r1) * t)
+        g = int(g1 + (g2 - g1) * t)
+        b = int(b1 + (b2 - b1) * t)
+        return f"#{max(0,min(255,r)):02x}{max(0,min(255,g)):02x}{max(0,min(255,b)):02x}"
+    except Exception:
+        return c2
+
+
+def _perimeter_point(t: float, W: int, H: int) -> tuple:
+    """(x, y) at distance t along the canvas perimeter, clockwise from (0,0)."""
+    if W <= 0 or H <= 0:
+        return (0.0, 0.0)
+    P = 2.0 * (W + H)
+    t %= P
+    if t < W:
+        return (t, 0.0)
+    t -= W
+    if t < H:
+        return (float(W), t)
+    t -= H
+    if t < W:
+        return (float(W) - t, float(H))
+    t -= W
+    return (0.0, float(H) - t)
+
+
+def _perimeter_segment_pts(t1: float, t2: float, W: int, H: int) -> list:
+    """Three perimeter points from t1 → t2 (clockwise), folding at a corner
+    when the segment crosses one.  Always yields 3 points so canvas.coords()
+    can stay a fixed length."""
+    if W <= 0 or H <= 0:
+        return [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
+    P = 2.0 * (W + H)
+    t1 %= P
+    t2 %= P
+    if t2 < t1:
+        t2 += P
+    p1 = _perimeter_point(t1, W, H)
+    p2 = _perimeter_point(t2 % P, W, H)
+    mid_pt = None
+    for c in (W, W + H, 2 * W + H, 2 * (W + H)):
+        if t1 < c < t2:
+            mid_pt = _perimeter_point(c % P, W, H)
+            break
+    if mid_pt is None:
+        mid_pt = _perimeter_point(((t1 + t2) * 0.5) % P, W, H)
+    return [p1, mid_pt, p2]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HUD sensor cell
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _HudCell:
+    """
+    A chamfered sensor cell rendered on a single tk.Canvas.
+
+    Layout (top → bottom):
+        label text     (dim)
+        value text     (bold, threshold-colored)
+        inline chart   (time-indexed samples, flows left at CHART_DRAW_INTERVAL_MS)
+
+    Left edge is a thin colored accent strip that tracks the threshold state.
+    Top-right corner is chamfered (5-px diagonal cut) for a HUD-panel feel.
+
+    Chart items (polygon + line + dot) are created once at construction and
+    updated via coords()/itemconfigure() instead of delete+create, so 30-fps
+    redraws on ~10 cells stay well under 1 % CPU.
+    """
+
+    _CHAMFER = 5
+
+    def __init__(self, parent, config_key: str, label: str, unit: str,
+                 size_preset: dict, bg: str = BG):
+        self.config_key = config_key
+        self.label      = label
+        self.unit       = unit
+
+        accent_w = size_preset["accent"]
+        chart_h  = size_preset["chart_h"]
+        pad      = 6
+        top_pad  = 3
+        mid_gap  = 2
+        bot_pad  = 3
+
+        self._label_font = tkFont.Font(
+            family="Consolas", size=size_preset["label"], weight="bold")
+        self._value_font = tkFont.Font(
+            family="Consolas", size=size_preset["value"], weight="bold")
+
+        # Measure text up front so we can size the cell once and keep the
+        # layout stable across updates.
+        sample = _SAMPLE_VALUES.get(config_key, "100%")
+        text_w = max(self._label_font.measure(label),
+                     self._value_font.measure(sample))
+        text_w = int(text_w * 1.05) + 2   # small margin for unicode width drift
+
+        label_h = self._label_font.metrics("linespace")
+        value_h = self._value_font.metrics("linespace")
+
+        cell_w = accent_w + pad + text_w + pad
+        cell_h = top_pad + label_h + mid_gap + value_h + mid_gap + chart_h + bot_pad
+
+        self.canvas = tk.Canvas(
+            parent, width=cell_w, height=cell_h,
+            bg=bg, highlightthickness=0, bd=0, cursor="fleur"
+        )
+        self._w = cell_w
+        self._h = cell_h
+
+        # 1. Chamfered background polygon (top-right corner cut)
+        ch = self._CHAMFER
+        self._bg_poly = self.canvas.create_polygon(
+            [0, 0,
+             cell_w - ch, 0,
+             cell_w, ch,
+             cell_w, cell_h,
+             0, cell_h],
+            fill=CELL_BG, outline=CELL_OUTLINE, width=1
+        )
+
+        # 2. Chart bounds
+        self._chart_x0 = accent_w + pad
+        self._chart_x1 = cell_w - pad
+        self._chart_y0 = cell_h - chart_h - bot_pad
+        self._chart_y1 = cell_h - bot_pad
+
+        # 3. Top-edge subtle highlight — implies a slightly raised panel
+        self.canvas.create_line(
+            accent_w + 1, 1, cell_w - ch - 1, 1,
+            fill="#2e2e44", width=1
+        )
+
+        # 4. Left accent strip
+        self._accent_id = self.canvas.create_rectangle(
+            0, 1, accent_w, cell_h - 1,
+            fill=COLOR_COOL, outline=""
+        )
+
+        # 7. Label text
+        self._label_id = self.canvas.create_text(
+            accent_w + pad, top_pad,
+            text=label, anchor="nw",
+            fill=FG_LABEL, font=self._label_font
+        )
+
+        # 8. Value text
+        val_y = top_pad + label_h + mid_gap
+        self._value_id = self.canvas.create_text(
+            accent_w + pad, val_y,
+            text="---", anchor="nw",
+            fill=COLOR_COOL, font=self._value_font
+        )
+
+        # 9-13. Persistent chart items — z-ordered bottom→top: polygon, glow
+        # line, main line, outer dot, inner dot.  All hidden until ≥2 samples.
+        self._chart_poly = self.canvas.create_polygon(
+            0, 0, 1, 0, 0, 1,
+            fill="", outline="", state="hidden"
+        )
+        self._chart_glow = self.canvas.create_line(
+            0, 0, 1, 0,
+            fill="", width=3, state="hidden"
+        )
+        self._chart_line = self.canvas.create_line(
+            0, 0, 1, 0,
+            fill="", width=1, state="hidden"
+        )
+        self._chart_dot_outer = self.canvas.create_oval(
+            0, 0, 1, 1,
+            fill="", outline="", state="hidden"
+        )
+        self._chart_dot = self.canvas.create_oval(
+            0, 0, 1, 1,
+            fill="", outline="", state="hidden"
+        )
+
+        # Animation state — target is the threshold color set by update_value;
+        # shown lerps toward target each frame.  is_alert drives accent pulsing.
+        self._target_color = COLOR_COOL
+        self._shown_color  = COLOR_COOL
+        self._is_alert     = False
+
+    # Widget proxying — let SensorBar call .pack / .bind directly.
+    @property
+    def widget(self):
+        return self.canvas
+
+    def pack(self, **kw):
+        self.canvas.pack(**kw)
+
+    def bind(self, *args, **kw):
+        return self.canvas.bind(*args, **kw)
+
+    def destroy(self):
+        try:
+            self.canvas.destroy()
+        except Exception:
+            pass
+
+    def update_value(self, text: str, color: str):
+        """Update value text + set target color.  Called at sensor-poll rate.
+
+        Only the text is written here; the accent strip and value-text *color*
+        are driven by the draw loop so they can interpolate smoothly toward
+        the new target over ~350 ms instead of snapping on threshold crossings.
+        """
+        try:
+            self.canvas.itemconfig(self._value_id, text=text)
+        except Exception:
+            pass
+        self._target_color = color
+        self._is_alert = color in (COLOR_WARM, COLOR_HOT)
+
+    def update_label(self, new_label: str):
+        try:
+            self.canvas.itemconfig(self._label_id, text=new_label)
+        except Exception:
+            pass
+
+    def render_chart(self, sample_log, now: float, color: str,
+                     window_seconds: float = CHART_WINDOW_SECONDS):
+        """
+        Redraw the inline chart from a time-indexed sample log.
+
+        Also drives the per-frame polish animations: color interpolation
+        toward the current threshold target, a slow sine pulse on the accent
+        strip and value-text glow when the sensor is in warn/hot state, and
+        a breathing current-value dot.  All of this is cheap — just
+        coords()/itemconfigure() on items that already exist.
+        """
+        # Smoothly lerp shown color toward the threshold target.  Runs every
+        # frame regardless of whether the chart is visible, so the accent
+        # strip and value text stay consistent even during the "collecting
+        # data" phase before two samples exist.
+        self._shown_color = _lerp_color(
+            self._shown_color, self._target_color, _COLOR_LERP_PER_FRAME)
+        shown = self._shown_color
+
+        pulse = 0.5 + 0.5 * math.sin(now * 2.0 * math.pi / _PULSE_PERIOD_SECONDS)
+        if self._is_alert:
+            accent_fill = _lerp_color(_darken(shown, 0.78), shown, pulse)
+        else:
+            accent_fill = shown
+
+        try:
+            self.canvas.itemconfigure(self._value_id, fill=shown)
+            self.canvas.itemconfigure(self._accent_id, fill=accent_fill)
+        except Exception:
+            pass
+
+        if not sample_log or len(sample_log) < 2:
+            try:
+                self.canvas.itemconfigure(self._chart_poly,      state="hidden")
+                self.canvas.itemconfigure(self._chart_glow,      state="hidden")
+                self.canvas.itemconfigure(self._chart_line,      state="hidden")
+                self.canvas.itemconfigure(self._chart_dot_outer, state="hidden")
+                self.canvas.itemconfigure(self._chart_dot,       state="hidden")
+            except Exception:
+                pass
+            return
+
+        cutoff = now - window_seconds
+        pts_raw = [(t, v) for (t, v) in sample_log
+                   if t >= cutoff and v is not None]
+        if len(pts_raw) < 2:
+            try:
+                self.canvas.itemconfigure(self._chart_poly,      state="hidden")
+                self.canvas.itemconfigure(self._chart_glow,      state="hidden")
+                self.canvas.itemconfigure(self._chart_line,      state="hidden")
+                self.canvas.itemconfigure(self._chart_dot_outer, state="hidden")
+                self.canvas.itemconfigure(self._chart_dot,       state="hidden")
+            except Exception:
+                pass
+            return
+
+        x0, x1 = self._chart_x0, self._chart_x1
+        y0, y1 = self._chart_y0, self._chart_y1
+        cw = x1 - x0
+        ch = y1 - y0
+
+        vals = [v for _, v in pts_raw]
+        mn = min(vals)
+        mx = max(vals)
+        span = max(mx - mn, 0.5)
+
+        pts = []
+        for t, v in pts_raw:
+            x_frac = (t - cutoff) / window_seconds
+            if x_frac < 0.0:
+                x_frac = 0.0
+            elif x_frac > 1.0:
+                x_frac = 1.0
+            x = x0 + x_frac * cw
+            y = y1 - ((v - mn) / span) * ch
+            if y < y0:
+                y = y0
+            elif y > y1:
+                y = y1
+            pts.append((x, y))
+
+        line_coords = [c for pt in pts for c in pt]
+        poly_coords = line_coords + [pts[-1][0], y1, pts[0][0], y1]
+        cx, cy = pts[-1]
+
+        fill_col = _darken(shown, 0.24)
+        glow_col = _darken(shown, 0.45)
+        outer_col = _darken(shown, 0.40)
+
+        # Breathing dot — radius oscillates 1.4 → 2.3 over the pulse period.
+        dot_r   = 1.4 + 0.9 * pulse
+        outer_r = dot_r + 1.5
+
+        try:
+            self.canvas.coords(self._chart_poly, *poly_coords)
+            self.canvas.itemconfigure(self._chart_poly,
+                                      fill=fill_col, state="normal")
+            self.canvas.coords(self._chart_glow, *line_coords)
+            self.canvas.itemconfigure(self._chart_glow,
+                                      fill=glow_col, state="normal")
+            self.canvas.coords(self._chart_line, *line_coords)
+            self.canvas.itemconfigure(self._chart_line,
+                                      fill=shown, state="normal")
+            self.canvas.coords(self._chart_dot_outer,
+                               cx - outer_r, cy - outer_r,
+                               cx + outer_r, cy + outer_r)
+            self.canvas.itemconfigure(self._chart_dot_outer,
+                                      fill=outer_col, state="normal")
+            self.canvas.coords(self._chart_dot,
+                               cx - dot_r, cy - dot_r,
+                               cx + dot_r, cy + dot_r)
+            self.canvas.itemconfigure(self._chart_dot,
+                                      fill=shown, state="normal")
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Profile badge — mini chamfered pill matching HUD cell geometry
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _ProfileBadge:
+    """Profile badge with a live system clock stacked below the profile name.
+
+    Profile label sits in the upper third, clock ("H:MM:SS AM/PM") fills the
+    lower portion in the HUD-cell value font so it reads clearly across the
+    room.  Cell width is sized to the wider of "STREAMING" or "11:59:59 PM".
+    """
+    _CHAMFER = 5
+
+    def __init__(self, parent, size_preset: dict, target_h: int, bg: str = BG):
+        accent_w = size_preset["accent"]
+        pad      = 6
+
+        self._profile_font = tkFont.Font(
+            family="Consolas", size=size_preset["label"], weight="bold")
+        self._clock_font = tkFont.Font(
+            family="Consolas", size=size_preset["value"], weight="bold")
+
+        # Size for whichever string is wider.  Clock width dominates most of
+        # the time ("11:59:59 PM" is ~12 chars at the value-font size).
+        profile_w = self._profile_font.measure("STREAMING")
+        clock_w   = self._clock_font.measure("11:59:59 PM")
+        text_w    = int(max(profile_w, clock_w) * 1.05) + 2
+
+        cell_w = accent_w + pad + text_w + pad
+        cell_h = target_h
+
+        self.canvas = tk.Canvas(
+            parent, width=cell_w, height=cell_h,
+            bg=bg, highlightthickness=0, bd=0, cursor="fleur"
+        )
+
+        ch = self._CHAMFER
+        self.canvas.create_polygon(
+            [0, 0,
+             cell_w - ch, 0,
+             cell_w, ch,
+             cell_w, cell_h,
+             0, cell_h],
+            fill=CELL_BG, outline=CELL_OUTLINE, width=1
+        )
+        self._accent = self.canvas.create_rectangle(
+            0, 1, accent_w, cell_h - 1,
+            fill=_PROFILE_COLORS["idle"], outline=""
+        )
+        # Stack the profile label and the clock, centered as a group within
+        # the badge.  This nudges the profile name above center (satisfying
+        # "move it up") and gives the clock room below at the value-font size.
+        text_cx   = accent_w + pad + text_w / 2
+        profile_h = self._profile_font.metrics("linespace")
+        clock_h   = self._clock_font.metrics("linespace")
+        mid_gap   = 2
+        group_h   = profile_h + mid_gap + clock_h
+        start_y   = max(2, (cell_h - group_h) // 2)
+
+        self._text = self.canvas.create_text(
+            text_cx, start_y + profile_h / 2,
+            text="IDLE", anchor="center",
+            fill="#aaaabf", font=self._profile_font
+        )
+        self._clock = self.canvas.create_text(
+            text_cx, start_y + profile_h + mid_gap + clock_h / 2,
+            text="--:--:-- --", anchor="center",
+            fill="#e0e0f0", font=self._clock_font
+        )
+
+    @property
+    def widget(self):
+        return self.canvas
+
+    def pack(self, **kw):
+        self.canvas.pack(**kw)
+
+    def bind(self, *args, **kw):
+        return self.canvas.bind(*args, **kw)
+
+    def destroy(self):
+        try:
+            self.canvas.destroy()
+        except Exception:
+            pass
+
+    def update(self, text: str, accent_color: str, fg: str = "#aaaabf"):
+        try:
+            self.canvas.itemconfig(self._accent, fill=accent_color)
+            self.canvas.itemconfig(self._text, text=text, fill=fg)
+        except Exception:
+            pass
+
+    def update_clock(self, clock_text: str):
+        try:
+            self.canvas.itemconfig(self._clock, text=clock_text)
+        except Exception:
+            pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -359,14 +845,7 @@ def start():
 
 
 def stop():
-    """Tear down the sensor bar.  Safe to call from any thread.
-
-    root.destroy() must run on the thread that owns the Tk interpreter (the
-    SensorBar thread), so we schedule it via root.after(0, …) and fall back
-    to root.quit() which is documented as thread-safe.  Without this the
-    tray-Exit path leaves the bar's mainloop spinning and the whole process
-    never terminates.
-    """
+    """Tear down the sensor bar.  Safe to call from any thread."""
     global _instance
     if not _instance:
         return
@@ -395,33 +874,67 @@ class SensorBar:
     # All sensor config keys in default display order
     _SENSOR_DEFS = [
         "cpu_temp", "gpu_temp", "gpu_hotspot", "gpu_mem_temp",
-        "nvme_temp", "fan_rpm",
+        "nvme_temp", "nvme_temp2", "fan_rpm",
         "ram_usage", "cpu_load", "gpu_load", "gpu_vram",
         "cpu_watts", "gpu_watts",
         "gpu_fan", "cpu_freq", "gpu_clock",
         "battery", "net_io", "disk_io",
     ]
 
+    # Shell windows that GetForegroundWindow may briefly return — excluded
+    # from the fullscreen-active check so transient system surfaces don't
+    # hide the bar.
+    _SHELL_CLASSES = {
+        "Progman",
+        "WorkerW",
+        "Shell_TrayWnd",
+        "Shell_SecondaryTrayWnd",
+        "Windows.UI.Core.CoreWindow",
+        "XamlExplorerHostIslandWindow",
+        "ApplicationFrameWindow",
+        "TaskListThumbnailWnd",
+        "MultitaskingViewFrame",
+    }
+
     def __init__(self):
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.92)
+        self.root.attributes("-alpha", 0.94)
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
 
-        self._drag_x    = 0
-        self._drag_y    = 0
-        self._cells     = {}
-        self._history   = {}    # config_key → deque(maxlen=90)
-        self._flash     = {}    # config_key → last color str
-        self._fs_hidden = False
-        self._fs_count  = 0     # consecutive fullscreen detections (hysteresis)
+        self._drag_x      = 0
+        self._drag_y      = 0
+        self._cells       = {}    # config_key → {"hud": _HudCell, "getter": fn, "unit": str, "label": str}
+        self._history     = {}    # config_key → deque of value floats (for sparkline)
+        self._sample_log  = {}    # config_key → deque of (t_monotonic, value) for inline chart
+        self._cell_colors = {}    # config_key → last threshold color (used by draw loop)
+        self._fs_hidden   = False
+        self._fs_count    = 0
+
+        # Perimeter comet state — driven by _draw_frame
+        self._cpu_load_cache  = 0.0
+        self._perimeter_phase = 0.0
+        self._last_draw_time  = time.monotonic()
+        self._last_inner_req  = (0, 0)
+        self._last_clock_sec  = -1
         self._gpu_warn_w, self._gpu_hot_w = self._read_gpu_tdp_thresholds()
 
-        saved_size = cfg.get_value("display", "bar_size", default=DEFAULT_SIZE)
-        self._size  = saved_size if saved_size in BAR_SIZES else DEFAULT_SIZE
-        self._apply_size_fonts()
+        saved_scale = cfg.get_value("display", "bar_scale", default=_SCALE_DEFAULT)
+        try:
+            self._scale = max(_SCALE_MIN, min(_SCALE_MAX, float(saved_scale)))
+        except (TypeError, ValueError):
+            self._scale = _SCALE_DEFAULT
+
+        # Drag-to-resize state.  `_resize_axis` is "x", "y", or None when the
+        # pointer is not hovering a resize edge.  `_resizing` latches at mouse
+        # press so the subsequent drag moves resize instead of repositioning.
+        self._resize_axis      = None
+        self._resizing         = False
+        self._resize_start     = None     # (start_root_xy, start_w, start_h, start_scale)
+        self._current_cursor   = ""
+        self._last_rebuild_scale = self._scale
 
         self._orient      = cfg.get_value("display", "bar_orientation", default="horizontal")
         self._last_orient = self._orient
@@ -433,6 +946,7 @@ class SensorBar:
         if cfg.get_value("display", "bar_hidden", default=False):
             self.root.withdraw()
         self._update()
+        self._draw_frame()
 
     # ── DWM rounded corners ───────────────────────────────────────────────────
 
@@ -451,92 +965,121 @@ class SensorBar:
         except Exception:
             pass
 
-    # ── Fonts ─────────────────────────────────────────────────────────────────
-
-    def _apply_size_fonts(self):
-        global FONT_LABEL, FONT_VALUE, FONT_SEP
-        s = BAR_SIZES[self._size]
-        FONT_LABEL = ("Consolas", s["label"])
-        FONT_VALUE = ("Consolas", s["value"], "bold")
-        FONT_SEP   = ("Consolas", s["sep"])
-
     # ── Orientation helpers ───────────────────────────────────────────────────
 
     def _pack_side(self) -> str:
         return "top" if self._orient == "vertical" else "left"
 
-    def _make_separator(self, parent) -> tk.Widget:
-        """Return a separator widget appropriate for the current orientation."""
+    def _cell_pad_kw(self, gap: int) -> dict:
+        """Pack padding kwargs for per-cell spacing based on orientation."""
+        half = gap // 2
         if self._orient == "vertical":
-            w = tk.Frame(parent, height=1, bg="#222222")
-            w.pack(side="top", fill="x", pady=2)
-        else:
-            w = tk.Label(parent, text="|", font=FONT_SEP, bg=BG, fg="#222222")
-            w.pack(side="left", padx=3)
-        return w
+            return {"pady": (half, gap - half)}
+        return {"padx": (half, gap - half)}
+
+    def _sync_outer_size(self):
+        """Size the outer canvas to fit inner's reqsize + the comet ring."""
+        try:
+            self.root.update_idletasks()
+            reqw = self.inner.winfo_reqwidth()  + 2 * _RING_PX
+            reqh = self.inner.winfo_reqheight() + 2 * _RING_PX
+            if reqw > 2 * _RING_PX and reqh > 2 * _RING_PX:
+                self._outer_canvas.config(width=reqw, height=reqh)
+        except Exception:
+            pass
+
+    def _on_inner_configure(self, event=None):
+        """Keep outer canvas sized to inner whenever its reqsize changes."""
+        try:
+            rw = self.inner.winfo_reqwidth()
+            rh = self.inner.winfo_reqheight()
+            if (rw, rh) != self._last_inner_req:
+                self._last_inner_req = (rw, rh)
+                self._sync_outer_size()
+        except Exception:
+            pass
+
+    def _cell_height(self, size_preset: dict) -> int:
+        """Compute the cell height that a _HudCell would produce — used to
+        size the profile badge so it aligns with sensor cells."""
+        lf = tkFont.Font(family="Consolas", size=size_preset["label"], weight="bold")
+        vf = tkFont.Font(family="Consolas", size=size_preset["value"], weight="bold")
+        return (3 + lf.metrics("linespace") + 2 +
+                vf.metrics("linespace") + 2 + size_preset["chart_h"] + 3)
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
-        s = BAR_SIZES[self._size]
-        outer = tk.Frame(self.root, bg=BORDER, padx=1, pady=1)
+        s = _scaled_preset(self._scale)
+
+        # Outer is a Canvas so we can draw the animated perimeter comet on
+        # the _RING_PX-wide border ring.  Canvas bg is BORDER; inner (packed
+        # with padx=_RING_PX, pady=_RING_PX) covers all but that ring, so
+        # comet segments are visible only along the edge.
+        outer = tk.Canvas(self.root, bg=BORDER,
+                          highlightthickness=0, bd=0,
+                          width=400, height=50)
+        outer.pack_propagate(False)
         outer.pack(fill="both", expand=True)
+        self._outer_canvas = outer
 
         self.inner = tk.Frame(outer, bg=BG,
                               padx=s["pad_x"], pady=s["pad_y"])
-        self.inner.pack(fill="both", expand=True)
+        self.inner.pack(fill="both", expand=True,
+                        padx=_RING_PX, pady=_RING_PX)
+
+        # Pre-allocate comet tail segments — each is a 3-point polyline so
+        # coords() stays a fixed length when the segment spans a corner.
+        # Line width 2 fits neatly inside the 5-px ring with 1 px of margin.
+        self._perimeter_segments = []
+        for _ in range(_PERIMETER_SEGMENTS):
+            seg_id = outer.create_line(
+                0, 0, 0, 0, 0, 0,
+                fill=BORDER, width=2, state="hidden",
+                capstyle="round", joinstyle="round"
+            )
+            self._perimeter_segments.append(seg_id)
 
         for w in [self.root, outer, self.inner]:
             w.bind("<ButtonPress-1>",   self._drag_start)
             w.bind("<B1-Motion>",       self._drag_move)
             w.bind("<ButtonRelease-1>", self._drag_end)
             w.bind("<Button-3>",        self._show_context_menu)
+            w.bind("<Motion>",          self._on_motion, add="+")
 
-        # Drag handle
-        grip = tk.Label(self.inner, text="⠿", font=("Consolas", 10),
-                        bg=BG, fg="#333333", cursor="fleur", padx=4)
-        grip.pack(side=self._pack_side())
-        grip.bind("<ButtonPress-1>",   self._drag_start)
-        grip.bind("<B1-Motion>",       self._drag_move)
-        grip.bind("<ButtonRelease-1>", self._drag_end)
-        grip.bind("<Button-3>",        self._show_context_menu)
+        self.inner.bind("<Configure>", self._on_inner_configure, add="+")
 
-        # Profile dot (colored canvas circle)
-        dot_sz = BAR_SIZES[self._size]["label"] + 4
-        self.profile_dot = tk.Canvas(
-            self.inner, width=dot_sz, height=dot_sz,
-            bg=BG, highlightthickness=0, cursor="fleur"
-        )
-        pad_kw = {"pady": (2, 0)} if self._orient == "vertical" else {"padx": (2, 0)}
-        self.profile_dot.pack(side=self._pack_side(), **pad_kw)
-        self._dot_oval = self.profile_dot.create_oval(
-            2, 2, dot_sz - 2, dot_sz - 2, fill="#1a4a6e", outline=""
-        )
-
-        # Profile text (dim, next to dot)
-        self.profile_label = tk.Label(
-            self.inner, text="IDLE", font=("Consolas", 7, "bold"),
-            bg=BG, fg="#444444", padx=2, cursor="fleur"
-        )
-        self.profile_label.pack(side=self._pack_side())
-
-        for w in [self.profile_dot, self.profile_label]:
-            w.bind("<ButtonPress-1>",   self._drag_start)
-            w.bind("<B1-Motion>",       self._drag_move)
-            w.bind("<ButtonRelease-1>", self._drag_end)
-            w.bind("<Button-3>",        self._show_context_menu)
-
-        sep = self._make_separator(self.inner)
-        sep.bind("<ButtonPress-1>",   self._drag_start)
-        sep.bind("<B1-Motion>",       self._drag_move)
-        sep.bind("<ButtonRelease-1>", self._drag_end)
-
+        self._build_header(s)
         self._build_sensor_cells()
+        self._sync_outer_size()
+
+    def _build_header(self, s: dict):
+        """Grip + profile badge at the leading edge of the bar."""
+        grip_font_size = max(s["label"], 9)
+        grip = tk.Label(self.inner, text="⫶", font=("Consolas", grip_font_size, "bold"),
+                        bg=BG, fg="#3a3a4a", cursor="fleur", padx=4)
+        grip.pack(side=self._pack_side())
+        for ev, cb in [("<ButtonPress-1>",   self._drag_start),
+                       ("<B1-Motion>",       self._drag_move),
+                       ("<ButtonRelease-1>", self._drag_end),
+                       ("<Button-3>",        self._show_context_menu),
+                       ("<Motion>",          self._on_motion)]:
+            grip.bind(ev, cb)
+
+        target_h = self._cell_height(s)
+        self.profile_badge = _ProfileBadge(self.inner, s, target_h)
+        pad_kw = self._cell_pad_kw(s["gap"])
+        self.profile_badge.pack(side=self._pack_side(), **pad_kw)
+        for ev, cb in [("<ButtonPress-1>",   self._drag_start),
+                       ("<B1-Motion>",       self._drag_move),
+                       ("<ButtonRelease-1>", self._drag_end),
+                       ("<Button-3>",        self._show_context_menu),
+                       ("<Motion>",          self._on_motion)]:
+            self.profile_badge.bind(ev, cb)
 
     # ── Sensor cells ──────────────────────────────────────────────────────────
 
     def _build_sensor_cells(self):
-        self._cells        = {}
         self._cell_widgets = []
         self._last_enabled = None
         sens = cfg.get().get("sensors", {})
@@ -575,14 +1118,21 @@ class SensorBar:
             except Exception:
                 pass
         self._cell_widgets = []
-        self._cells        = {}
+        # Destroy any old HudCells too
+        for entry in self._cells.values():
+            try:
+                entry["hud"].destroy()
+            except Exception:
+                pass
+        self._cells = {}
 
         sensor_map = {
             "cpu_temp":    ("CPU",  self._get_cpu,          "°"),
             "gpu_temp":    ("GPU",  self._get_gpu,          "°"),
             "gpu_hotspot": ("GHOT", self._get_gpu_hotspot,  "°"),
             "gpu_mem_temp":("GMEM", self._get_gpu_mem_temp, "°"),
-            "nvme_temp":   ("NVM",  self._get_nvme,         "°"),
+            "nvme_temp":   ("NVM1", self._get_nvme,         "°"),
+            "nvme_temp2":  ("NVM2", self._get_nvme2,        "°"),
             "fan_rpm":     ("FAN",  self._get_fan_or_dimm,  "rpm"),
             "ram_usage":   ("RAM",  self._get_ram,          "%"),
             "cpu_load":    ("CPU%", self._get_cpu_load,     "%"),
@@ -592,84 +1142,79 @@ class SensorBar:
             "gpu_watts":   ("GPUW", self._get_gpu_watts,    "W"),
             "gpu_fan":     ("GFAN", self._get_gpu_fan,      "%"),
             "cpu_freq":    ("CFRQ", self._get_cpu_freq,     "GHz"),
-            "gpu_clock":   ("GCLK", self._get_gpu_clock,   "MHz"),
+            "gpu_clock":   ("GCLK", self._get_gpu_clock,    "MHz"),
             "battery":     ("BAT",  self._get_battery,      "%"),
             "net_io":      ("NET",  self._get_net_io,       "MB/s"),
             "disk_io":     ("DISK", self._get_disk_io,      "MB/s"),
         }
 
-        ordered = self._get_sensor_order(sens)
-        first   = True
+        s        = _scaled_preset(self._scale)
+        pad_kw   = self._cell_pad_kw(s["gap"])
+        ordered  = self._get_sensor_order(sens)
+
         for config_key in ordered:
             if config_key not in sensor_map:
                 continue
             label, getter, unit = sensor_map[config_key]
 
-            if not first:
-                sep = self._make_separator(self.inner)
-                self._cell_widgets.append(sep)
-            first = False
+            hud = _HudCell(self.inner, config_key, label, unit, s)
+            hud.pack(side=self._pack_side(), **pad_kw)
+            self._cell_widgets.append(hud.canvas)
 
-            cell = tk.Frame(self.inner, bg=BG, padx=2)
-            cell.pack(side=self._pack_side())
-            self._cell_widgets.append(cell)
-
-            lbl = tk.Label(cell, text=label, font=FONT_LABEL,
-                           bg=BG, fg=FG_LABEL, cursor="fleur")
-            lbl.pack(anchor="w")
-            lbl.bind("<ButtonPress-1>",   self._drag_start)
-            lbl.bind("<B1-Motion>",       self._drag_move)
-            lbl.bind("<ButtonRelease-1>", self._drag_end)
-            lbl.bind("<Button-3>",
+            # Drag + right-click menu + double-click sparkline + hover motion
+            hud.bind("<ButtonPress-1>",   self._drag_start, add="+")
+            hud.bind("<B1-Motion>",       self._drag_move, add="+")
+            hud.bind("<ButtonRelease-1>", self._drag_end, add="+")
+            hud.bind("<Motion>",          self._on_motion, add="+")
+            hud.bind("<Button-3>",
                      lambda e, k=config_key: self._show_sensor_menu(e, k))
-
-            val = tk.Label(cell, text="---", font=FONT_VALUE,
-                           bg=BG, fg=COLOR_COOL, cursor="fleur")
-            val.pack(anchor="w")
-            val.bind("<ButtonPress-1>",   self._drag_start)
-            val.bind("<B1-Motion>",       self._drag_move)
-            val.bind("<ButtonRelease-1>", self._drag_end)
-            val.bind("<Button-3>",
-                     lambda e, k=config_key: self._show_sensor_menu(e, k))
-            val.bind("<Double-Button-1>",
+            hud.bind("<Double-Button-1>",
                      lambda e, k=config_key, lb=label, u=unit:
                          self._open_sparkline(k, lb, u))
 
-            cell.bind("<ButtonPress-1>",   self._drag_start)
-            cell.bind("<B1-Motion>",       self._drag_move)
-            cell.bind("<ButtonRelease-1>", self._drag_end)
-            cell.bind("<Button-3>",
-                      lambda e, k=config_key: self._show_sensor_menu(e, k))
-
-            # Tooltip on both label and value
-            _Tooltip(lbl, lambda lb=label, k=config_key: self._tooltip_text(lb, k))
-            _Tooltip(val, lambda lb=label, k=config_key: self._tooltip_text(lb, k))
+            _Tooltip(hud.canvas,
+                     lambda lb=label, k=config_key: self._tooltip_text(lb, k))
 
             self._cells[config_key] = {
-                "value":        val,
-                "label_widget": lbl,
-                "getter":       getter,
-                "unit":         unit,
+                "hud":    hud,
+                "getter": getter,
+                "unit":   unit,
+                "label":  label,
             }
             if config_key not in self._history:
                 self._history[config_key] = collections.deque(maxlen=90)
+            if config_key not in self._sample_log:
+                self._sample_log[config_key] = collections.deque(maxlen=_SAMPLE_LOG_MAXLEN)
+            self._cell_colors.setdefault(config_key, COLOR_COOL)
+
+        # After cells are (re)built, resize the outer canvas so the perimeter
+        # comet has the correct track length.
+        if hasattr(self, "_outer_canvas"):
+            self._sync_outer_size()
 
     def _tooltip_text(self, label: str, config_key: str) -> str:
         hist = self._history.get(config_key)
         if hist:
             vals = [v for v in hist if v is not None]
             if vals:
-                unit = self._cells.get(config_key, {}).get("unit", "")
+                unit = self._cell_unit(config_key)
                 return f"{label}  {vals[-1]:.1f} {unit}"
         return label
 
+    def _cell_unit(self, config_key: str) -> str:
+        """Return the current display unit for a cell.  For net_io this is
+        user-configurable (MB/s / Mbps / kbps) and must be looked up live."""
+        if config_key == "net_io":
+            return cfg.get_value("display", "net_unit", default="MB/s")
+        return self._cells.get(config_key, {}).get("unit", "")
+
     def _open_sparkline(self, config_key: str, label: str, unit: str):
         hist = self._history.get(config_key, collections.deque())
-        _Sparkline.show(config_key, label, hist, unit)
+        _Sparkline.show(config_key, label, hist, self._cell_unit(config_key))
 
     def _set_orientation(self, orient: str):
         cfg.set_value("display", "bar_orientation", value=orient)
-        # _update loop will detect the change and rebuild
+        # _update loop detects and rebuilds
 
     def _show_sensor_menu(self, event, key: str):
         menu = tk.Menu(self.root, tearoff=0,
@@ -733,7 +1278,6 @@ class SensorBar:
         val = readings.get("gpu_temp_hotspot")
         if val is None:
             return "---", COLOR_COOL
-        # Hotspot runs ~15 °C hotter; thresholds adjusted accordingly
         return sensors.fmt_temp(val), self._temp_color(val, 95, 105)
 
     def _get_gpu_mem_temp(self, readings, thresh):
@@ -746,30 +1290,25 @@ class SensorBar:
         nvmes = readings.get("nvme_temps", [])
         if not nvmes:
             return "---", COLOR_COOL
+        t = nvmes[0]["temp_c"]
         warn = thresh.get("nvme_warn", 60)
         crit = thresh.get("nvme_crit", 70)
-        if len(nvmes) >= 2:
-            t1, t2 = nvmes[0]["temp_c"], nvmes[1]["temp_c"]
-            c1     = self._temp_color(t1, warn, crit)
-            c2     = self._temp_color(t2, warn, crit)
-            hottest = c1 if t1 >= t2 else c2
-            v1 = sensors.fmt_temp(t1).rstrip("°")
-            v2 = sensors.fmt_temp(t2)
-            return f"{v1}/{v2}", hottest
-        t1 = nvmes[0]["temp_c"]
-        return sensors.fmt_temp(t1), self._temp_color(t1, warn, crit)
+        return sensors.fmt_temp(t), self._temp_color(t, warn, crit)
+
+    def _get_nvme2(self, readings, thresh):
+        nvmes = readings.get("nvme_temps", [])
+        if len(nvmes) < 2:
+            return "---", COLOR_COOL
+        t = nvmes[1]["temp_c"]
+        warn = thresh.get("nvme_warn", 60)
+        crit = thresh.get("nvme_crit", 70)
+        return sensors.fmt_temp(t), self._temp_color(t, warn, crit)
 
     def _get_fan_or_dimm(self, readings, thresh):
         """
-        Returns (label, text, color) — 3-tuple for dynamic label update.
-
-        Fan data priority:
-          1. AWCC WMI physical fans (most accurate RPM for Alienware hardware)
-          2. LHM Embedded Controller fans (fallback when AWCC is unavailable or
-             when all AWCC fans report 0 RPM — firmware fan-stop mode)
-          3. DIMM temperature (when no fan data is available from either source)
+        Returns (label, text, color) — 3-tuple so the cell can switch its label
+        between FAN and DIMM depending on which data source is available.
         """
-        # ── AWCC fans (only when at least one is spinning) ───────────────────
         if readings.get("awcc_available") and readings.get("awcc_fans"):
             rpms = [f["rpm"] for f in readings["awcc_fans"]
                     if f.get("rpm") is not None]
@@ -780,7 +1319,6 @@ class SensorBar:
                          COLOR_WARM if mx > 3000 else COLOR_COOL)
                 return "FAN", text, color
 
-        # ── LHM EC fans (fallback) ───────────────────────────────────────────
         lhm_fans = readings.get("lhm_fan_rpms", [])
         if lhm_fans:
             mx    = max(f["rpm"] for f in lhm_fans)
@@ -789,7 +1327,6 @@ class SensorBar:
                      COLOR_WARM if mx > 3000 else COLOR_COOL)
             return "FAN", text, color
 
-        # ── DIMM temperature (last resort) ───────────────────────────────────
         dimms = readings.get("ram_temps", [])
         if not dimms:
             return "DIMM", "---", COLOR_COOL
@@ -878,7 +1415,25 @@ class SensorBar:
         up = readings.get("net_up_mbps")
         if dn is None:
             return "---", COLOR_COOL
-        def _f(v): return f"{v:.0f}" if v >= 10 else f"{v:.1f}"
+        # Internal reading is MiB/s (bytes ÷ 2^20).  Convert to the unit
+        # the user picked; factors are precise so values match ISP reporting.
+        unit = cfg.get_value("display", "net_unit", default="MB/s")
+        if unit == "Mbps":
+            dn *= 8.388608
+            up *= 8.388608
+        elif unit == "kbps":
+            dn *= 8388.608
+            up *= 8388.608
+
+        def _f(v):
+            if v >= 10000:
+                return f"{v/1000:.0f}k"
+            if v >= 1000:
+                return f"{v/1000:.1f}k"
+            if v >= 10:
+                return f"{v:.0f}"
+            return f"{v:.1f}"
+
         return f"↓{_f(dn)} ↑{_f(up)}", COLOR_COOL
 
     def _get_disk_io(self, readings, thresh):
@@ -890,10 +1445,9 @@ class SensorBar:
         color = COLOR_WARM if (rd + wr) > 500 else COLOR_COOL
         return f"R{_f(rd)} W{_f(wr)}", color
 
-    # ── History ───────────────────────────────────────────────────────────────
+    # ── History extraction (for sparkline + inline micro-chart) ───────────────
 
     def _extract_numeric(self, config_key: str, readings: dict):
-        """Pull a single float from readings for sparkline history."""
         simple = {
             "cpu_temp":    "cpu_temp_avg",
             "gpu_temp":    "gpu_temp",
@@ -908,76 +1462,60 @@ class SensorBar:
             "cpu_freq":    "cpu_freq_ghz",
             "gpu_clock":   "gpu_clock_mhz",
             "battery":     "battery_pct",
-            "net_io":      "net_down_mbps",
             "disk_io":     "disk_read_mbps",
         }
         if config_key in simple:
             return readings.get(simple[config_key])
+        if config_key == "net_io":
+            # Store history in the user-chosen unit so tooltip/sparkline
+            # agree with the cell text.  Sensor emits MiB/s internally.
+            val = readings.get("net_down_mbps")
+            if val is None:
+                return None
+            unit = cfg.get_value("display", "net_unit", default="MB/s")
+            if unit == "Mbps":
+                return val * 8.388608
+            if unit == "kbps":
+                return val * 8388.608
+            return val
         if config_key == "nvme_temp":
             nvmes = readings.get("nvme_temps", [])
-            return max(n["temp_c"] for n in nvmes) if nvmes else None
+            return nvmes[0]["temp_c"] if nvmes else None
+        if config_key == "nvme_temp2":
+            nvmes = readings.get("nvme_temps", [])
+            return nvmes[1]["temp_c"] if len(nvmes) >= 2 else None
         if config_key == "gpu_vram":
             used  = readings.get("gpu_vram_used_mb")
             total = readings.get("gpu_vram_total_mb")
             if used and total and total > 0:
                 return (used / total) * 100
         if config_key == "fan_rpm":
-            # AWCC first
             fans = readings.get("awcc_fans", [])
             if fans:
                 rpms = [f["rpm"] for f in fans if f.get("rpm")]
                 mx = max(rpms) if rpms else 0
                 if mx > 0:
                     return float(mx)
-            # LHM EC fans fallback
             lhm_fans = readings.get("lhm_fan_rpms", [])
             if lhm_fans:
                 return float(max(f["rpm"] for f in lhm_fans))
-            # DIMM temp as last resort
             dimms = readings.get("ram_temps", [])
             return max(d["temp_c"] for d in dimms) if dimms else None
         return None
 
     def _feed_history(self, readings: dict):
+        now = time.monotonic()
         for key in self._cells:
             if key not in self._history:
                 self._history[key] = collections.deque(maxlen=90)
-            self._history[key].append(self._extract_numeric(key, readings))
-
-    # ── Threshold flash ───────────────────────────────────────────────────────
-
-    def _check_flash(self, config_key: str, color: str):
-        """Flash the value widget background on transition into warn/crit."""
-        prev = self._flash.get(config_key)
-        if prev in (None, COLOR_COOL) and color in (COLOR_WARM, COLOR_HOT):
-            cell = self._cells.get(config_key)
-            if cell:
-                flash_bg = "#332200" if color == COLOR_WARM else "#330000"
-                try:
-                    lbl = cell["value"]
-                    lbl.config(bg=flash_bg)
-                    self.root.after(600, lambda w=lbl: w.config(bg=BG))
-                except Exception:
-                    pass
-        self._flash[config_key] = color
+            if key not in self._sample_log:
+                self._sample_log[key] = collections.deque(maxlen=_SAMPLE_LOG_MAXLEN)
+            val = self._extract_numeric(key, readings)
+            self._history[key].append(val)
+            if val is not None:
+                self._sample_log[key].append((now, float(val)))
 
     # ── Fullscreen auto-hide ──────────────────────────────────────────────────
-
-    # Desktop / shell / system window classes that GetForegroundWindow can
-    # briefly return during task switching, window transitions, or when nothing
-    # is active — hiding the bar for any of these produces a "disappearing bar"
-    # flicker that the user reported.  Also skip our own bar and its popups.
-    _SHELL_CLASSES = {
-        "Progman",                     # desktop
-        "WorkerW",                     # desktop (wallpaper renderer)
-        "Shell_TrayWnd",               # taskbar
-        "Shell_SecondaryTrayWnd",      # secondary-monitor taskbar
-        "Windows.UI.Core.CoreWindow",  # UWP shell surfaces (Start, Search, etc)
-        "XamlExplorerHostIslandWindow",
-        "ApplicationFrameWindow",      # only when paired with a UWP inside — see check below
-        "TaskListThumbnailWnd",
-        "MultitaskingViewFrame",       # alt-tab / task view
-    }
 
     def _is_fullscreen_active(self) -> bool:
         try:
@@ -985,15 +1523,11 @@ class SensorBar:
             if not hwnd:
                 return False
 
-            # Exclude our own bar (and any Toplevel children like sparklines /
-            # tooltips) — their HWNDs can briefly become foreground on click.
             own = ctypes.windll.user32.GetParent(self.root.winfo_id()) \
                   or int(self.root.winfo_id())
             if hwnd == own:
                 return False
 
-            # Exclude shell / desktop / transient system windows whose rect
-            # equals the screen but which aren't real fullscreen apps.
             cls_buf = ctypes.create_unicode_buffer(256)
             ctypes.windll.user32.GetClassNameW(hwnd, cls_buf, 256)
             if cls_buf.value in self._SHELL_CLASSES:
@@ -1018,7 +1552,6 @@ class SensorBar:
     def _check_fullscreen_hide(self):
         if not cfg.get().get("display", {}).get("auto_hide_fullscreen", True):
             if self._fs_hidden:
-                # Feature disabled while hidden — restore
                 if not cfg.get_value("display", "bar_hidden", default=False):
                     self.root.deiconify()
                 self._fs_hidden = False
@@ -1028,12 +1561,6 @@ class SensorBar:
         fs = self._is_fullscreen_active()
         hidden = cfg.get_value("display", "bar_hidden", default=False)
 
-        # Hysteresis: require two consecutive readings in the same direction
-        # before changing state.  Kills the 2-second disappear/reappear blink
-        # that fired on transient fullscreen-sized windows (splash screens,
-        # alt-tab thumbnails, maximized apps with hidden taskbar), and also
-        # prevents the bar from flashing back into view during a brief alt-tab
-        # away from an active fullscreen app.
         if fs:
             self._fs_count = min(self._fs_count + 1, 2)
         else:
@@ -1047,18 +1574,15 @@ class SensorBar:
                 self.root.deiconify()
             self._fs_hidden = False
 
-    # ── Profile dot ───────────────────────────────────────────────────────────
+    # ── Profile badge update ─────────────────────────────────────────────────
 
-    def _update_profile_dot(self, profile: str):
-        color = _PROFILE_COLORS.get(profile, "#444444")
+    def _profile_color(self, profile: str) -> str:
+        color = _PROFILE_COLORS.get(profile, "#444455")
         for up in cfg.get().get("profiles", {}).get("user_profiles", []):
             if up.get("name") == profile:
                 color = up.get("color", "#7700cc")
                 break
-        try:
-            self.profile_dot.itemconfig(self._dot_oval, fill=color)
-        except Exception:
-            pass
+        return color
 
     # ── Update loop ───────────────────────────────────────────────────────────
 
@@ -1071,57 +1595,69 @@ class SensorBar:
             profile  = profiles.get_current()
             sens     = c.get("sensors", {})
 
-            # Rebuild everything if orientation changed
             orient_now = cfg.get_value("display", "bar_orientation", default="horizontal")
             if orient_now != self._last_orient:
                 self._orient      = orient_now
                 self._last_orient = orient_now
                 self._rebuild_bar_widgets()
 
-            # Rebuild cells if enabled set changed
+            # Auto-hide NVM2 when no second NVMe drive is present, even if
+            # the user enabled it in config — no point reserving a cell for
+            # a drive that doesn't exist.
+            effective_sens = dict(sens)
+            if len(readings.get("nvme_temps", [])) < 2:
+                effective_sens["nvme_temp2"] = False
+
             enabled_now = tuple(
-                k for k in self._SENSOR_DEFS if sens.get(k, False)
+                k for k in self._SENSOR_DEFS if effective_sens.get(k, False)
             )
             if enabled_now != getattr(self, "_last_enabled", None):
-                self._rebuild_sensor_cells(sens)
+                self._rebuild_sensor_cells(effective_sens)
                 self._last_enabled = enabled_now
 
-            # Feed sparkline history
             self._feed_history(readings)
 
-            # Profile dot + label
+            cpu_val = readings.get("cpu_load_pct")
+            if cpu_val is not None:
+                self._cpu_load_cache = float(cpu_val)
+
+            # Profile badge
             try:
                 from core import turbo_cool
                 if turbo_cool.is_active():
-                    tc_text = turbo_cool.status_text() or "COOL"
-                    self.profile_label.config(text=tc_text, fg="#00ffff")
-                    self._update_profile_dot("manual")
+                    tc_text = (turbo_cool.status_text() or "COOL")[:9].upper()
+                    self.profile_badge.update(tc_text, "#00ccdd", fg="#00e8ff")
                 else:
-                    self._update_profile_dot(profile)
-                    self.profile_label.config(
-                        text=profile.upper()[:4], fg="#444444")
+                    self.profile_badge.update(
+                        profile.upper()[:9],
+                        self._profile_color(profile),
+                        fg="#cccce0"
+                    )
             except Exception:
-                self._update_profile_dot(profile)
-                self.profile_label.config(text=profile.upper()[:4], fg="#444444")
+                try:
+                    self.profile_badge.update(
+                        profile.upper()[:9],
+                        self._profile_color(profile),
+                        fg="#cccce0"
+                    )
+                except Exception:
+                    pass
 
-            # Update sensor values + flash
+            # Sensor cells — value text + accent color update at poll rate.
+            # The inline chart is driven by _draw_frame() at ~30 fps.
             for key, cell in self._cells.items():
                 try:
                     result = cell["getter"](readings, thresh)
                     if len(result) == 3:
                         new_label, text, color = result
-                        lw = cell.get("label_widget")
-                        if lw and lw.winfo_exists():
-                            lw.config(text=new_label)
+                        cell["hud"].update_label(new_label)
                     else:
                         text, color = result
-                    cell["value"].config(text=text, fg=color)
-                    self._check_flash(key, color)
+                    cell["hud"].update_value(text, color)
+                    self._cell_colors[key] = color
                 except Exception:
                     pass
 
-            # Fullscreen auto-hide — skip while any sparkline is open so the
-            # sparkline window doesn't confuse the foreground-window check
             if not _Sparkline._open:
                 self._check_fullscreen_hide()
 
@@ -1129,6 +1665,97 @@ class SensorBar:
             logger.debug("Bar update error: %s", e)
 
         self.root.after(int(self._get_interval_ms()), self._update)
+
+    def _draw_frame(self):
+        """Redraw inline charts + perimeter comet at CHART_DRAW_INTERVAL_MS.
+
+        Sensor reads are NOT performed here — we just reuse the time-indexed
+        sample log.  Since x-position is derived from (now - t_sample), every
+        frame shifts the line a fraction of a pixel leftward and new samples
+        appear to rise into the right edge.  The perimeter comet advances by
+        speed * dt pixels each frame, so motion is smooth regardless of the
+        poll rate.  Cost is dominated by coords()/itemconfigure() calls on
+        pre-allocated canvas items — no create/delete per frame.
+        """
+        try:
+            now = time.monotonic()
+            dt  = max(0.0, min(0.1, now - self._last_draw_time))
+            self._last_draw_time = now
+
+            if not self._fs_hidden and self.root.state() != "withdrawn":
+                for key, cell in self._cells.items():
+                    log = self._sample_log.get(key)
+                    if not log:
+                        continue
+                    color = self._cell_colors.get(key, COLOR_COOL)
+                    cell["hud"].render_chart(log, now, color)
+
+                self._render_perimeter_comet(dt)
+                self._tick_clock()
+        except Exception as e:
+            logger.debug("Bar draw frame error: %s", e)
+
+        self.root.after(CHART_DRAW_INTERVAL_MS, self._draw_frame)
+
+    def _tick_clock(self):
+        """Update the profile-badge clock text when the wall-clock second
+        rolls over.  Called from _draw_frame (~30 fps) but the itemconfig
+        call only fires once per second."""
+        try:
+            local = time.localtime()
+            if local.tm_sec == self._last_clock_sec:
+                return
+            self._last_clock_sec = local.tm_sec
+            hour12 = local.tm_hour % 12 or 12
+            suffix = "AM" if local.tm_hour < 12 else "PM"
+            text = f"{hour12}:{local.tm_min:02d}:{local.tm_sec:02d} {suffix}"
+            self.profile_badge.update_clock(text)
+        except Exception:
+            pass
+
+    def _render_perimeter_comet(self, dt: float):
+        """Advance the phase and repaint the tail segments.
+
+        Speed scales linearly with cached CPU load (0 % → min, 100 % → max),
+        so the comet visibly quickens during heavy work and drifts during
+        idle — doubling as an ambient load indicator.
+        """
+        try:
+            outer = self._outer_canvas
+            inset = _COMET_INSET
+            # Track rectangle is centered in the ring (inset pixels from each
+            # outer edge).  W/H below are the track's inner width/height.
+            W = outer.winfo_width()  - 1 - 2 * inset
+            H = outer.winfo_height() - 1 - 2 * inset
+            if W <= 4 or H <= 4:
+                return
+
+            P = 2.0 * (W + H)
+            cpu   = max(0.0, min(100.0, self._cpu_load_cache))
+            speed = _COMET_SPEED_MIN + (_COMET_SPEED_MAX - _COMET_SPEED_MIN) * (cpu / 100.0)
+            self._perimeter_phase = (self._perimeter_phase + speed * dt) % P
+
+            head = self._perimeter_phase
+            step = float(_COMET_SEGMENT_PX)
+            N    = len(self._perimeter_segments)
+            denom = float(max(N - 1, 1))
+
+            for i, seg_id in enumerate(self._perimeter_segments):
+                t_lead  = head - i * step
+                t_trail = head - (i + 1) * step
+                pts = _perimeter_segment_pts(t_trail, t_lead, W, H)
+                flat = []
+                for px, py in pts:
+                    flat.append(px + inset)
+                    flat.append(py + inset)
+                # Ease-out fade so the head reads bright and the tail dissolves
+                # into the BORDER-colored ring with no visible cut-off.
+                frac  = (i / denom) ** 0.6
+                color = _lerp_color(_COMET_HEAD_COLOR, BORDER, frac)
+                outer.coords(seg_id, *flat)
+                outer.itemconfigure(seg_id, fill=color, state="normal")
+        except Exception:
+            pass
 
     def _check_config_changed(self):
         import os
@@ -1149,18 +1776,94 @@ class SensorBar:
             return max(100, int(val))
         return max(500, int(float(val) * 1000))
 
-    # ── Drag ─────────────────────────────────────────────────────────────────
+    # ── Drag / drag-to-resize ────────────────────────────────────────────────
+
+    def _resize_axis_for_event(self, event) -> str:
+        """Return 'x' or 'y' if event lands on the active resize edge, else ''.
+
+        Horizontal bars resize from the bottom edge (height-axis drag scales
+        everything up/down).  Vertical bars resize from the right edge.
+        """
+        try:
+            # Translate to window-local coordinates.
+            wx = event.x_root - self.root.winfo_rootx()
+            wy = event.y_root - self.root.winfo_rooty()
+            w  = self.root.winfo_width()
+            h  = self.root.winfo_height()
+        except Exception:
+            return ""
+        edge = _RESIZE_EDGE_PX
+        if self._orient == "vertical":
+            if 0 <= wy <= h and (w - edge) <= wx <= w:
+                return "x"
+        else:
+            if 0 <= wx <= w and (h - edge) <= wy <= h:
+                return "y"
+        return ""
+
+    def _set_cursor(self, cur: str):
+        if cur == self._current_cursor:
+            return
+        self._current_cursor = cur
+        try:
+            self.root.configure(cursor=cur)
+        except Exception:
+            pass
+
+    def _on_motion(self, event):
+        """Hover feedback — switch to a resize cursor near the draggable edge."""
+        if self._resizing:
+            return
+        axis = self._resize_axis_for_event(event)
+        if axis == "y":
+            self._set_cursor("sb_v_double_arrow")
+        elif axis == "x":
+            self._set_cursor("sb_h_double_arrow")
+        else:
+            self._set_cursor("")
 
     def _drag_start(self, event):
+        axis = self._resize_axis_for_event(event)
+        if axis:
+            self._resizing     = True
+            self._resize_axis  = axis
+            self._resize_start = (
+                event.x_root, event.y_root,
+                self.root.winfo_width(), self.root.winfo_height(),
+                self._scale,
+            )
+            return
+        self._resizing    = False
+        self._resize_axis = None
         self._drag_x = event.x
         self._drag_y = event.y
 
     def _drag_move(self, event):
+        if self._resizing and self._resize_start is not None:
+            sx, sy, sw, sh, sscale = self._resize_start
+            if self._resize_axis == "y":
+                delta    = event.y_root - sy
+                ratio    = max(0.4, (sh + delta) / max(sh, 1))
+            else:
+                delta    = event.x_root - sx
+                ratio    = max(0.4, (sw + delta) / max(sw, 1))
+            new_scale = max(_SCALE_MIN, min(_SCALE_MAX, sscale * ratio))
+            # Throttle: only rebuild when the scale actually moves meaningfully.
+            if abs(new_scale - self._last_rebuild_scale) >= 0.03:
+                self._apply_scale(new_scale, persist=False)
+            return
         x = self.root.winfo_x() + event.x - self._drag_x
         y = self.root.winfo_y() + event.y - self._drag_y
         self.root.geometry(f"+{x}+{y}")
 
     def _drag_end(self, event):
+        if self._resizing:
+            self._resizing     = False
+            self._resize_axis  = None
+            self._resize_start = None
+            self._set_cursor("")
+            cfg.set_value("display", "bar_scale", value=round(self._scale, 3))
+            return
         cfg.set_value("display", "bar_x", value=self.root.winfo_x())
         cfg.set_value("display", "bar_y", value=self.root.winfo_y())
 
@@ -1180,11 +1883,16 @@ class SensorBar:
 
     # ── Size / rebuild ────────────────────────────────────────────────────────
 
-    def _set_size(self, size_name: str):
-        self._size = size_name
-        self._apply_size_fonts()
-        cfg.set_value("display", "bar_size", value=size_name)
-        s = BAR_SIZES[self._size]
+    def _apply_scale(self, new_scale: float, *, persist: bool = True):
+        """Set a new bar scale and rebuild all cells at the new font sizes."""
+        new_scale = max(_SCALE_MIN, min(_SCALE_MAX, float(new_scale)))
+        if abs(new_scale - self._scale) < 1e-3:
+            return
+        self._scale = new_scale
+        self._last_rebuild_scale = new_scale
+        if persist:
+            cfg.set_value("display", "bar_scale", value=round(new_scale, 3))
+        s = _scaled_preset(self._scale)
         self.inner.config(padx=s["pad_x"], pady=s["pad_y"])
         self._rebuild_bar_widgets()
 
@@ -1194,54 +1902,20 @@ class SensorBar:
                 w.destroy()
             except Exception:
                 pass
-
-        # Grip
-        grip = tk.Label(self.inner, text="⠿",
-                        font=("Consolas", BAR_SIZES[self._size]["sep"]),
-                        bg=BG, fg="#333333", cursor="fleur", padx=4)
-        grip.pack(side=self._pack_side())
-        for ev, cb in [("<ButtonPress-1>",   self._drag_start),
-                       ("<B1-Motion>",       self._drag_move),
-                       ("<ButtonRelease-1>", self._drag_end),
-                       ("<Button-3>",        self._show_context_menu)]:
-            grip.bind(ev, cb)
-
-        # Profile dot
-        dot_sz = BAR_SIZES[self._size]["label"] + 4
-        self.profile_dot = tk.Canvas(
-            self.inner, width=dot_sz, height=dot_sz,
-            bg=BG, highlightthickness=0, cursor="fleur"
-        )
-        pad_kw = {"pady": (2, 0)} if self._orient == "vertical" else {"padx": (2, 0)}
-        self.profile_dot.pack(side=self._pack_side(), **pad_kw)
-        self._dot_oval = self.profile_dot.create_oval(
-            2, 2, dot_sz - 2, dot_sz - 2, fill="#1a4a6e", outline=""
-        )
-
-        # Profile label
-        self.profile_label = tk.Label(
-            self.inner, text="IDLE",
-            font=("Consolas", BAR_SIZES[self._size]["label"], "bold"),
-            bg=BG, fg="#444444", padx=2, cursor="fleur"
-        )
-        self.profile_label.pack(side=self._pack_side())
-
-        for w in [self.profile_dot, self.profile_label]:
-            w.bind("<ButtonPress-1>",   self._drag_start)
-            w.bind("<B1-Motion>",       self._drag_move)
-            w.bind("<ButtonRelease-1>", self._drag_end)
-            w.bind("<Button-3>",        self._show_context_menu)
-
-        # Separator
-        sep = self._make_separator(self.inner)
-        for ev, cb in [("<ButtonPress-1>",   self._drag_start),
-                       ("<B1-Motion>",       self._drag_move),
-                       ("<ButtonRelease-1>", self._drag_end)]:
-            sep.bind(ev, cb)
-
-        self._cell_widgets = []
+        # Drop HUD references — they pointed at now-destroyed canvases.
         self._cells        = {}
+        self._cell_widgets = []
         self._last_enabled = None
+
+        s = _scaled_preset(self._scale)
+        self._build_header(s)
+        # Rebuild sensor cells immediately so drag-to-resize feels live —
+        # waiting for the next _update tick (~2 s) would look janky.
+        try:
+            self._rebuild_sensor_cells(cfg.get().get("sensors", {}))
+        except Exception:
+            pass
+        self._sync_outer_size()
 
     # ── Context menu ──────────────────────────────────────────────────────────
 
@@ -1268,18 +1942,10 @@ class SensorBar:
         menu.add_command(label="Open Settings", command=self._open_settings)
 
         menu.add_separator()
-        size_menu = tk.Menu(menu, tearoff=0,
-                            bg="#1a1a1a", fg="#cccccc",
-                            activebackground="#333333",
-                            activeforeground="#ffffff",
-                            font=("Segoe UI", 9))
-        for size_name in BAR_SIZES:
-            check = "✓ " if size_name == self._size else "   "
-            size_menu.add_command(
-                label=f"{check}{size_name}",
-                command=lambda s=size_name: self._set_size(s)
-            )
-        menu.add_cascade(label="Bar Size", menu=size_menu)
+        menu.add_command(
+            label="Reset Bar Size",
+            command=lambda: self._apply_scale(_SCALE_DEFAULT),
+        )
 
         orient_menu = tk.Menu(menu, tearoff=0,
                               bg="#1a1a1a", fg="#cccccc",
@@ -1328,7 +1994,6 @@ class SensorBar:
         """
         Return (warn_watts, hot_watts) from the hardware-cache GPU TDP.
         Thresholds: warn = 65% of TDP, hot = 88% of TDP.
-        Falls back to conservative defaults if cache is unavailable.
         """
         try:
             import json, os

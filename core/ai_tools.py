@@ -114,6 +114,7 @@ def _h_set_power_plan(args: dict):
             ["powercfg", "/setactive", guid],
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            timeout=10,
         )
     except FileNotFoundError:
         return False, "powercfg.exe not found on PATH.", None

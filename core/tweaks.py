@@ -202,7 +202,7 @@ def _ensure_aliencore_power_plan(dry_run: bool):
     try:
         result = subprocess.run(
             ["powercfg", "/list"], capture_output=True, text=True,
-            creationflags=_CNW
+            creationflags=_CNW, timeout=10
         )
         if "AlienCore" not in result.stdout:
             logger.info("Creating AlienCore power plan...")
@@ -211,14 +211,14 @@ def _ensure_aliencore_power_plan(dry_run: bool):
             # sets aggressive P-state thresholds, and is the best gaming foundation.
             dup = subprocess.run(
                 ["powercfg", "/duplicatescheme", POWER_PLAN_ULTIMATE_PERF],
-                capture_output=True, text=True, creationflags=_CNW
+                capture_output=True, text=True, creationflags=_CNW, timeout=10
             )
             if dup.returncode != 0:
                 # Fallback to Balanced on systems where Ultimate Perf unavailable
                 logger.info("Ultimate Performance unavailable — falling back to Balanced")
                 dup = subprocess.run(
                     ["powercfg", "/duplicatescheme", POWER_PLAN_BALANCED],
-                    capture_output=True, text=True, creationflags=_CNW
+                    capture_output=True, text=True, creationflags=_CNW, timeout=10
                 )
 
             for token in dup.stdout.split():
@@ -228,9 +228,11 @@ def _ensure_aliencore_power_plan(dry_run: bool):
                         subprocess.run(["powercfg", "/changename", new_guid,
                                         "AlienCore Adaptive",
                                         "Managed by AlienCore optimizer"],
-                                       capture_output=True, creationflags=_CNW)
+                                       capture_output=True, creationflags=_CNW,
+                                       timeout=10)
                         subprocess.run(["powercfg", "/setactive", new_guid],
-                                       capture_output=True, creationflags=_CNW)
+                                       capture_output=True, creationflags=_CNW,
+                                       timeout=10)
                     logger.info("AlienCore power plan created: %s", new_guid)
                     return new_guid
         else:
@@ -240,7 +242,8 @@ def _ensure_aliencore_power_plan(dry_run: bool):
                         if len(token) == 36 and token.count("-") == 4:
                             if not dry_run:
                                 subprocess.run(["powercfg", "/setactive", token],
-                                               capture_output=True, creationflags=_CNW)
+                                               capture_output=True,
+                                               creationflags=_CNW, timeout=10)
                             return token
     except Exception as e:
         logger.warning("Power plan setup failed: %s", e)
@@ -287,7 +290,7 @@ def _get_active_scheme() -> "str | None":
     try:
         result = subprocess.run(["powercfg", "/getactivescheme"],
                                 capture_output=True, text=True,
-                                creationflags=_CNW)
+                                creationflags=_CNW, timeout=5)
         for token in result.stdout.split():
             if len(token) == 36 and token.count("-") == 4:
                 _scheme_cache = token

@@ -178,15 +178,16 @@ def _cfg_set(dot_key: str, value):
         return
 
     keys = dot_key.split(".")
-    node = cfg.get()
-    # Walk to the parent dict, then set
-    # We need to work on the live _config, not a snapshot
+    # Walk to the parent dict, then set.
+    # Work on the live _config (not a cfg.get() snapshot), and invalidate
+    # the read cache so the very next cfg.get() sees this change.
     import core.config_manager as _cm
     with _cm._lock:
         node = _cm._config
         for k in keys[:-1]:
             node = node.setdefault(k, {})
         node[keys[-1]] = value
+        _cm._cache_valid = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

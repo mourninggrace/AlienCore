@@ -181,7 +181,12 @@ def _readline_timeout(stream, timeout: float) -> bytes | None:
 
 
 def _kill_proc():
-    """Terminate the bridge process. Must be called while _lock is held."""
+    """Terminate the bridge process. Must be called while _lock is held.
+
+    Kept short (≤0.3 s) so application shutdown doesn't stall — the bridge
+    is an external .NET subprocess and a hard kill is safe: we never read
+    stdout after stdin EOF, and the process owns no shared resources.
+    """
     global _proc, _fail_count, _last_kill_time, _restart_delay_secs
     if _proc is None:
         return
@@ -191,7 +196,7 @@ def _kill_proc():
     except Exception:
         pass
     try:
-        _proc.wait(timeout=2)
+        _proc.wait(timeout=0.3)
     except Exception:
         pass
     try:
