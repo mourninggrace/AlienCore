@@ -119,6 +119,9 @@ def _poll_loop():
             data.update(_parse_fan_rpm(flat))
             data.update(_parse_cpu_watts(flat))
             data.update(_read_gpu_nvidia_smi())
+            # AMD / Intel Arc / any non-NVIDIA discrete GPU:
+            # fill missing GPU fields from the LHM flat list.
+            _fill_gpu_from_lhm(data, flat)
             data.update(_read_ram_usage())
             data.update(_read_cpu_freq())
             data.update(_read_cpu_load())
@@ -166,15 +169,32 @@ def _parse_cpu_temp(flat: list) -> dict:
         result["cpu_temp_package"] = pkg["value"]
         result["cpu_temp_avg"]     = pkg["value"]
 
+    # AMD Ryzen: LHM reports "Core (Tctl/Tdie)" as the package-equivalent
+    # thermal reading.  Zen 3 / Zen 4 both use this name.
+    if result["cpu_temp_avg"] is None:
+        tctl = next((s for s in temps
+                     if s["name"] in ("Core (Tctl/Tdie)", "CPU Core (Tctl/Tdie)")), None)
+        if tctl:
+            result["cpu_temp_package"] = tctl["value"]
+            result["cpu_temp_avg"]     = tctl["value"]
+
     # Core Average — fallback if Package unavailable
     if result["cpu_temp_avg"] is None:
         avg = next((s for s in temps if s["name"] == "Core Average"), None)
         if avg:
             result["cpu_temp_avg"] = avg["value"]
 
-    # Individual core temps — exclude "Distance to TjMax"
+    # Individual core temps.
+    # Intel hybrid: "P-Core #0" / "E-Core #0"
+    # AMD Ryzen:    "Core #1", "Core #2", ... (1-indexed, per-core Tdie)
     cores = [s for s in temps
-             if ("P-Core #" in s["name"] or "E-Core #" in s["name"])
+             if (
+                 "P-Core #" in s["name"]
+                 or "E-Core #" in s["name"]
+                 or (s["name"].startswith("Core #")
+                     and "average" not in s["name"].lower()
+                     and "(tctl" not in s["name"].lower())
+             )
              and "distance" not in s["name"].lower()
              and 0 < s["value"] < 120]
     if cores:
@@ -251,9 +271,13 @@ def _parse_fan_rpm(flat: list) -> dict:
 def _parse_cpu_watts(flat: list) -> dict:
     result = {"cpu_watts": None}
     power = [s for s in flat if s["type"] == "Power"]
-    pkg = next((s for s in power if s["name"] == "CPU Package"), None)
-    if pkg:
-        result["cpu_watts"] = pkg["value"]
+    # Intel: "CPU Package"
+    # AMD:   "Package" or "CPU Package" (LHM name varies by Zen gen), or "CPU PPT"
+    for name in ("CPU Package", "Package", "CPU PPT", "Socket"):
+        s = next((p for p in power if p["name"] == name), None)
+        if s and s.get("value") is not None:
+            result["cpu_watts"] = s["value"]
+            break
     return result
 
 
@@ -420,6 +444,81 @@ def _read_gpu_nvidia_smi() -> dict:
     except Exception as e:
         logger.debug("nvidia-smi error: %s", e)
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AMD / Intel Arc / generic LHM GPU fallback
+#
+# LibreHardwareMonitor exposes Radeon and Arc metrics via the same flat sensor
+# list used for CPU / NVMe / DIMM readings.  Only fields the NVIDIA path left
+# as None are overwritten, so mixed-vendor systems don't clobber NVML data.
+#
+# Radeon sensor names (LHM 0.9.x):
+#   Temperature: "GPU Core", "GPU Hot Spot", "GPU Memory"
+#   Load:        "GPU Core", "GPU Memory Controller"
+#   Clock:       "GPU Core", "GPU Memory"
+#   Power:       "GPU Package", "GPU PPT"
+#   Fan:         "GPU Fan"
+#   SmallData:   "GPU Memory Used", "GPU Memory Total"
+# Intel Arc uses "GPU Core" (Temp/Load/Clock) + "GPU Power" — same parser.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fill_gpu_from_lhm(data: dict, flat: list):
+    """Populate gpu_* fields from the LHM flat list when NVML left them None.
+
+    Harmless on NVIDIA systems: all the target keys are already populated, so
+    every branch short-circuits.  On Radeon / Arc, this is the primary source.
+    """
+    if not flat:
+        return
+
+    def _pick(name: str, stype: str):
+        for s in flat:
+            if s.get("type") == stype and s.get("name") == name:
+                v = s.get("value")
+                if v is not None:
+                    return float(v)
+        return None
+
+    def _any(names, stype):
+        for n in names:
+            v = _pick(n, stype)
+            if v is not None:
+                return v
+        return None
+
+    if data.get("gpu_load") is None:
+        data["gpu_load"] = _any(["GPU Core", "D3D 3D"], "Load")
+
+    if data.get("gpu_vram_used_mb") is None:
+        v = _any(["GPU Memory Used", "D3D Dedicated Memory Used"], "SmallData")
+        if v is not None:
+            data["gpu_vram_used_mb"] = v
+
+    if data.get("gpu_vram_total_mb") is None:
+        v = _pick("GPU Memory Total", "SmallData")
+        if v is not None:
+            data["gpu_vram_total_mb"] = v
+
+    if data.get("gpu_watts") is None:
+        data["gpu_watts"] = _any(["GPU Package", "GPU PPT", "GPU Power"], "Power")
+
+    if data.get("gpu_fan_pct") is None:
+        # LHM reports Radeon fan as Control % (0-100) or Fan RPM — prefer %
+        v = _pick("GPU Fan", "Control")
+        if v is None:
+            # Normalize RPM → approx % if max ~ 3000 (rough, fan table varies)
+            rpm = _pick("GPU Fan", "Fan")
+            if rpm is not None and rpm > 0:
+                v = min(100.0, round(rpm / 30.0, 1))
+        if v is not None:
+            data["gpu_fan_pct"] = v
+
+    if data.get("gpu_clock_mhz") is None:
+        data["gpu_clock_mhz"] = _pick("GPU Core", "Clock")
+
+    if data.get("gpu_mem_clock_mhz") is None:
+        data["gpu_mem_clock_mhz"] = _pick("GPU Memory", "Clock")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

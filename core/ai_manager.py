@@ -219,6 +219,127 @@ def send_chat(user_message: str, history: list) -> str:
         return f"Error: {e}"
 
 
+def send_chat_with_tools(user_message: str, history: list,
+                         confirm_fn=None, on_event=None,
+                         max_iters: int = 8) -> str:
+    """Agentic chat — Claude can call tools registered in core.ai_tools.
+
+    confirm_fn(tool_name, args, risk) -> bool : approval gate for
+        RISK_SOFT and above. Called from this thread, so the UI must
+        marshal the modal to its own loop and block until the user
+        answers.
+    on_event(event_dict) : UI notifier for 'tool_call' / 'tool_result'
+        events.  Event shape:
+            {"kind": "tool_call",   "name": str, "args": dict}
+            {"kind": "tool_result", "name": str, "ok": bool,
+             "message": str, "declined": bool}
+
+    OpenAI-compatible providers fall back to plain send_chat for this
+    first pass — tool-use is implemented for Anthropic only.
+    """
+    from core import ai_tools
+
+    c      = cfg.get().get("ai", {})
+    ai_cfg = _resolve_config(c, chat=True)
+    if not ai_cfg["api_key"]:
+        return "Error: No API key configured — go to Settings → AI."
+
+    if ai_cfg["provider"] != "anthropic":
+        # Graceful fallback so existing openai_compat users still chat.
+        return send_chat(user_message, history)
+
+    try:
+        import anthropic
+    except ImportError:
+        return "Error: anthropic package not installed.  Run: pip install anthropic"
+
+    context = get_system_context()
+    system  = (
+        f"{_build_system_prompt()}\n\n"
+        f"Current system snapshot: {context}\n\n"
+        "You have tools available to inspect and change system settings. "
+        "Prefer calling tools over telling the user to click menus. Before a "
+        "state-changing action, state in one sentence what you will do. After "
+        "a tool runs, briefly summarise the result. Only use tools the user "
+        "has actually asked for — do not take extra liberties."
+    )
+
+    # History stays in the simple {role, content: str} form the UI already
+    # maintains.  Tool-use / tool-result blocks only live inside this call.
+    messages = list(history) + [{"role": "user", "content": user_message}]
+
+    try:
+        client  = anthropic.Anthropic(api_key=ai_cfg["api_key"])
+        schemas = ai_tools.tool_schemas()
+
+        for _ in range(max_iters):
+            resp = client.messages.create(
+                model=ai_cfg["model"],
+                max_tokens=2048,
+                system=system,
+                tools=schemas,
+                messages=messages,
+            )
+
+            if resp.stop_reason != "tool_use":
+                text = "\n".join(
+                    b.text for b in resp.content
+                    if getattr(b, "type", None) == "text"
+                ).strip()
+                return text or "(The assistant returned no text.)"
+
+            # Echo the assistant turn (with tool_use blocks) back into the
+            # thread so the follow-up call can reference tool_use_id.
+            messages.append({
+                "role":    "assistant",
+                "content": [b.model_dump() for b in resp.content],
+            })
+
+            tool_results = []
+            for block in resp.content:
+                if getattr(block, "type", None) != "tool_use":
+                    continue
+                args = dict(block.input or {})
+
+                if on_event:
+                    try:
+                        on_event({"kind": "tool_call",
+                                  "name": block.name, "args": args})
+                    except Exception as e:
+                        logger.debug("on_event(tool_call) raised: %s", e)
+
+                result = ai_tools.execute(block.name, args, confirm_fn)
+
+                if on_event:
+                    try:
+                        on_event({"kind":     "tool_result",
+                                  "name":     block.name,
+                                  "ok":       result["ok"],
+                                  "message":  result["message"],
+                                  "declined": result["declined"]})
+                    except Exception as e:
+                        logger.debug("on_event(tool_result) raised: %s", e)
+
+                tool_results.append({
+                    "type":        "tool_result",
+                    "tool_use_id": block.id,
+                    "content":     ai_tools.result_payload(result),
+                    "is_error":    not result["ok"],
+                })
+
+            if not tool_results:
+                break
+
+            messages.append({"role": "user", "content": tool_results})
+
+        return ("Error: the assistant exceeded the tool-call limit without "
+                f"finishing (max_iters={max_iters}).")
+
+    except Exception as e:
+        logger.error("AI tool-chat error: %s", e)
+        return f"Error: {e}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Watchdog
 # ─────────────────────────────────────────────────────────────────────────────

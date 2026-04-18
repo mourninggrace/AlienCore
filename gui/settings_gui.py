@@ -2021,8 +2021,15 @@ class SettingsWindow:
                      fmt=lambda v: f"{int(v)} messages")
 
         def _open_chat():
-            from gui.ai_chat import open_chat_thread
-            open_chat_thread()
+            # Subprocess so the chat gets its own Tk interpreter — avoids
+            # sensor-bar geometry glitches caused by two live tk.Tk() roots.
+            import os, sys, subprocess
+            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            subprocess.Popen(
+                [sys.executable, os.path.join(base, "aliencore.py"), "--ai-chat"],
+                cwd=base,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
 
         self._btn(t, "Open AI Chat", _open_chat, ACCENT2).pack(anchor="w",
                   padx=20, pady=(0, 16))

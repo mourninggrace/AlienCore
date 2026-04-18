@@ -756,10 +756,24 @@ def _open_ai_advisor():
         logger.error("AI advisor open error: %s", e)
 
 
+_ai_chat_proc = None
+
+
 def _open_ai_chat():
+    """Launch the AI chat as a subprocess so its Tk root can't collide with
+    the sensor bar's Tk root (two live tk.Tk() instances in one process make
+    the bar shrink / flicker)."""
+    global _ai_chat_proc
     try:
-        from gui.ai_chat import open_chat_thread
-        open_chat_thread()
+        import os, sys, subprocess
+        if _ai_chat_proc is not None and _ai_chat_proc.poll() is None:
+            return   # already open
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _ai_chat_proc = subprocess.Popen(
+            [sys.executable, os.path.join(base, "aliencore.py"), "--ai-chat"],
+            cwd=base,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
     except Exception as e:
         logger.error("AI chat open error: %s", e)
 

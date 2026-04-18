@@ -359,13 +359,27 @@ def start():
 
 
 def stop():
+    """Tear down the sensor bar.  Safe to call from any thread.
+
+    root.destroy() must run on the thread that owns the Tk interpreter (the
+    SensorBar thread), so we schedule it via root.after(0, …) and fall back
+    to root.quit() which is documented as thread-safe.  Without this the
+    tray-Exit path leaves the bar's mainloop spinning and the whole process
+    never terminates.
+    """
     global _instance
-    if _instance:
-        try:
-            _instance.root.destroy()
-        except Exception:
-            pass
-        _instance = None
+    if not _instance:
+        return
+    root = _instance.root
+    try:
+        root.after(0, root.destroy)
+    except Exception:
+        pass
+    try:
+        root.quit()
+    except Exception:
+        pass
+    _instance = None
 
 
 def is_visible() -> bool:
@@ -402,6 +416,7 @@ class SensorBar:
         self._history   = {}    # config_key → deque(maxlen=90)
         self._flash     = {}    # config_key → last color str
         self._fs_hidden = False
+        self._fs_count  = 0     # consecutive fullscreen detections (hysteresis)
         self._gpu_warn_w, self._gpu_hot_w = self._read_gpu_tdp_thresholds()
 
         saved_size = cfg.get_value("display", "bar_size", default=DEFAULT_SIZE)
@@ -948,11 +963,42 @@ class SensorBar:
 
     # ── Fullscreen auto-hide ──────────────────────────────────────────────────
 
+    # Desktop / shell / system window classes that GetForegroundWindow can
+    # briefly return during task switching, window transitions, or when nothing
+    # is active — hiding the bar for any of these produces a "disappearing bar"
+    # flicker that the user reported.  Also skip our own bar and its popups.
+    _SHELL_CLASSES = {
+        "Progman",                     # desktop
+        "WorkerW",                     # desktop (wallpaper renderer)
+        "Shell_TrayWnd",               # taskbar
+        "Shell_SecondaryTrayWnd",      # secondary-monitor taskbar
+        "Windows.UI.Core.CoreWindow",  # UWP shell surfaces (Start, Search, etc)
+        "XamlExplorerHostIslandWindow",
+        "ApplicationFrameWindow",      # only when paired with a UWP inside — see check below
+        "TaskListThumbnailWnd",
+        "MultitaskingViewFrame",       # alt-tab / task view
+    }
+
     def _is_fullscreen_active(self) -> bool:
         try:
             hwnd = ctypes.windll.user32.GetForegroundWindow()
             if not hwnd:
                 return False
+
+            # Exclude our own bar (and any Toplevel children like sparklines /
+            # tooltips) — their HWNDs can briefly become foreground on click.
+            own = ctypes.windll.user32.GetParent(self.root.winfo_id()) \
+                  or int(self.root.winfo_id())
+            if hwnd == own:
+                return False
+
+            # Exclude shell / desktop / transient system windows whose rect
+            # equals the screen but which aren't real fullscreen apps.
+            cls_buf = ctypes.create_unicode_buffer(256)
+            ctypes.windll.user32.GetClassNameW(hwnd, cls_buf, 256)
+            if cls_buf.value in self._SHELL_CLASSES:
+                return False
+
             sw = ctypes.windll.user32.GetSystemMetrics(0)
             sh = ctypes.windll.user32.GetSystemMetrics(1)
 
@@ -976,13 +1022,27 @@ class SensorBar:
                 if not cfg.get_value("display", "bar_hidden", default=False):
                     self.root.deiconify()
                 self._fs_hidden = False
+                self._fs_count = 0
             return
+
         fs = self._is_fullscreen_active()
         hidden = cfg.get_value("display", "bar_hidden", default=False)
-        if fs and not self._fs_hidden and not hidden:
+
+        # Hysteresis: require two consecutive readings in the same direction
+        # before changing state.  Kills the 2-second disappear/reappear blink
+        # that fired on transient fullscreen-sized windows (splash screens,
+        # alt-tab thumbnails, maximized apps with hidden taskbar), and also
+        # prevents the bar from flashing back into view during a brief alt-tab
+        # away from an active fullscreen app.
+        if fs:
+            self._fs_count = min(self._fs_count + 1, 2)
+        else:
+            self._fs_count = max(self._fs_count - 1, 0)
+
+        if self._fs_count >= 2 and not self._fs_hidden and not hidden:
             self.root.withdraw()
             self._fs_hidden = True
-        elif not fs and self._fs_hidden:
+        elif self._fs_count == 0 and self._fs_hidden:
             if not hidden:
                 self.root.deiconify()
             self._fs_hidden = False

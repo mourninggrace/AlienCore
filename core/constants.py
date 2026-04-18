@@ -95,11 +95,14 @@ STREAMING_PROCESSES = [
 ]
 
 GAMING_PROCESSES = [
-    # Common launchers / engines — fingerprint also adds detected game EXEs
-    "steam.exe", "epicgameslauncher.exe", "gog galaxy.exe",
-    "gameoverlayui.exe",          # Steam overlay = game is running
+    # IMPORTANT: launcher processes (steam.exe, epicgameslauncher.exe,
+    # gog galaxy.exe, ea desktop, battle.net, etc.) are intentionally NOT
+    # listed here — they run whenever the platform is open, and including
+    # them would switch the profile to gaming just by browsing the store.
+    # Only include processes that imply a game is *actually* running.
+    # User-specific games should be added in profiles.user_profiles.
+    "gameoverlayui.exe",          # Steam overlay — only spawns when a Steam game launches
     "thedivision2.exe",           # your current game
-    "d3d11.dll",                  # not a process but noted for load signals
 ]
 
 BROWSER_PROCESSES = [

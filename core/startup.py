@@ -159,6 +159,12 @@ def _remove_reg_entry() -> bool:
 
 def sync(enabled: bool):
     """Enable or disable to match the given boolean — used at startup."""
+    # Always clean up stale tasks from older AlienCore versions.  A left-over
+    # `AlienCore` task alongside the current `AlienCoreElevatedStartup` task
+    # causes duplicate launches at logon (mutex catches the duplicate, but both
+    # interpreters still pay the full import cost — ~30 s slower login).
+    elevation.cleanup_legacy_tasks()
+
     if not enabled:
         disable()
         return

@@ -59,8 +59,11 @@ ALIENCORE_TO_AWCC = {
     "manual":    None,   # don't change AWCC profile on manual override
 }
 
-# Failure sentinel values from the WMI interface
-_WMI_FAIL = (0xFFFFFFFF, 0xFFFFFFFE)
+# Failure sentinel values from the WMI interface.
+# WMI may return these as unsigned 32-bit (0xFFFFFFFF) or signed Python int (-1)
+# depending on the variant type the Alienware provider hands back for any given
+# method — include both forms so tuple-membership tests catch either.
+_WMI_FAIL = (0xFFFFFFFF, 0xFFFFFFFE, -1, -2)
 
 # ── Module state ──────────────────────────────────────────────────────────────
 _lock         = threading.Lock()

@@ -24,7 +24,9 @@ REQUIRED_PACKAGES = [
 ]
 
 OPTIONAL_PACKAGES = [
-    ("pyamdgpuinfo",           "pyamdgpuinfo",            "AMD GPU support (skip if NVIDIA only)"),
+    # AMD and Intel Arc GPU sensors are read through LibreHardwareMonitor
+    # (bundled via lhm_bridge.exe), so no extra Python package is needed.
+    # Leave this list empty — it's kept in place for future optional deps.
 ]
 
 
@@ -94,18 +96,19 @@ def main():
         except Exception:
             pass
 
-    print("\n  Optional packages (skip if not needed):\n")
-    for pip_name, import_name, reason in OPTIONAL_PACKAGES:
-        already = check_import(import_name)
-        if already:
-            print(f"  ✓ {pip_name:<22} already installed  ({reason})")
-        else:
-            ans = input(f"  ? Install {pip_name} ({reason})? [y/N]: ").strip().lower()
-            if ans == "y":
-                ok = pip_install(pip_name)
-                print(f"    {'done' if ok else 'FAILED'}")
+    if OPTIONAL_PACKAGES:
+        print("\n  Optional packages (skip if not needed):\n")
+        for pip_name, import_name, reason in OPTIONAL_PACKAGES:
+            already = check_import(import_name)
+            if already:
+                print(f"  ✓ {pip_name:<22} already installed  ({reason})")
             else:
-                print("    skipped")
+                ans = input(f"  ? Install {pip_name} ({reason})? [y/N]: ").strip().lower()
+                if ans == "y":
+                    ok = pip_install(pip_name)
+                    print(f"    {'done' if ok else 'FAILED'}")
+                else:
+                    print("    skipped")
 
     print("\n" + "=" * 60)
     if failures:

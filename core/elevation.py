@@ -23,6 +23,12 @@ logger = logging.getLogger("aliencore.elevation")
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TASK_NAME = "AlienCoreElevatedStartup"
 
+# Historical task names installed by earlier versions of startup.py.  If any of
+# these still exist they will fire at logon alongside _TASK_NAME, producing
+# duplicate processes (the mutex catches it, but both run their full Python
+# import cycle and slow login by ~30 s).
+_LEGACY_TASK_NAMES = ("AlienCore",)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Admin detection
@@ -169,3 +175,37 @@ def uninstall_elevated_task() -> bool:
     except Exception as e:
         logger.error("uninstall_elevated_task error: %s", e)
         return False
+
+
+def cleanup_legacy_tasks() -> int:
+    """Remove any stale Task Scheduler entries from earlier AlienCore versions.
+
+    Returns the number of legacy tasks that were actually removed.  Requires
+    admin rights; silently no-ops otherwise.
+    """
+    if not is_admin():
+        return 0
+    removed = 0
+    for name in _LEGACY_TASK_NAMES:
+        try:
+            query = subprocess.run(
+                ["schtasks", "/Query", "/TN", name],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if query.returncode != 0:
+                continue   # doesn't exist — nothing to do
+            result = subprocess.run(
+                ["schtasks", "/Delete", "/TN", name, "/F"],
+                capture_output=True, text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if result.returncode == 0:
+                logger.info("Removed legacy startup task: %s", name)
+                removed += 1
+            else:
+                logger.warning("Failed to remove legacy task %s: %s",
+                               name, result.stderr.strip())
+        except Exception as e:
+            logger.warning("cleanup_legacy_tasks(%s) error: %s", name, e)
+    return removed

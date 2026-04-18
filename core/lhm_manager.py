@@ -185,14 +185,7 @@ def _kill_proc():
     global _proc, _fail_count, _last_kill_time, _restart_delay_secs
     if _proc is None:
         return
-    # Capture any stderr output the bridge wrote before dying
-    try:
-        _proc.stderr.flush()
-        err_bytes = _proc.stderr.read1(4096) if hasattr(_proc.stderr, "read1") else b""
-        if err_bytes:
-            logger.warning("lhm_bridge stderr: %s", err_bytes.decode("utf-8", errors="replace").strip())
-    except Exception:
-        pass
+    # Close stdin first so the bridge sees EOF and exits cleanly.
     try:
         _proc.stdin.close()
     except Exception:
@@ -203,6 +196,14 @@ def _kill_proc():
         pass
     try:
         _proc.kill()
+    except Exception:
+        pass
+    # Now that the process is gone, stderr is closed — read1() returns immediately.
+    # Reading BEFORE kill blocks forever on a healthy bridge with an empty stderr.
+    try:
+        err_bytes = _proc.stderr.read1(4096) if hasattr(_proc.stderr, "read1") else b""
+        if err_bytes:
+            logger.warning("lhm_bridge stderr: %s", err_bytes.decode("utf-8", errors="replace").strip())
     except Exception:
         pass
     _proc = None

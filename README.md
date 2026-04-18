@@ -77,10 +77,13 @@ aliencore/
 AlienCore is designed to run on **any Windows machine**, not just your Alienware.
 
 On first run on a new machine, it fingerprints the hardware and calculates
-appropriate tweak values for that machine's CPU, GPU, and RAM.
+appropriate tweak values for that machine's CPU, GPU, and RAM. Both Intel
+and AMD CPUs are supported — Intel-specific tweaks (Thread Director,
+hetero-scheduling, TVB) silently skip on AMD, and AMD-specific tools
+(Curve Optimizer, PBO, CCD affinity) silently skip on Intel.
 
-Alienware-specific features (AWCC fan curve integration) are only activated
-if an Alienware chassis is detected.
+Alienware-specific features (AWCC fan curve integration, G-Mode) are
+only activated if an Alienware chassis is detected.
 
 ---
 
@@ -113,10 +116,18 @@ python aliencore.py --restore-defaults
 
 ## Requirements
 
-- Windows 10 / 11
+- Windows 10 21H2 / 11
 - Python 3.10+
-- NVIDIA GPU: nvidia-smi (ships with NVIDIA drivers)
-- Optional: LibreHardwareMonitor (for NVMe temps + fan RPM)
+- **CPU**: Intel 12th Gen+ (Alder Lake / Raptor Lake / Meteor Lake) **or**
+  AMD Ryzen Zen 2 / Zen 3 / Zen 4 / Zen 5. Priority AMD coverage: Ryzen 9
+  5950X and 5900X (Zen 3 Vermeer).
+- **GPU**: NVIDIA GeForce, AMD Radeon, or Intel Arc — all three vendors
+  supported.
+  - NVIDIA sensors come from NVML (via pynvml) with nvidia-smi fallback
+  - AMD Radeon and Intel Arc sensors come from LibreHardwareMonitor
+- LibreHardwareMonitor is bundled via `lhm_bridge.exe` and provides
+  NVMe temps, fan RPM, DIMM temps, AMD/Intel Arc GPU readings, and CPU
+  package temp/watts on all supported platforms.
 
 Python packages (installed by install_deps.py):
 - psutil
@@ -124,3 +135,18 @@ Python packages (installed by install_deps.py):
 - wmi
 - pystray
 - Pillow
+- nvidia-ml-py (pynvml — NVIDIA GPU direct NVML calls)
+
+No AMD-specific Python package is required — AMD GPU data is read through
+the bundled LibreHardwareMonitor bridge.
+
+## CPU Feature Matrix
+
+| Feature                                  | Intel 12th+     | AMD Zen 3+                  | AMD Zen 2        |
+|------------------------------------------|-----------------|-----------------------------|------------------|
+| Sensor bar (temp / load / watts)         | Yes             | Yes                         | Yes              |
+| Per-core temp / load                     | Yes (P/E split) | Yes (per CCD)               | Yes              |
+| Thread Director / hetero-scheduling      | Yes             | N/A (not hybrid)            | N/A              |
+| TVB Optimizer                            | Yes (i9 Raptor) | N/A                         | N/A              |
+| CCD awareness (affinity hints)           | N/A             | Yes                         | Yes              |
+| AI voltage tool (read + write scaffolded)| MSR 0x150       | Curve Optimizer + PBO       | PBO only         |

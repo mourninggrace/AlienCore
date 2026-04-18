@@ -119,6 +119,26 @@ def main():
         lhm_manager.stop()
         return
 
+    # ── AI chat only (subprocess) ────────────────────────────────────────────
+    # Running the chat as its own process keeps it out of the main Tk
+    # interpreter.  When the chat lived on a background thread with a second
+    # tk.Tk() root, the sensor bar shrank and misbehaved any time the chat
+    # window was open — two Tk roots in one process fight over geometry and
+    # z-order.  Subprocess isolation makes the issue structurally impossible.
+    if args.ai_chat:
+        cfg.load()
+        # The chat needs live sensor readings to build its system-context
+        # snapshot; start sensors but skip the heavier monitor / tweaks stack.
+        sensors.start()
+        try:
+            from gui.ai_chat import open_chat
+            open_chat()
+        finally:
+            sensors.stop()
+            from core import lhm_manager
+            lhm_manager.stop()
+        return
+
     # ── Restore defaults ──────────────────────────────────────────────────────
     if args.restore:
         tweaks.restore_defaults(dry_run=False)
@@ -268,6 +288,11 @@ def _start_tray(hw: dict):
                 _settings_proc.terminate()
             except Exception:
                 pass
+        # Sensor bar lives on its own thread with its own Tk mainloop — if we
+        # don't tear it down explicitly its mainloop keeps the interpreter
+        # alive after the tray exits and the whole process hangs.
+        from gui import bar
+        bar.stop()
         sensors.stop()
         monitor.stop()
         from core import lhm_manager
@@ -350,6 +375,7 @@ def _parse_args():
     )
     p.add_argument("--firstrun",  action="store_true", help="Force first-run settings GUI")
     p.add_argument("--settings",  action="store_true", help="Open settings GUI only")
+    p.add_argument("--ai-chat",   action="store_true", help="Open AI chat window only (subprocess)")
     p.add_argument("--dryrun",    action="store_true", help="Show tweaks without applying")
     p.add_argument("--install",   action="store_true", help="Install as Windows service (Admin)")
     p.add_argument("--uninstall", action="store_true", help="Remove Windows service (Admin)")
@@ -366,7 +392,7 @@ def _should_auto_elevate(args) -> bool:
     """
     if getattr(args, "no_elevate", False):
         return False
-    if args.settings or args.dryrun or args.restore:
+    if args.settings or args.ai_chat or args.dryrun or args.restore:
         return False
     if args.install or args.uninstall:
         return False   # sc.exe fails loudly if not admin — let the user see that
