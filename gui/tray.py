@@ -197,7 +197,27 @@ def _update_loop():
     Updates the alien-head icon color based on CPU Package temperature,
     refreshes the tooltip with live readings, and polls the AI watchdog alert.
     """
+    reregister_counter = 0
     while _running:
+        # ── Tray icon resilience ──────────────────────────────────────────────
+        # pystray handles WM_TASKBARCREATED (Explorer restart), but Windows 11
+        # silently drops tray icons on sleep/resume and on some DWM resets
+        # without firing that broadcast. Every ~32 s we re-issue NIM_ADD via
+        # icon._show(); Windows ignores the call if the icon is still alive,
+        # and revives it otherwise.
+        reregister_counter += 1
+        if reregister_counter >= 8:
+            reregister_counter = 0
+            try:
+                ico = _icons[0] if _icons else None
+                if (ico is not None
+                        and getattr(ico, "_running", False)
+                        and getattr(ico, "visible", False)):
+                    ico._show()
+            except Exception as e:
+                logger.debug("Tray re-register skipped: %s", e)
+
+
         # ── CPU Package temp → icon color ─────────────────────────────────────
         try:
             readings = sensors.get_readings()
