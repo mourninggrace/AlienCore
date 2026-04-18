@@ -10,6 +10,7 @@ config.advisor_backup.json
 hardware_profile.json
 learning.json
 learning.json.bak
+suggestions.json
 logs/
 
 # Claude Code session data

@@ -25,15 +25,14 @@ BACKEND_PORT = int(os.getenv("AC_PORT", "8765"))
 # Long random secret — used to protect the /paypal/refund-support admin endpoint
 SECRET_KEY   = os.getenv("AC_SECRET", "CHANGE_ME_IN_PRODUCTION")
 
-# ── SMTP (email sending) ──────────────────────────────────────────────────────
-# Recommended: Gmail + App Password (2FA must be enabled on the Gmail account)
-# Google account → Security → App Passwords → generate one for "Mail"
-SMTP_HOST  = os.getenv("AC_SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT  = int(os.getenv("AC_SMTP_PORT", "587"))
-SMTP_USER  = os.getenv("AC_SMTP_USER", "")   # e.g. yourname@gmail.com
-SMTP_PASS  = os.getenv("AC_SMTP_PASS", "")   # Gmail App Password
-FROM_EMAIL = os.getenv("AC_FROM_EMAIL", SMTP_USER)
-FROM_NAME  = "AlienCore"
+# ── Email sending (Brevo HTTPS API) ───────────────────────────────────────────
+# Uses Brevo's transactional email API over HTTPS (port 443). We use HTTPS
+# rather than SMTP because cloud providers routinely block outbound SMTP.
+# Sign up at https://brevo.com (free — 300 emails/day), verify your sender
+# address, then generate an API key under SMTP & API → API Keys.
+BREVO_API_KEY = os.getenv("AC_BREVO_API_KEY", "")
+FROM_EMAIL    = os.getenv("AC_FROM_EMAIL",   "mourning.grace.2014@gmail.com")
+FROM_NAME     = "AlienCore"
 
 # ── PayPal ────────────────────────────────────────────────────────────────────
 # Set to your PayPal business account email.

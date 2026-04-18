@@ -16,7 +16,7 @@ GITHUB_ISSUES_URL = "https://github.com/mourninggrace/AlienCore/issues/new"
 # ── Licensing backend ────────────────────────────────────────────────────────
 # Update this to your deployed server URL once you have a domain.
 # Example: "https://api.aliencore.app"  or  "https://yourserver.com:8765"
-BACKEND_URL = "https://api.aliencore.app"
+BACKEND_URL = "https://aliencoreapp.duckdns.org"
 
 # PayPal account that receives payments
 PAYPAL_BUSINESS_EMAIL = "mourning.grace.2014@gmail.com"

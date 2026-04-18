@@ -1,27 +1,47 @@
 """
 AlienCore Backend - mail.py
-Sends transactional emails via SMTP (Gmail recommended).
+Sends transactional emails via Brevo HTTPS API (port 443).
+HTTPS is used instead of SMTP because many cloud providers
+(DigitalOcean, AWS, GCP) block outbound SMTP ports by default.
 """
 
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+import json
+import urllib.error
+import urllib.request
 
-from backend.config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, FROM_EMAIL, FROM_NAME, KYLE_EMAIL
+from backend.config import BREVO_API_KEY, FROM_EMAIL, FROM_NAME, KYLE_EMAIL
+
+_BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
 
 def _send(to: str, subject: str, body_text: str, body_html: str):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = f"{FROM_NAME} <{FROM_EMAIL}>"
-    msg["To"]      = to
-    msg.attach(MIMEText(body_text, "plain"))
-    msg.attach(MIMEText(body_html, "html"))
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
-        s.ehlo()
-        s.starttls()
-        s.login(SMTP_USER, SMTP_PASS)
-        s.sendmail(FROM_EMAIL, to, msg.as_string())
+    if not BREVO_API_KEY:
+        raise RuntimeError("AC_BREVO_API_KEY not set — cannot send email.")
+
+    payload = {
+        "sender":      {"name": FROM_NAME, "email": FROM_EMAIL},
+        "to":          [{"email": to}],
+        "subject":     subject,
+        "htmlContent": body_html,
+        "textContent": body_text,
+    }
+    req = urllib.request.Request(
+        _BREVO_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "api-key":      BREVO_API_KEY,
+            "content-type": "application/json",
+            "accept":       "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status >= 300:
+                raise RuntimeError(f"Brevo returned HTTP {resp.status}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"Brevo {e.code}: {body}") from None
 
 
 def send_pin_email(to_email: str, pin: str):
