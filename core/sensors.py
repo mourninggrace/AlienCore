@@ -417,7 +417,7 @@ def _read_gpu_nvidia_smi() -> dict:
             parts = [p.strip() for p in proc.stdout.strip().split(",")]
             def _f(v):
                 try:    return float(v)
-                except: return None
+                except (TypeError, ValueError): return None
             if len(parts) >= 5:
                 result["gpu_load"]          = _f(parts[0])
                 result["gpu_vram_used_mb"]  = _f(parts[1])

@@ -1,8 +1,7 @@
 """
 AlienCore - gpu_tuning.py
-Runtime GPU tuning (NVIDIA + AMD capability dispatch).
+Runtime GPU tuning (NVIDIA only — v1).
 
-NVIDIA PATH — fully implemented, testable today:
     Uses pynvml (nvidia-ml-py) to talk directly to the NVML shared library
     that ships with the NVIDIA driver.  No subprocess, no admin-only COM,
     no third-party tool.  The four primitives exposed:
@@ -17,9 +16,6 @@ NVIDIA PATH — fully implemented, testable today:
     Experience's "Automatic Tuning" writes to — a signed offset applied
     across the entire voltage/frequency curve.  Offsets survive until
     reboot (driver resets on boot) unless re-applied.
-
-AMD PATH — delegated to core/amd_gpu_tuning.py (ADLX scaffolding).
-INTEL ARC — not yet implemented.
 
 RANGE CLAMPS (conservative — users who want more can edit config.json):
     Core offset:   -200 .. +300 MHz
@@ -70,14 +66,15 @@ def _primary_gpu_info() -> dict:
     if nvidia:
         return {"vendor": "nvidia", "name": nvidia.get("name", "")}
 
-    amd = next((g for g in gpus if g.get("is_amd")
-                and not g.get("is_integrated")), None)
-    if amd:
-        return {"vendor": "amd", "name": amd.get("name", "")}
-
     if gpus:
         g = gpus[0]
-        vendor = "intel" if "intel" in (g.get("name") or "").lower() else "unknown"
+        name_lower = (g.get("name") or "").lower()
+        if "intel" in name_lower:
+            vendor = "intel"
+        elif g.get("is_amd"):
+            vendor = "amd"
+        else:
+            vendor = "unknown"
         return {"vendor": vendor, "name": g.get("name", "")}
 
     return {"vendor": "unknown", "name": ""}
@@ -88,20 +85,14 @@ def get_status() -> dict:
     info    = _primary_gpu_info()
     nvidia  = _nvidia_status() if info["vendor"] == "nvidia" else {
         "supported": False,
-        "reason":    "Primary GPU is not NVIDIA.",
+        "reason":    "Primary GPU is not NVIDIA — runtime GPU tuning is "
+                     "NVIDIA-only in this version.",
     }
-
-    try:
-        from core import amd_gpu_tuning
-        amd = amd_gpu_tuning.get_status()
-    except Exception as e:
-        amd = {"supported": False, "reason": f"amd_gpu_tuning import failed: {e}"}
 
     return {
         "primary_vendor": info["vendor"],
         "primary_name":   info["name"],
         "nvidia":         nvidia,
-        "amd":            amd,
         "ranges": {
             "core_offset_mhz":  [CORE_OFFSET_MIN_MHZ, CORE_OFFSET_MAX_MHZ],
             "mem_offset_mhz":   [MEM_OFFSET_MIN_MHZ,  MEM_OFFSET_MAX_MHZ],
@@ -123,13 +114,6 @@ def status_text() -> str:
                      f"power {nv.get('power_limit_min_w','?')}..{nv.get('power_limit_max_w','?')} W.")
     else:
         lines.append(f"NVIDIA tuning: not available ({nv['reason']}).")
-
-    amd = s["amd"]
-    if amd["supported"]:
-        lines.append(f"AMD tuning: detected {amd.get('gpu_name','')} — "
-                     "ADLX backend scaffolded (not yet writing).")
-    elif s["primary_vendor"] == "amd":
-        lines.append(f"AMD tuning: {amd['reason']}")
 
     return " ".join(lines)
 
@@ -219,7 +203,7 @@ def _nvml_call(fn_name: str, *args) -> tuple[bool, str]:
 def set_core_offset(offset_mhz: int) -> tuple[bool, str]:
     """Apply a signed core-clock VF offset (NVIDIA only)."""
     if _primary_gpu_info()["vendor"] != "nvidia":
-        return False, "Primary GPU is not NVIDIA — use set_amd_gpu_* tools."
+        return False, "Primary GPU is not NVIDIA — runtime GPU tuning is NVIDIA-only."
 
     try:
         offset_mhz = int(offset_mhz)
@@ -241,7 +225,7 @@ def set_core_offset(offset_mhz: int) -> tuple[bool, str]:
 def set_mem_offset(offset_mhz: int) -> tuple[bool, str]:
     """Apply a signed memory-clock VF offset (NVIDIA only)."""
     if _primary_gpu_info()["vendor"] != "nvidia":
-        return False, "Primary GPU is not NVIDIA — use set_amd_gpu_* tools."
+        return False, "Primary GPU is not NVIDIA — runtime GPU tuning is NVIDIA-only."
 
     try:
         offset_mhz = int(offset_mhz)
@@ -263,7 +247,7 @@ def set_mem_offset(offset_mhz: int) -> tuple[bool, str]:
 def set_power_limit(watts: float) -> tuple[bool, str]:
     """Set the enforced GPU power limit (NVIDIA only, in watts)."""
     if _primary_gpu_info()["vendor"] != "nvidia":
-        return False, "Primary GPU is not NVIDIA — use set_amd_gpu_* tools."
+        return False, "Primary GPU is not NVIDIA — runtime GPU tuning is NVIDIA-only."
 
     try:
         watts = float(watts)
@@ -287,7 +271,7 @@ def set_power_limit(watts: float) -> tuple[bool, str]:
 def set_fan_duty(percent: int, fan_index: int = 0) -> tuple[bool, str]:
     """Set a fixed fan duty %.  Pass percent=-1 to return control to the driver."""
     if _primary_gpu_info()["vendor"] != "nvidia":
-        return False, "Primary GPU is not NVIDIA — use set_amd_gpu_* tools."
+        return False, "Primary GPU is not NVIDIA — runtime GPU tuning is NVIDIA-only."
 
     try:
         percent   = int(percent)

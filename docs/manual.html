@@ -304,7 +304,7 @@
     <li class="toc-sub"><a href="#ai-agentic">Agentic Tools &amp; Safety</a></li>
     <li class="toc-sub"><a href="#ai-watchdog">AI Watchdog</a></li>
     <li class="toc-sub"><a href="#ai-advisor">AI Advisor</a></li>
-    <li class="toc-sub"><a href="#ai-voltage">CPU Voltage &amp; PBO</a></li>
+    <li class="toc-sub"><a href="#ai-voltage">CPU Voltage</a></li>
     <li class="toc-sub"><a href="#ai-gpu-tuning">GPU Tuning</a></li>
     <li class="toc-sub"><a href="#ai-memory-tuning">Memory Tuning</a></li>
 
@@ -343,8 +343,8 @@
   <table>
     <tr><th>Component</th><th>Requirement</th></tr>
     <tr><td>OS</td><td>Windows 10 21H2 or later &nbsp;·&nbsp; <strong>Windows 11 recommended</strong></td></tr>
-    <tr><td>CPU</td><td>Intel 12th Gen or newer (Alder Lake+) <em>or</em> AMD Ryzen (Zen 2 / Zen 3 / Zen 4 / Zen 5) for full feature support</td></tr>
-    <tr><td>GPU</td><td>NVIDIA GeForce, AMD Radeon, or Intel Arc — all three vendors supported (some features require RTX)</td></tr>
+    <tr><td>CPU</td><td>Intel 12th Gen or newer (Alder Lake+). AMD Ryzen support planned for a future release.</td></tr>
+    <tr><td>GPU</td><td>NVIDIA GeForce (runtime tuning). Non-NVIDIA GPUs still get sensor readings via LibreHardwareMonitor, but runtime clock / power / fan control is NVIDIA-only in v1. AMD Radeon / Intel Arc tuning planned for a future release.</td></tr>
     <tr><td>RAM</td><td>8 GB minimum; 16 GB+ for full feature benefit</td></tr>
     <tr><td>Python</td><td>3.11 or later (bundled with the installer)</td></tr>
     <tr><td>Admin rights</td><td>Required — AlienCore modifies system-level registry and power settings</td></tr>
@@ -352,29 +352,27 @@
   </table>
 
   <div class="box box-tip">
-    <strong>Compatibility:</strong> AlienCore is broadly compatible with any Windows PC. Features are detected and adapted automatically based on your hardware. Features that require specific hardware (TVB Optimizer, AWCC integration, AMD Curve Optimizer) are silently skipped if the hardware isn't present.
+    <strong>Compatibility:</strong> AlienCore v1 targets Intel 12th Gen+ CPUs and NVIDIA GPUs for the full tuning surface. Generic OS tweaks (power plan, scheduler, network, storage, privacy) work on any Windows machine. Features that require specific hardware (TVB Optimizer, AWCC integration) are silently skipped if the hardware isn't present.
   </div>
 
-  <h3>CPU Feature Matrix</h3>
+  <h3>CPU Feature Matrix (v1)</h3>
   <table>
-    <tr><th>Feature</th><th>Intel 12th Gen+</th><th>AMD Ryzen (Zen&nbsp;3+)</th><th>AMD Ryzen (Zen&nbsp;2)</th></tr>
-    <tr><td>Sensor bar (temp / load / watts / clock)</td><td class="optimal">Yes</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-    <tr><td>Per-core temp + load</td><td class="optimal">Yes (P/E split)</td><td class="optimal">Yes (per CCD)</td><td class="optimal">Yes</td></tr>
-    <tr><td>Boost tracker / Boost Score</td><td class="optimal">Yes</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-    <tr><td>Core parking / unparking</td><td class="optimal">Yes</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-    <tr><td>Profile engine (idle / gaming / streaming)</td><td class="optimal">Yes</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-    <tr><td>Thread Director / hetero-scheduling</td><td class="optimal">Yes</td><td class="default">N/A (not hybrid)</td><td class="default">N/A</td></tr>
-    <tr><td>TVB Optimizer</td><td class="optimal">Yes (i9 Raptor Lake+)</td><td class="default">N/A</td><td class="default">N/A</td></tr>
-    <tr><td>CCD awareness (affinity hints)</td><td class="default">N/A (single L3)</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-    <tr><td>Voltage offset (AI tool)</td><td class="optimal">Intel OC Mailbox (MSR 0x150)</td><td class="optimal">Curve Optimizer + PBO</td><td class="default">PBO only (no Curve Optimizer)</td></tr>
+    <tr><th>Feature</th><th>Intel 12th Gen+</th></tr>
+    <tr><td>Sensor bar (temp / load / watts / clock)</td><td class="optimal">Yes</td></tr>
+    <tr><td>Per-core temp + load</td><td class="optimal">Yes (P/E split)</td></tr>
+    <tr><td>Boost tracker / Boost Score</td><td class="optimal">Yes</td></tr>
+    <tr><td>Core parking / unparking</td><td class="optimal">Yes</td></tr>
+    <tr><td>Profile engine (idle / gaming / streaming)</td><td class="optimal">Yes</td></tr>
+    <tr><td>Thread Director / hetero-scheduling</td><td class="optimal">Yes</td></tr>
+    <tr><td>TVB Optimizer</td><td class="optimal">Yes (i9 Raptor Lake+)</td></tr>
+    <tr><td>Voltage offset (AI tool)</td><td class="optimal">Intel OC Mailbox (MSR 0x150)</td></tr>
   </table>
 
-  <h3>GPU Vendor Support</h3>
+  <h3>GPU Vendor Support (v1)</h3>
   <table>
-    <tr><th>Vendor</th><th>Sensor path</th><th>Notes</th></tr>
-    <tr><td>NVIDIA GeForce</td><td>NVML (via pynvml) with <code>nvidia-smi</code> fallback</td><td>Full coverage — load, VRAM, clocks, power, fan %, throttle reasons</td></tr>
-    <tr><td>AMD Radeon</td><td>LibreHardwareMonitor bridge</td><td>Temp (Core / Hot Spot / Memory), load, clocks, VRAM, power (GPU Package / PPT), fan</td></tr>
-    <tr><td>Intel Arc</td><td>LibreHardwareMonitor bridge</td><td>Temp, load, clocks, power — same parser as Radeon</td></tr>
+    <tr><th>Vendor</th><th>Sensor path</th><th>Runtime tuning</th></tr>
+    <tr><td>NVIDIA GeForce</td><td>NVML (via pynvml) with <code>nvidia-smi</code> fallback</td><td>Full — core/mem VF offsets, power limit, fan</td></tr>
+    <tr><td>Non-NVIDIA</td><td>LibreHardwareMonitor bridge (sensors only)</td><td>Not supported in v1</td></tr>
   </table>
 </section>
 
@@ -894,22 +892,10 @@ python aliencore.py --uninstall # remove the service</code></pre>
   <h3>Intel Hybrid (12th / 13th / 14th Gen, Meteor Lake)</h3>
   <p>Reports the P-core (Performance) and E-core (Efficiency) split, plus the logical processor IDs belonging to each. Example — i9-14900HX: 8 P-cores (SMT = 16 logical processors) + 16 E-cores (single-threaded = 16 logical processors) = 32 logical processors total.</p>
 
-  <h3>AMD Ryzen (Zen 2 / Zen 3 / Zen 4 / Zen 5)</h3>
-  <p>Reports the CCD (Core Complex Die) grouping. Each CCD has its own dedicated L3 cache, and crossing CCDs adds inter-die latency that hurts games sensitive to cache locality. AlienCore detects CCDs by enumerating L3 cache affinities via the Windows <code>GetLogicalProcessorInformationEx</code> API.</p>
-  <table>
-    <tr><th>CPU</th><th>CCDs</th><th>Layout</th></tr>
-    <tr><td>Ryzen 9 5950X</td><td>2</td><td>CCD0 = cores 0–7 (16 logical), CCD1 = cores 8–15 (16 logical)</td></tr>
-    <tr><td>Ryzen 9 5900X</td><td>2</td><td>CCD0 = 6 cores (12 logical), CCD1 = 6 cores (12 logical)</td></tr>
-    <tr><td>Ryzen 9 7950X</td><td>2</td><td>CCD0 = 8 cores, CCD1 = 8 cores</td></tr>
-    <tr><td>Ryzen 7 5800X / 7700X</td><td>1</td><td>Single CCD</td></tr>
-  </table>
-
   <h3>Why This Matters</h3>
   <p>On Intel hybrid CPUs, Windows 11 with Thread Director is supposed to route threads correctly (foreground / latency-sensitive → P-cores; background / batch → E-cores). The Topology panel confirms this is configured correctly and shows you exactly which cores AlienCore is targeting.</p>
 
-  <p>On multi-CCD AMD Ryzen, pinning a latency-sensitive workload (e.g. a game) to a single CCD avoids the ~75 ns inter-CCD penalty and improves frame-time consistency. AlienCore can pin per-EXE to a specific CCD the same way it pins Intel apps to P-cores or E-cores.</p>
-
-  <p>You can set manual affinity hints per EXE — on Intel, specify <code>p</code> (prefer P-cores) or <code>e</code> (prefer E-cores). On AMD, specify <code>ccd0</code> or <code>ccd1</code>.</p>
+  <p>You can set manual affinity hints per EXE — specify <code>p</code> (prefer P-cores) or <code>e</code> (prefer E-cores).</p>
 </section>
 
 <section id="cpu-irq">
@@ -1117,31 +1103,26 @@ python aliencore.py --uninstall # remove the service</code></pre>
     <tr><th>Tool</th><th>Risk tier</th><th>What it does</th></tr>
     <tr><td class="setting">get_system_snapshot</td><td>Read</td><td>Returns live sensor readings, thresholds, and hardware identity — auto-executed, no prompt.</td></tr>
     <tr><td class="setting">get_profile_status</td><td>Read</td><td>Reports the active profile, manual override state, Turbo Cool, and G-Mode.</td></tr>
-    <tr><td class="setting">cpu_voltage_status</td><td>Read</td><td>Reports whether Intel OC Mailbox or AMD Curve Optimizer / PBO is available.</td></tr>
+    <tr><td class="setting">cpu_voltage_status</td><td>Read</td><td>Reports whether Intel OC Mailbox (MSR 0x150) voltage offsets are available on this machine.</td></tr>
     <tr><td class="setting">open_settings</td><td>Read</td><td>Opens the settings window.</td></tr>
     <tr><td class="setting">switch_profile</td><td>Soft</td><td>Locks to idle / gaming / streaming (or returns to auto).</td></tr>
     <tr><td class="setting">set_turbo_cool</td><td>Soft</td><td>Ramps fans to maximum.</td></tr>
     <tr><td class="setting">set_gmode</td><td>Soft</td><td>Toggles AWCC G-Mode (Alienware hardware only).</td></tr>
     <tr><td class="setting">set_power_plan</td><td>Soft</td><td>Switches Windows power plan (balanced / high_perf / power_saver / ultimate).</td></tr>
     <tr><td class="setting">set_cpu_voltage_offset</td><td class="warn-text">High</td><td>Intel MSR 0x150 voltage offset per plane.</td></tr>
-    <tr><td class="setting">set_amd_curve_optimizer</td><td class="warn-text">High</td><td>AMD Ryzen per-core or all-core Curve Optimizer offset (Zen 3+).</td></tr>
-    <tr><td class="setting">set_amd_pbo_limit</td><td class="warn-text">High</td><td>AMD Precision Boost Overdrive PPT / TDC / EDC limits.</td></tr>
-    <tr><td class="setting">gpu_tuning_status</td><td>Read</td><td>Reports NVIDIA (via NVML) and AMD (via ADLX) GPU tuning capability + firmware power-limit range.</td></tr>
-    <tr><td class="setting">set_gpu_core_offset</td><td class="warn-text">High</td><td>GPU core-clock VF offset (NVIDIA real, AMD scaffolded). -200 to +300 MHz.</td></tr>
-    <tr><td class="setting">set_gpu_mem_offset</td><td class="warn-text">High</td><td>GPU memory-clock VF offset (NVIDIA real, AMD scaffolded). NVIDIA: ±1000..2000 MHz; AMD: ±200..400 MHz.</td></tr>
-    <tr><td class="setting">set_gpu_power_limit</td><td class="warn-text">High</td><td>Absolute wattage cap (NVIDIA) or slider % offset (AMD).</td></tr>
-    <tr><td class="setting">set_gpu_fan_duty</td><td class="warn-text">High</td><td>Fixed GPU fan duty (0-100 %) or -1 for auto.</td></tr>
-    <tr><td class="setting">memory_status</td><td>Read</td><td>RAM config, XMP/EXPO state, AMD runtime tuning availability.</td></tr>
-    <tr><td class="setting">set_amd_fclk</td><td class="warn-text">High</td><td>AMD Infinity Fabric clock (1333-2100 MHz). SMU backend scaffolded.</td></tr>
-    <tr><td class="setting">set_amd_soc_voltage</td><td class="warn-text">High</td><td>AMD VDD_SOC (900-1150 mV). SMU backend scaffolded.</td></tr>
-    <tr><td class="setting">set_amd_vddg</td><td class="warn-text">High</td><td>AMD VDDG_CCD / VDDG_IOD (850-1050 mV). SMU backend scaffolded.</td></tr>
+    <tr><td class="setting">gpu_tuning_status</td><td>Read</td><td>Reports NVIDIA (NVML) GPU tuning capability + firmware power-limit range.</td></tr>
+    <tr><td class="setting">set_gpu_core_offset</td><td class="warn-text">High</td><td>NVIDIA GPU core-clock VF offset. -200 to +300 MHz.</td></tr>
+    <tr><td class="setting">set_gpu_mem_offset</td><td class="warn-text">High</td><td>NVIDIA GPU memory-clock VF offset. -1000 to +2000 MHz.</td></tr>
+    <tr><td class="setting">set_gpu_power_limit</td><td class="warn-text">High</td><td>NVIDIA absolute wattage cap (firmware-clamped).</td></tr>
+    <tr><td class="setting">set_gpu_fan_duty</td><td class="warn-text">High</td><td>Fixed NVIDIA GPU fan duty (0-100 %) or -1 for auto.</td></tr>
+    <tr><td class="setting">memory_status</td><td>Read</td><td>RAM config, XMP state, slot layout, inferred JEDEC cap.</td></tr>
   </table>
 
   <h3>Risk-Tiered Confirmation</h3>
   <ul style="padding-left:24px; line-height:2">
     <li><strong>Read</strong> tools run silently — they only read state.</li>
     <li><strong>Soft</strong> tools (profile change, Turbo Cool, G-Mode, power plan) show a simple <em>Approve / Cancel</em> prompt explaining what will change.</li>
-    <li><strong>High</strong> tools (voltage offsets, Curve Optimizer, PBO limits, any future registry writes) show the full disclaimer dialog, including:
+    <li><strong>High</strong> tools (voltage offsets, GPU clock / power / fan writes, any future registry writes) show the full disclaimer dialog, including:
       <ul style="padding-left:20px;">
         <li>The exact scope of the change (plane / core / value)</li>
         <li>A warning about potential damage (instability, data loss, VRM overheating, hardware damage)</li>
@@ -1206,44 +1187,23 @@ python aliencore.py --uninstall # remove the service</code></pre>
     <strong>Dell / Alienware users:</strong> Dell ships Alienware and XPS laptops with the Plundervolt mitigation (CVE-2019-11157) fully enabled in BIOS with no user toggle. MSR 0x150 writes are silently accepted and dropped. AlienCore detects this and reports voltage control as unavailable rather than letting you believe the offset stuck. On most desktop boards (MSI / ASUS / Gigabyte) and many non-Dell laptops, the writes do take effect.
   </div>
 
-  <h3>AMD — Curve Optimizer + PBO (SMU Mailbox)</h3>
-  <p>AMD Ryzen does not use MSR 0x150. Instead, the SMU (System Management Unit) mailbox exposes two tuning surfaces:</p>
-
-  <h4>Curve Optimizer (Zen 3, Zen 4, Zen 5)</h4>
-  <p>A signed per-core voltage-frequency curve offset. Each "count" is approximately <strong>3–5 mV</strong> of shift. Negative counts undervolt (the common case); positive counts are rarely useful but accepted. Range: <strong>-30 to +30 counts per core</strong>. You can apply the same offset to every core (<em>scope = all</em>) or target a specific physical core (<em>scope = core</em>, requires <em>core_index</em>).</p>
-
-  <h4>PBO — Precision Boost Overdrive (Zen 2 and newer)</h4>
-  <p>Three firmware power/current caps:</p>
-  <table>
-    <tr><th>Limit</th><th>Unit</th><th>Meaning</th></tr>
-    <tr><td>PPT</td><td>mW</td><td>Package Power Tracking — sustained package power ceiling</td></tr>
-    <tr><td>TDC</td><td>mA</td><td>Thermal Design Current — sustained current draw</td></tr>
-    <tr><td>EDC</td><td>mA</td><td>Electrical Design Current — short-duration current peaks</td></tr>
-  </table>
-  <p>Setting a limit to <strong>0</strong> returns control to motherboard defaults.</p>
-
-  <h3>Supported AMD Silicon</h3>
-  <table>
-    <tr><th>Zen Generation</th><th>Example CPUs</th><th>Curve Optimizer</th><th>PBO Limits</th></tr>
-    <tr><td>Zen 2 (Matisse)</td><td>3900X, 3950X</td><td class="default">No</td><td class="optimal">Yes</td></tr>
-    <tr><td>Zen 3 (Vermeer) <strong>priority</strong></td><td>5950X, 5900X, 5800X</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-    <tr><td>Zen 4 (Raphael)</td><td>7950X, 7900X, 7800X3D</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-    <tr><td>Zen 5 (Granite Ridge)</td><td>9950X, 9900X, 9700X</td><td class="optimal">Yes</td><td class="optimal">Yes</td></tr>
-  </table>
-
   <h3>Current Backend Status</h3>
   <div class="box box-info">
-    The detection, validation, range clamping, AI tool surface, and confirm-dialog plumbing are <strong>fully implemented</strong> for both Intel and AMD. The low-level <strong>write path</strong> (MSR 0x150 for Intel, SMU mailbox for AMD) is currently stubbed — attempting to apply an offset returns a clear "backend not yet implemented" message rather than silently succeeding or silently failing. Implementation lands in <code>core/cpu_voltage.py::_msr_write()</code> (Intel) and <code>core/amd_voltage.py::_smu_write()</code> (AMD), both of which share the WinRing0 driver loaded by the LibreHardwareMonitor bridge.
+    The detection, validation, range clamping, AI tool surface, and confirm-dialog plumbing are <strong>fully implemented</strong>. The low-level <strong>write path</strong> (MSR 0x150) is currently stubbed — attempting to apply an offset returns a clear "backend not yet implemented" message rather than silently succeeding or silently failing. Implementation lands in <code>core/cpu_voltage.py::_msr_write()</code>, which will share the WinRing0 driver loaded by the LibreHardwareMonitor bridge.
+  </div>
+
+  <div class="box box-info">
+    <strong>AMD Ryzen:</strong> Curve Optimizer and PBO tuning (SMU mailbox) are planned for a future release.
   </div>
 
   <div class="box box-warn">
-    <strong>When the write backend is enabled:</strong> a too-aggressive undervolt on either vendor will cause idle WHEA errors, sudden hard-freezes under load, blue screens, or corrupted in-flight disk writes. Settings revert on reboot, but damage caused while the offset was active does not. Never accept the RISK_HIGH dialog without actually reading what the AI is about to do.
+    <strong>When the write backend is enabled:</strong> a too-aggressive undervolt will cause idle WHEA errors, sudden hard-freezes under load, blue screens, or corrupted in-flight disk writes. Settings revert on reboot, but damage caused while the offset was active does not. Never accept the RISK_HIGH dialog without actually reading what the AI is about to do.
   </div>
 </section>
 
 <section id="ai-gpu-tuning">
   <h2>GPU Tuning <span class="badge badge-pro">PRO</span></h2>
-  <p>The AI can apply runtime overclocks, undervolts, power limits, and fan overrides to the primary discrete GPU. Dispatch is automatic — <code>set_gpu_core_offset</code> routes to NVML on NVIDIA cards and to ADLX on Radeon.</p>
+  <p>The AI can apply runtime overclocks, undervolts, power limits, and fan overrides to the primary discrete GPU. NVIDIA-only in v1 — AMD Radeon and Intel Arc tuning are planned for a future release.</p>
 
   <h3>NVIDIA GeForce — NVML backend (live)</h3>
   <p>The NVIDIA path is fully implemented. AlienCore talks directly to the NVML shared library that ships with the GeForce driver — no subprocess, no external tool, no admin-only COM interop required beyond the elevation AlienCore already has.</p>
@@ -1257,12 +1217,9 @@ python aliencore.py --uninstall # remove the service</code></pre>
   </table>
   <p>These are the same knobs MSI Afterburner and GeForce Experience "Automatic Tuning" write to. Offsets survive until reboot or driver restart unless re-applied.</p>
 
-  <h3>AMD Radeon — ADLX backend (scaffolded)</h3>
-  <p>The AMD path is scaffolded the same way as <code>amd_voltage.py</code>: capability probe, ADLX DLL presence check, per-card range clamping, full tool registration, with <code>_adlx_call()</code> stubbed. Supported hardware (when the backend lands): Radeon RX 5000 / 6000 / 7000 / 9000 series (RDNA1 onward). Requires Adrenalin 22.x or newer (provides <code>amdadlx64.dll</code>).</p>
-  <p>Target API: <code>IADLXGPUTuning1</code> with <code>GetManualGFXTuning1</code> (core), <code>GetManualVRAMTuning1</code> (memory), <code>GetManualPowerTuning</code> (power slider ±%), and <code>GetManualFanTuning</code> (fan override). Implementation options: pythonnet + ADLX C# wrapper, or ctypes COM against <code>amdadlx64.dll</code>.</p>
-
-  <h3>Intel Arc</h3>
-  <p>Intel Arc Control has a user-mode API, but it's undocumented and rarely used by third-party tools. AlienCore reports Arc capability but does not expose tuning tools for it.</p>
+  <div class="box box-info">
+    <strong>Non-NVIDIA GPUs:</strong> sensor readings still work (via the LibreHardwareMonitor bridge), but runtime clock / power / fan control is not supported in v1. The AI tool will return a clear "NVIDIA-only" message if invoked on a non-NVIDIA primary GPU.
+  </div>
 
   <div class="box box-warn">
     <strong>Memory overclocks:</strong> GDDR6 / GDDR6X tolerates larger offsets than core clock, but past the stable point you get image corruption, driver TDR crashes, or application hangs. GDDR6X in particular runs hot — a too-aggressive offset can push junction temperatures above 105 °C.<br /><br />
@@ -1277,7 +1234,7 @@ python aliencore.py --uninstall # remove the service</code></pre>
 
   <h3>What Runtime Memory Tuning Does NOT Do</h3>
   <div class="box box-info">
-    <strong>Runtime DDR frequency and primary-timing changes are not supported on any platform.</strong> The integrated memory controller trains against the DIMMs at POST using SPD + XMP (Intel) or EXPO (AMD DDR5). Changing DDR frequency, CL, tRCD, tRP, or tRAS while Windows is running will desync the memory controller state machine and crash the machine instantly. Any tool that claims otherwise either does nothing, changes only Windows memory-manager policy (which is unrelated to DIMM timings), or performs motherboard-vendor SMI flashing that isn't exposed to user-mode applications. If you want tighter primary timings, use BIOS XMP/EXPO or manual timings.
+    <strong>Runtime DDR frequency and primary-timing changes are not supported on any platform.</strong> The integrated memory controller trains against the DIMMs at POST using SPD + XMP. Changing DDR frequency, CL, tRCD, tRP, or tRAS while Windows is running will desync the memory controller state machine and crash the machine instantly. Any tool that claims otherwise either does nothing, changes only Windows memory-manager policy (which is unrelated to DIMM timings), or performs motherboard-vendor SMI flashing that isn't exposed to user-mode applications. If you want tighter primary timings, use BIOS XMP or manual timings.
   </div>
 
   <h3>Read-Only: memory_status</h3>
@@ -1286,28 +1243,15 @@ python aliencore.py --uninstall # remove the service</code></pre>
     <li>Total installed capacity and slot count</li>
     <li>Per-slot capacity, speed, manufacturer, slot label</li>
     <li>Configured DIMM frequency (in MT/s)</li>
-    <li>Inferred XMP/EXPO state — derived by comparing configured speed to the JEDEC cap for the detected generation (DDR4 &le; 3200, DDR5 &le; 5600)</li>
-    <li>Whether runtime AMD memory-subsystem tuning (FCLK, VDD_SOC, VDDG) is available on this platform</li>
+    <li>Inferred XMP state — derived by comparing configured speed to the JEDEC cap for the detected generation (DDR4 &le; 3200, DDR5 &le; 5600)</li>
   </ul>
 
-  <h3>AMD Infinity Fabric &amp; SoC Voltage (Zen 2+)</h3>
-  <p>The AMD memory controller, I/O die, and inter-CCD fabric are all clocked by the Infinity Fabric (FCLK), and powered by VDD_SOC + (on Zen 3+) VDDG_CCD / VDDG_IOD. All three sit behind the SMU mailbox — the same path as <code>set_amd_curve_optimizer</code> and <code>set_amd_pbo_limit</code>.</p>
-  <table>
-    <tr><th>Tool</th><th>What it changes</th><th>Range</th><th>Status</th></tr>
-    <tr><td class="setting">set_amd_fclk</td><td>Infinity Fabric clock (MHz)</td><td>1333-2100</td><td>Scaffolded</td></tr>
-    <tr><td class="setting">set_amd_soc_voltage</td><td>VDD_SOC (mV)</td><td>900-1150</td><td>Scaffolded</td></tr>
-    <tr><td class="setting">set_amd_vddg</td><td>VDDG_CCD or VDDG_IOD (mV)</td><td>850-1050</td><td>Scaffolded (Zen 3+ only)</td></tr>
-  </table>
-
-  <h3>Why FCLK Matters</h3>
-  <p>On Zen 2 / Zen 3 / Zen 4, keeping FCLK coupled 1:1 with the memory clock (MCLK = half the DDR data rate) minimizes round-trip latency to RAM. For DDR4-3600 that's 1800 MHz FCLK; for DDR4-4000 it's 2000 MHz. Pushing FCLK above what the silicon can stably hold forces the controller into 2:1 divider mode, which is SLOWER than a lower stable FCLK. The <code>memory_status</code> tool reports your current configured DDR rate so the AI can pick a matching FCLK target.</p>
-
-  <div class="box box-warn">
-    <strong>VDD_SOC limit is a hard cap, not a soft warning.</strong> Sustained VDD_SOC above 1.15 V permanently degrades Zen 3 silicon via electromigration. AMD publicly confirmed this after the Zen 4 X3D burn-out incidents in 2023. The <code>set_amd_soc_voltage</code> tool refuses values above 1150 mV — this is not configurable. VDDG must also remain at least ~50 mV below VDD_SOC.
+  <div class="box box-info">
+    <strong>Intel platforms:</strong> runtime FCLK / SoC-voltage tuning on Intel 12th Gen+ requires the ME firmware mailbox, which is not exposed in AlienCore. For Intel, use BIOS XMP and leave runtime memory tuning to the firmware.
   </div>
 
   <div class="box box-info">
-    <strong>Intel platforms:</strong> runtime FCLK / SoC-voltage tuning on Intel 12th Gen+ requires the ME firmware mailbox, which has not been exposed in AlienCore. For Intel, use BIOS XMP and leave runtime memory tuning to the firmware.
+    <strong>AMD Ryzen:</strong> runtime Infinity Fabric (FCLK), VDD_SOC, and VDDG tuning via the SMU mailbox are planned for a future release.
   </div>
 </section>
 

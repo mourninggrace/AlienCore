@@ -38,7 +38,6 @@ liability clause before any call lands here.
 # copykitten
 
 import logging
-import platform
 
 logger = logging.getLogger("aliencore.cpu_voltage")
 
@@ -122,12 +121,7 @@ def get_status() -> dict:
 
     supported  = True
     reason     = ""
-    if info["is_amd"]:
-        supported = False
-        reason    = ("Intel MSR 0x150 is not applicable on AMD CPUs — use "
-                     "the AMD Curve Optimizer tool (set_amd_curve_optimizer) "
-                     "for per-core voltage offsets instead.")
-    elif not info["is_intel"] and info["name"]:
+    if not info["is_intel"] and info["name"]:
         supported = False
         reason    = (f"CPU '{info['name']}' is not a recognized Intel part; "
                      "MSR 0x150 voltage offsets require an Intel CPU.")

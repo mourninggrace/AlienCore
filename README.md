@@ -74,13 +74,17 @@ aliencore/
 
 ## Portability
 
-AlienCore is designed to run on **any Windows machine**, not just your Alienware.
+AlienCore v1 is designed to run on **any Intel + NVIDIA Windows machine**,
+not just your Alienware.
 
 On first run on a new machine, it fingerprints the hardware and calculates
-appropriate tweak values for that machine's CPU, GPU, and RAM. Both Intel
-and AMD CPUs are supported — Intel-specific tweaks (Thread Director,
-hetero-scheduling, TVB) silently skip on AMD, and AMD-specific tools
-(Curve Optimizer, PBO, CCD affinity) silently skip on Intel.
+appropriate tweak values for that machine's CPU, GPU, and RAM. Tuning
+features (voltage offsets, GPU clock/power/fan control) require an
+Intel CPU and an NVIDIA GPU. Generic OS tweaks (power plan, scheduler,
+network, storage, privacy) apply to any Windows machine regardless of
+silicon.
+
+AMD Ryzen and Radeon tuning are planned for a future release.
 
 Alienware-specific features (AWCC fan curve integration, G-Mode) are
 only activated if an Alienware chassis is detected.
@@ -118,16 +122,15 @@ python aliencore.py --restore-defaults
 
 - Windows 10 21H2 / 11
 - Python 3.10+
-- **CPU**: Intel 12th Gen+ (Alder Lake / Raptor Lake / Meteor Lake) **or**
-  AMD Ryzen Zen 2 / Zen 3 / Zen 4 / Zen 5. Priority AMD coverage: Ryzen 9
-  5950X and 5900X (Zen 3 Vermeer).
-- **GPU**: NVIDIA GeForce, AMD Radeon, or Intel Arc — all three vendors
-  supported.
-  - NVIDIA sensors come from NVML (via pynvml) with nvidia-smi fallback
-  - AMD Radeon and Intel Arc sensors come from LibreHardwareMonitor
+- **CPU**: Intel 12th Gen or newer (Alder Lake / Raptor Lake / Meteor Lake).
+  AMD Ryzen support is planned for a future release.
+- **GPU**: NVIDIA GeForce (tuning via NVML / pynvml). AMD Radeon / Intel Arc
+  tuning are planned for a future release; sensor readings still work for
+  these through LibreHardwareMonitor, but runtime clock/power/fan control
+  is NVIDIA-only in v1.
 - LibreHardwareMonitor is bundled via `lhm_bridge.exe` and provides
-  NVMe temps, fan RPM, DIMM temps, AMD/Intel Arc GPU readings, and CPU
-  package temp/watts on all supported platforms.
+  NVMe temps, fan RPM, DIMM temps, non-NVIDIA GPU readings, and CPU
+  package temp/watts.
 
 Python packages (installed by install_deps.py):
 - psutil
@@ -137,16 +140,12 @@ Python packages (installed by install_deps.py):
 - Pillow
 - nvidia-ml-py (pynvml — NVIDIA GPU direct NVML calls)
 
-No AMD-specific Python package is required — AMD GPU data is read through
-the bundled LibreHardwareMonitor bridge.
+## CPU Feature Matrix (v1)
 
-## CPU Feature Matrix
-
-| Feature                                  | Intel 12th+     | AMD Zen 3+                  | AMD Zen 2        |
-|------------------------------------------|-----------------|-----------------------------|------------------|
-| Sensor bar (temp / load / watts)         | Yes             | Yes                         | Yes              |
-| Per-core temp / load                     | Yes (P/E split) | Yes (per CCD)               | Yes              |
-| Thread Director / hetero-scheduling      | Yes             | N/A (not hybrid)            | N/A              |
-| TVB Optimizer                            | Yes (i9 Raptor) | N/A                         | N/A              |
-| CCD awareness (affinity hints)           | N/A             | Yes                         | Yes              |
-| AI voltage tool (read + write scaffolded)| MSR 0x150       | Curve Optimizer + PBO       | PBO only         |
+| Feature                                  | Intel 12th+     |
+|------------------------------------------|-----------------|
+| Sensor bar (temp / load / watts)         | Yes             |
+| Per-core temp / load                     | Yes (P/E split) |
+| Thread Director / hetero-scheduling      | Yes             |
+| TVB Optimizer                            | Yes (i9 Raptor) |
+| AI voltage tool (read + write scaffolded)| MSR 0x150       |

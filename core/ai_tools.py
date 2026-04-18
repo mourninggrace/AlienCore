@@ -127,20 +127,13 @@ def _h_set_power_plan(args: dict):
 
 
 def _h_cpu_voltage_status(args: dict):
-    """Report both Intel and AMD voltage-control capabilities.
+    """Report Intel MSR 0x150 voltage-control capability.
 
-    The AI uses this to pick the right tool: Intel MSR 0x150 path vs
-    AMD Curve Optimizer / PBO path.  On systems where neither applies
-    (e.g. Dell Alienware with Plundervolt lock, unknown Zen generation),
-    both sub-statuses will return supported=False with a reason string.
+    On systems where it doesn't apply (Dell/Alienware Plundervolt lock,
+    non-Intel CPU), supported=False with a reason string.
     """
-    from core import cpu_voltage, amd_voltage
-    intel_s = cpu_voltage.get_status()
-    amd_s   = amd_voltage.get_status()
-    return True, (cpu_voltage.status_text() + " | " + amd_voltage.status_text()), {
-        "intel": intel_s,
-        "amd":   amd_s,
-    }
+    from core import cpu_voltage
+    return True, cpu_voltage.status_text(), cpu_voltage.get_status()
 
 
 def _h_set_cpu_voltage_offset(args: dict):
@@ -151,27 +144,7 @@ def _h_set_cpu_voltage_offset(args: dict):
     return ok, msg, {"plane": plane, "offset_mv": offset}
 
 
-def _h_set_amd_curve_optimizer(args: dict):
-    from core import amd_voltage
-    counts = args.get("counts")
-    scope  = (args.get("scope") or "all").lower()
-    if scope == "all":
-        ok, msg = amd_voltage.set_curve_all_cores(counts)
-        return ok, msg, {"scope": "all", "counts": counts}
-    core = args.get("core_index")
-    ok, msg = amd_voltage.set_curve_offset(core, counts)
-    return ok, msg, {"scope": "core", "core_index": core, "counts": counts}
-
-
-def _h_set_amd_pbo_limit(args: dict):
-    from core import amd_voltage
-    kind  = args.get("kind")
-    value = args.get("value")
-    ok, msg = amd_voltage.set_pbo_limit(kind, value)
-    return ok, msg, {"kind": kind, "value": value}
-
-
-# ── GPU tuning (NVIDIA real, AMD scaffolded) ────────────────────────────────
+# ── GPU tuning (NVIDIA only in v1) ──────────────────────────────────────────
 
 def _h_gpu_tuning_status(args: dict):
     from core import gpu_tuning
@@ -180,58 +153,52 @@ def _h_gpu_tuning_status(args: dict):
 
 
 def _h_set_gpu_core_offset(args: dict):
-    from core import gpu_tuning, amd_gpu_tuning
+    from core import gpu_tuning
     vendor = gpu_tuning._primary_gpu_info()["vendor"]
     offset = args.get("offset_mhz")
     if vendor == "nvidia":
         ok, msg = gpu_tuning.set_core_offset(offset)
-    elif vendor == "amd":
-        ok, msg = amd_gpu_tuning.set_core_clock_offset(offset)
     else:
-        ok, msg = False, f"No tuning backend for GPU vendor '{vendor}'."
+        ok, msg = False, ("Runtime GPU tuning is NVIDIA-only in this version. "
+                          f"Primary GPU vendor: '{vendor}'.")
     return ok, msg, {"vendor": vendor, "offset_mhz": offset}
 
 
 def _h_set_gpu_mem_offset(args: dict):
-    from core import gpu_tuning, amd_gpu_tuning
+    from core import gpu_tuning
     vendor = gpu_tuning._primary_gpu_info()["vendor"]
     offset = args.get("offset_mhz")
     if vendor == "nvidia":
         ok, msg = gpu_tuning.set_mem_offset(offset)
-    elif vendor == "amd":
-        ok, msg = amd_gpu_tuning.set_mem_clock_offset(offset)
     else:
-        ok, msg = False, f"No tuning backend for GPU vendor '{vendor}'."
+        ok, msg = False, ("Runtime GPU tuning is NVIDIA-only in this version. "
+                          f"Primary GPU vendor: '{vendor}'.")
     return ok, msg, {"vendor": vendor, "offset_mhz": offset}
 
 
 def _h_set_gpu_power_limit(args: dict):
-    from core import gpu_tuning, amd_gpu_tuning
+    from core import gpu_tuning
     vendor = gpu_tuning._primary_gpu_info()["vendor"]
     if vendor == "nvidia":
         watts = args.get("watts")
         ok, msg = gpu_tuning.set_power_limit(watts)
         data = {"vendor": vendor, "watts": watts}
-    elif vendor == "amd":
-        percent = args.get("percent")
-        ok, msg = amd_gpu_tuning.set_power_offset(percent)
-        data = {"vendor": vendor, "percent": percent}
     else:
-        ok, msg = False, f"No tuning backend for GPU vendor '{vendor}'."
+        ok, msg = False, ("Runtime GPU tuning is NVIDIA-only in this version. "
+                          f"Primary GPU vendor: '{vendor}'.")
         data = {"vendor": vendor}
     return ok, msg, data
 
 
 def _h_set_gpu_fan_duty(args: dict):
-    from core import gpu_tuning, amd_gpu_tuning
+    from core import gpu_tuning
     vendor  = gpu_tuning._primary_gpu_info()["vendor"]
     percent = args.get("percent")
     if vendor == "nvidia":
         ok, msg = gpu_tuning.set_fan_duty(percent, args.get("fan_index", 0))
-    elif vendor == "amd":
-        ok, msg = amd_gpu_tuning.set_fan_duty(percent)
     else:
-        ok, msg = False, f"No tuning backend for GPU vendor '{vendor}'."
+        ok, msg = False, ("Runtime GPU tuning is NVIDIA-only in this version. "
+                          f"Primary GPU vendor: '{vendor}'.")
     return ok, msg, {"vendor": vendor, "percent": percent}
 
 
@@ -240,28 +207,6 @@ def _h_set_gpu_fan_duty(args: dict):
 def _h_memory_status(args: dict):
     from core import memory_tuning
     return True, memory_tuning.status_text(), memory_tuning.get_status()
-
-
-def _h_set_amd_fclk(args: dict):
-    from core import memory_tuning
-    fclk = args.get("fclk_mhz")
-    ok, msg = memory_tuning.set_amd_fclk(fclk)
-    return ok, msg, {"fclk_mhz": fclk}
-
-
-def _h_set_amd_soc_voltage(args: dict):
-    from core import memory_tuning
-    mv = args.get("millivolts")
-    ok, msg = memory_tuning.set_amd_soc_voltage(mv)
-    return ok, msg, {"millivolts": mv}
-
-
-def _h_set_amd_vddg(args: dict):
-    from core import memory_tuning
-    mv    = args.get("millivolts")
-    plane = args.get("plane", "ccd")
-    ok, msg = memory_tuning.set_amd_vddg(mv, plane)
-    return ok, msg, {"millivolts": mv, "plane": plane}
 
 
 def _h_open_settings(args: dict):
@@ -375,8 +320,9 @@ TOOLS = {
                        "available on this machine. Returns support flag, "
                        "reason string (if unsupported — e.g. Dell/Alienware "
                        "Plundervolt lock, non-Intel CPU), list of voltage "
-                       "planes, and the allowed offset range in mV. Call "
-                       "this before attempting to set any voltage offset.",
+                       "planes, and the allowed offset range in mV. Intel-"
+                       "only in this version. Call this before attempting "
+                       "to set any voltage offset.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "risk":    RISK_READ,
         "handler": _h_cpu_voltage_status,
@@ -422,108 +368,23 @@ TOOLS = {
         "risk":    RISK_HIGH,
         "handler": _h_set_cpu_voltage_offset,
     },
-    "set_amd_curve_optimizer": {
-        "description": "Apply an AMD Ryzen Curve Optimizer offset (Zen 3 "
-                       "and newer). Each signed 'count' is approximately "
-                       "3-5 mV of undervolt (negative) or overvolt "
-                       "(positive). Range: -30 to +30 per core. 'scope' "
-                       "= 'all' applies the same offset to every "
-                       "physical core; 'scope' = 'core' applies it to "
-                       "one core specified by 'core_index'. Unavailable "
-                       "on Zen 2 and non-AMD CPUs — always call "
-                       "cpu_voltage_status first.",
-        "warning":     ("Curve Optimizer writes per-core voltage-"
-                        "frequency curve offsets directly to the silicon "
-                        "via the AMD SMU mailbox. Too aggressive an "
-                        "undervolt causes idle WHEA errors, sudden hard-"
-                        "freezes under load, blue screens, or corrupted "
-                        "in-flight disk writes. Damage caused while the "
-                        "offset is active does not revert on reboot even "
-                        "though the setting itself does."),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "scope": {
-                    "type": "string",
-                    "enum": ["all", "core"],
-                    "description": "'all' = apply to every physical core; "
-                                   "'core' = target one core.",
-                },
-                "core_index": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "Physical core index (only used when "
-                                   "scope='core').",
-                },
-                "counts": {
-                    "type": "integer",
-                    "minimum": -30,
-                    "maximum":  30,
-                    "description": "Signed Curve Optimizer counts "
-                                   "(negative = undervolt, ~3-5 mV each).",
-                },
-            },
-            "required": ["scope", "counts"],
-        },
-        "risk":    RISK_HIGH,
-        "handler": _h_set_amd_curve_optimizer,
-    },
-    "set_amd_pbo_limit": {
-        "description": "Set an AMD Precision Boost Overdrive power / "
-                       "current limit. 'kind' = 'ppt' (package power in "
-                       "mW), 'tdc' (thermal design current in mA), or "
-                       "'edc' (electrical design current in mA). Setting "
-                       "'value' = 0 reverts to motherboard defaults. "
-                       "Works on Zen 2 and newer AMD Ryzen; always call "
-                       "cpu_voltage_status first.",
-        "warning":     ("Raising PBO limits increases sustained package "
-                        "power and current draw. Silicon is firmware-"
-                        "capped so the CPU itself is unlikely to be "
-                        "damaged, but extended operation above "
-                        "motherboard-rated VRM limits can overheat and "
-                        "permanently damage voltage regulators, "
-                        "especially on budget boards. Monitor VRM "
-                        "temperatures before committing to elevated "
-                        "limits."),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "kind": {
-                    "type": "string",
-                    "enum": ["ppt", "tdc", "edc"],
-                    "description": "Which PBO limit to set.",
-                },
-                "value": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "Limit value (mW for ppt, mA for "
-                                   "tdc/edc). 0 = motherboard default.",
-                },
-            },
-            "required": ["kind", "value"],
-        },
-        "risk":    RISK_HIGH,
-        "handler": _h_set_amd_pbo_limit,
-    },
 
     # ── GPU tuning ──────────────────────────────────────────────────────
     "gpu_tuning_status": {
-        "description": "Report which GPU tuning path is available: NVIDIA "
-                       "(via NVML — core/mem clock offsets, power limit, "
-                       "fan), AMD Radeon (via ADLX — scaffolded), or "
-                       "neither. Returns firmware-reported power-limit "
-                       "range for NVIDIA. Call before any set_gpu_* tool.",
+        "description": "Report whether NVIDIA GPU tuning is available via "
+                       "NVML (core/mem clock offsets, power limit, fan). "
+                       "Returns firmware-reported power-limit range. "
+                       "NVIDIA-only in this version. Call before any "
+                       "set_gpu_* tool.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "risk":    RISK_READ,
         "handler": _h_gpu_tuning_status,
     },
     "set_gpu_core_offset": {
         "description": "Apply a signed core-clock offset to the primary "
-                       "GPU. On NVIDIA this writes the GpcClk VF offset "
-                       "via NVML (same knob MSI Afterburner uses). On "
-                       "AMD Radeon this writes the GFX clock offset via "
-                       "ADLX (scaffolded). Range: -200 to +300 MHz. "
-                       "Always call gpu_tuning_status first.",
+                       "NVIDIA GPU via NVML (same knob MSI Afterburner "
+                       "uses). Range: -200 to +300 MHz. NVIDIA-only; "
+                       "always call gpu_tuning_status first.",
         "warning":     ("Raising core-clock offset increases GPU power "
                         "and heat. Too aggressive an offset causes "
                         "driver TDR crashes, flickering artifacts, or "
@@ -550,11 +411,10 @@ TOOLS = {
     },
     "set_gpu_mem_offset": {
         "description": "Apply a signed memory-clock offset to the primary "
-                       "GPU. NVIDIA via NVML, AMD via ADLX (scaffolded). "
-                       "GDDR6/6X tolerates larger offsets than core "
-                       "clock — NVIDIA range: -1000 to +2000 MHz; AMD "
-                       "range: -200 to +400 MHz. Always call "
-                       "gpu_tuning_status first.",
+                       "NVIDIA GPU via NVML. GDDR6/6X tolerates larger "
+                       "offsets than core clock — range: -1000 to +2000 "
+                       "MHz. NVIDIA-only; always call gpu_tuning_status "
+                       "first.",
         "warning":     ("Memory overclocking past the silicon's stable "
                         "point causes image corruption (sparkles, "
                         "texture flickering), full application crashes, "
@@ -578,13 +438,10 @@ TOOLS = {
         "handler": _h_set_gpu_mem_offset,
     },
     "set_gpu_power_limit": {
-        "description": "Set the GPU power limit. On NVIDIA this is an "
-                       "absolute wattage clamped to the firmware min/max "
-                       "(call gpu_tuning_status to get the valid range). "
-                       "On AMD it's a signed percentage offset to the "
-                       "power slider (-30 to +20 typically). Provide "
-                       "'watts' for NVIDIA or 'percent' for AMD — the "
-                       "tool picks based on the detected GPU vendor.",
+        "description": "Set the NVIDIA GPU power limit. Absolute wattage "
+                       "clamped to the firmware min/max (call "
+                       "gpu_tuning_status to get the valid range). "
+                       "NVIDIA-only in this version.",
         "warning":     ("Raising the GPU power limit allows the card to "
                         "draw more sustained wattage, which increases "
                         "VRM and board temperatures. Budget and "
@@ -596,23 +453,21 @@ TOOLS = {
         "input_schema": {
             "type": "object",
             "properties": {
-                "watts":   {"type": "number",
-                            "description": "NVIDIA only — absolute power limit in watts."},
-                "percent": {"type": "integer",
-                            "description": "AMD only — signed % offset to power slider."},
+                "watts": {"type": "number",
+                          "description": "Absolute power limit in watts."},
             },
-            "required": [],
+            "required": ["watts"],
         },
         "risk":    RISK_HIGH,
         "handler": _h_set_gpu_power_limit,
     },
     "set_gpu_fan_duty": {
-        "description": "Set a fixed GPU fan duty cycle (0-100 %). Pass "
-                       "percent = -1 to hand control back to the driver's "
-                       "automatic fan curve. Useful for reducing noise at "
-                       "idle (lower percent) or improving thermals under "
-                       "load (higher percent). NVIDIA requires fan_index "
-                       "(default 0 = primary fan).",
+        "description": "Set a fixed NVIDIA GPU fan duty cycle (0-100 %). "
+                       "Pass percent = -1 to hand control back to the "
+                       "driver's automatic fan curve. Useful for reducing "
+                       "noise at idle (lower percent) or improving "
+                       "thermals under load (higher percent). "
+                       "fan_index defaults to 0 (primary fan).",
         "warning":     ("Locking the fan below the card's automatic "
                         "curve can allow the GPU to overheat under "
                         "load. Always verify temperatures remain below "
@@ -626,7 +481,7 @@ TOOLS = {
                               "minimum": -1, "maximum": 100,
                               "description": "Fan duty % (0-100), or -1 for auto."},
                 "fan_index": {"type": "integer", "minimum": 0, "default": 0,
-                              "description": "NVIDIA only — which fan to control."},
+                              "description": "Which fan to control."},
             },
             "required": ["percent"],
         },
@@ -637,99 +492,13 @@ TOOLS = {
     # ── Memory tuning ───────────────────────────────────────────────────
     "memory_status": {
         "description": "Report RAM configuration — total capacity, slot "
-                       "layout, DIMM frequency, inferred XMP/EXPO state, "
-                       "and (on AMD) whether runtime Infinity Fabric / "
-                       "SoC-voltage tuning is available. Runtime DDR "
-                       "frequency or primary-timing changes are NOT "
-                       "supported on any platform — those must be set "
-                       "in BIOS via XMP/EXPO. This tool explains which "
-                       "memory-subsystem knobs ARE runtime-adjustable.",
+                       "layout, DIMM frequency, inferred XMP state. "
+                       "Runtime DDR frequency or primary-timing changes "
+                       "are NOT supported on any platform — those must "
+                       "be set in BIOS via XMP.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "risk":    RISK_READ,
         "handler": _h_memory_status,
-    },
-    "set_amd_fclk": {
-        "description": "Set the AMD Ryzen Infinity Fabric clock (FCLK) "
-                       "in MHz via the SMU mailbox. FCLK couples the "
-                       "memory controller to the Core Complex Die(s); "
-                       "matching FCLK to half the DDR data rate (1:1 "
-                       "coupled mode) minimizes memory latency. Range: "
-                       "1333-2100 MHz. Sweet spot on Zen 3: 1800-2000. "
-                       "AMD-only; call memory_status first.",
-        "warning":     ("Setting FCLK above what the silicon can stably "
-                        "support causes WHEA errors, random reboots, "
-                        "and data corruption. FCLK is coupled to DDR "
-                        "rate — raising it above 1:1 coupled mode can "
-                        "force 2:1 divider mode, which is SLOWER than "
-                        "a lower stable FCLK. Values revert on reboot."),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "fclk_mhz": {
-                    "type": "integer", "minimum": 1333, "maximum": 2100,
-                    "description": "Target Infinity Fabric clock in MHz.",
-                },
-            },
-            "required": ["fclk_mhz"],
-        },
-        "risk":    RISK_HIGH,
-        "handler": _h_set_amd_fclk,
-    },
-    "set_amd_soc_voltage": {
-        "description": "Set the AMD Ryzen VDD_SOC voltage (in mV) — "
-                       "powers the I/O die including memory controller. "
-                       "Used when pushing FCLK above stock. Range: "
-                       "900-1150 mV; stock is typically 1050-1100. AMD-"
-                       "only.",
-        "warning":     ("Sustained VDD_SOC above 1.15 V permanently "
-                        "degrades Zen 3 silicon (migration / "
-                        "electromigration damage). AMD publicly "
-                        "confirmed this after the Zen 4 X3D burn-out "
-                        "incidents. Stay at or below 1.15 V. Too-low "
-                        "values cause memory training failures and "
-                        "boot-loops."),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "millivolts": {
-                    "type": "integer", "minimum": 900, "maximum": 1150,
-                    "description": "VDD_SOC in millivolts.",
-                },
-            },
-            "required": ["millivolts"],
-        },
-        "risk":    RISK_HIGH,
-        "handler": _h_set_amd_soc_voltage,
-    },
-    "set_amd_vddg": {
-        "description": "Set VDDG_CCD (core-complex die) or VDDG_IOD "
-                       "(I/O die) voltage in mV — fine-grained "
-                       "tuning of the Infinity Fabric power planes on "
-                       "Zen 3 and newer. Range: 850-1050 mV. Required "
-                       "for high-FCLK stability.",
-        "warning":     ("VDDG planes feed the Infinity Fabric. Too-low "
-                        "causes FCLK instability and WHEA errors. Too-"
-                        "high accelerates silicon degradation. VDDG "
-                        "must also remain at least ~50 mV below "
-                        "VDD_SOC — going above will be rejected or "
-                        "cause instability."),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "plane": {
-                    "type": "string",
-                    "enum": ["ccd", "iod"],
-                    "description": "Which VDDG plane to set.",
-                },
-                "millivolts": {
-                    "type": "integer", "minimum": 850, "maximum": 1050,
-                    "description": "VDDG voltage in millivolts.",
-                },
-            },
-            "required": ["plane", "millivolts"],
-        },
-        "risk":    RISK_HIGH,
-        "handler": _h_set_amd_vddg,
     },
 }
 
