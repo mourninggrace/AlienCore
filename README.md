@@ -92,6 +92,7 @@ aliencore/
 │   ├── logger.py           ← Rotating log setup
 │   ├── hardware.py         ← Hardware fingerprint (CPU/GPU/RAM/drives)
 │   ├── sensors.py          ← Live sensor polling (temps, RPM, usage)
+│   ├── amd_smu.py          ← AMD CPU temp via Ryzen Master Platform.dll (Ring0 fallback)
 │   ├── tweaks.py           ← Applies all system tweaks
 │   ├── profiles.py         ← Profile detection and switching logic
 │   └── monitor.py          ← Resident monitor loop
@@ -203,15 +204,19 @@ python aliencore.py --restore-defaults
 
 - Windows 10 21H2 / 11
 - Python 3.10+
-- **CPU**: Intel 12th Gen or newer (Alder Lake / Raptor Lake / Meteor Lake).
-  AMD Ryzen support is planned for a future release.
+- **CPU**: Intel 12th Gen+ or AMD Ryzen (Zen 3 / Zen 4). AMD CPU temps are
+  read via LibreHardwareMonitor (Ring0) or Ryzen Master's Platform.dll as a
+  fallback. Intel-specific features (Thread Director, TVB optimizer, MSR
+  voltage) are skipped on AMD.
 - **GPU**: NVIDIA GeForce (tuning via NVML / pynvml). AMD Radeon / Intel Arc
   tuning are planned for a future release; sensor readings still work for
   these through LibreHardwareMonitor, but runtime clock/power/fan control
   is NVIDIA-only in v1.
 - LibreHardwareMonitor is bundled via `lhm_bridge.exe` and provides
-  NVMe temps, fan RPM, DIMM temps, non-NVIDIA GPU readings, and CPU
-  package temp/watts.
+  NVMe temps, fan RPM, non-NVIDIA GPU readings, and CPU package temp/watts.
+  DIMM temperature sensors are hardware-dependent — many DDR4/DDR5 DIMMs
+  do not expose thermal data; requires LHM Ring0 access (Memory Integrity
+  must be disabled).
 
 Python packages (installed by install_deps.py):
 - psutil

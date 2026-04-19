@@ -32,6 +32,7 @@ _prev_net_io    = None
 _prev_net_time  = None
 _prev_disk_io   = None
 _prev_disk_time = None
+_cpu_zero_polls = 0   # consecutive polls where LHM returned no CPU temp
 
 # ── pynvml lazy init (avoid nvidia-smi subprocess overhead) ──────────────────
 _nvml_ok     = None   # None = untried, True = working, False = unavailable
@@ -159,13 +160,14 @@ def _get_lhm_sensors() -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _parse_cpu_temp(flat: list) -> dict:
+    global _cpu_zero_polls
     result = {"cpu_temp_avg": None, "cpu_temp_package": None, "cpu_temp_cores": []}
 
     temps = [s for s in flat if s["type"] == "Temperature"]
 
     # CPU Package — primary Intel thermal sensor, most accurate single value
     pkg = next((s for s in temps if s["name"] == "CPU Package"), None)
-    if pkg:
+    if pkg and pkg["value"] > 0:
         result["cpu_temp_package"] = pkg["value"]
         result["cpu_temp_avg"]     = pkg["value"]
 
@@ -174,15 +176,32 @@ def _parse_cpu_temp(flat: list) -> dict:
     if result["cpu_temp_avg"] is None:
         tctl = next((s for s in temps
                      if s["name"] in ("Core (Tctl/Tdie)", "CPU Core (Tctl/Tdie)")), None)
-        if tctl:
+        if tctl and tctl["value"] > 0:
             result["cpu_temp_package"] = tctl["value"]
             result["cpu_temp_avg"]     = tctl["value"]
 
     # Core Average — fallback if Package unavailable
     if result["cpu_temp_avg"] is None:
         avg = next((s for s in temps if s["name"] == "Core Average"), None)
-        if avg:
+        if avg and avg["value"] > 0:
             result["cpu_temp_avg"] = avg["value"]
+
+    # AMD SMU fallback — when HVCI blocks WinRing0, LHM returns 0 for AMD CPU
+    # temp.  Only attempt after 3 consecutive zero-temp polls so LHM gets time
+    # to warm up on startup (first 1-2 polls often return empty on AMD hardware).
+    if result["cpu_temp_avg"] is None:
+        _cpu_zero_polls += 1
+        if _cpu_zero_polls >= 3:
+            try:
+                from core import amd_smu
+                smu_temp = amd_smu.get_cpu_temp()
+                if smu_temp is not None:
+                    result["cpu_temp_package"] = smu_temp
+                    result["cpu_temp_avg"]     = smu_temp
+            except Exception:
+                pass
+    else:
+        _cpu_zero_polls = 0
 
     # Individual core temps.
     # Intel hybrid: "P-Core #0" / "E-Core #0"

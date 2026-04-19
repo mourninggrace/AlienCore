@@ -15,6 +15,7 @@ Also provides per-process working set data via psutil.
 
 import logging
 import psutil
+import threading
 import time
 
 from core.constants import DDR5_PEAK_GBPS
@@ -41,68 +42,78 @@ def get_composition() -> dict:
         return dict(_cached_result)
 
     result = {}
-    try:
-        import pythoncom
-        pythoncom.CoInitialize()
-    except Exception:
-        pass
-    try:
-        import wmi
-        c = wmi.WMI()
-        for mem in c.Win32_PerfFormattedData_PerfOS_Memory():
-            # Key counters (in bytes)
-            available    = int(mem.AvailableBytes or 0)
-            standby      = int(mem.StandbyCacheNormalPriorityBytes or 0) + \
-                           int(mem.StandbyCacheReserveBytes or 0) + \
-                           int(mem.StandbyCacheCoreBytes or 0)
-            modified     = int(mem.ModifiedPageListBytes or 0)
-            free_bytes   = int(mem.FreeAndZeroPageListBytes or 0)
-            break
-        else:
-            raise RuntimeError("No WMI memory data")
+    wmi_raw = [None]
 
-        vm      = psutil.virtual_memory()
-        total_b = vm.total
+    def _query_wmi():
+        try:
+            import pythoncom
+            pythoncom.CoInitialize()
+        except Exception:
+            pass
+        try:
+            import wmi
+            c = wmi.WMI()
+            for mem in c.Win32_PerfFormattedData_PerfOS_Memory():
+                wmi_raw[0] = {
+                    "available":  int(mem.AvailableBytes or 0),
+                    "standby":    int(mem.StandbyCacheNormalPriorityBytes or 0) +
+                                  int(mem.StandbyCacheReserveBytes or 0) +
+                                  int(mem.StandbyCacheCoreBytes or 0),
+                    "modified":   int(mem.ModifiedPageListBytes or 0),
+                    "free_bytes": int(mem.FreeAndZeroPageListBytes or 0),
+                }
+                break
+        except Exception as e:
+            logger.debug("WMI memory query error: %s", e)
 
-        in_use_b  = max(0, total_b - available)
-        standby_b = min(standby, available)
-        free_b    = max(0, free_bytes)
+    t = threading.Thread(target=_query_wmi, daemon=True)
+    t.start()
+    t.join(timeout=3.0)
 
-        def to_gb(b): return round(b / 1024**3, 2)
+    if wmi_raw[0]:
+        try:
+            raw     = wmi_raw[0]
+            vm      = psutil.virtual_memory()
+            total_b = vm.total
 
-        total_gb   = to_gb(total_b)
-        in_use_gb  = to_gb(in_use_b)
-        modified_gb = to_gb(modified)
-        standby_gb = to_gb(standby_b)
-        free_gb    = to_gb(free_b)
+            in_use_b  = max(0, total_b - raw["available"])
+            standby_b = min(raw["standby"], raw["available"])
+            free_b    = max(0, raw["free_bytes"])
 
-        in_use_pct  = round(in_use_b  / total_b * 100, 1) if total_b else 0
-        standby_pct = round(standby_b / total_b * 100, 1) if total_b else 0
-        free_pct    = round(free_b    / total_b * 100, 1) if total_b else 0
+            def to_gb(b): return round(b / 1024**3, 2)
 
-        # Rough bandwidth estimate: memory utilization ≈ bandwidth pressure proxy
-        # (true bandwidth needs HW PMCs — this is a heuristic)
-        bandwidth_est = round(in_use_pct * 0.3, 1)  # conservative ~30% of % used
+            total_gb    = to_gb(total_b)
+            in_use_gb   = to_gb(in_use_b)
+            modified_gb = to_gb(raw["modified"])
+            standby_gb  = to_gb(standby_b)
+            free_gb     = to_gb(free_b)
 
-        result = {
-            "in_use_gb":    in_use_gb,
-            "modified_gb":  modified_gb,
-            "standby_gb":   standby_gb,
-            "free_gb":      free_gb,
-            "total_gb":     total_gb,
-            "in_use_pct":   in_use_pct,
-            "standby_pct":  standby_pct,
-            "free_pct":     free_pct,
-            "bandwidth_pct_estimate": bandwidth_est,
-        }
+            in_use_pct  = round(in_use_b  / total_b * 100, 1) if total_b else 0
+            standby_pct = round(standby_b / total_b * 100, 1) if total_b else 0
+            free_pct    = round(free_b    / total_b * 100, 1) if total_b else 0
 
-    except Exception as e:
-        logger.debug("WMI memory query error: %s", e)
-        # Fallback to psutil only
+            bandwidth_est = round(in_use_pct * 0.3, 1)
+
+            result = {
+                "in_use_gb":    in_use_gb,
+                "modified_gb":  modified_gb,
+                "standby_gb":   standby_gb,
+                "free_gb":      free_gb,
+                "total_gb":     total_gb,
+                "in_use_pct":   in_use_pct,
+                "standby_pct":  standby_pct,
+                "free_pct":     free_pct,
+                "bandwidth_pct_estimate": bandwidth_est,
+            }
+        except Exception as e:
+            logger.debug("WMI memory parse error: %s", e)
+
+    if not result:
+        logger.debug("WMI memory unavailable or timed out — using psutil fallback")
         try:
             vm = psutil.virtual_memory()
-            total_gb  = round(vm.total  / 1024**3, 2)
-            used_gb   = round(vm.used   / 1024**3, 2)
+            total_gb  = round(vm.total     / 1024**3, 2)
+            used_gb   = round(vm.used      / 1024**3, 2)
             avail_gb  = round(vm.available / 1024**3, 2)
             result = {
                 "in_use_gb":    used_gb,
@@ -111,8 +122,8 @@ def get_composition() -> dict:
                 "free_gb":      avail_gb * 0.5,
                 "total_gb":     total_gb,
                 "in_use_pct":   vm.percent,
-                "standby_pct":  round(avail_gb / total_gb * 50, 1),
-                "free_pct":     round(avail_gb / total_gb * 50, 1),
+                "standby_pct":  round(avail_gb / total_gb * 50, 1) if total_gb else 0,
+                "free_pct":     round(avail_gb / total_gb * 50, 1) if total_gb else 0,
                 "bandwidth_pct_estimate": round(vm.percent * 0.3, 1),
             }
         except Exception:

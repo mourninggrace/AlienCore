@@ -1363,7 +1363,7 @@ class SettingsWindow:
         self._note(parent,
             "Reads DIMM temperatures via LibreHardwareMonitor. If any DIMM exceeds "
             "the threshold, AlienCore reduces the CPU ceiling to relieve memory controller "
-            "heat. DDR5 DIMMs on the i9-14900HX typically run 40–55°C under load.")
+            "heat. Requires AlienCore to run as Administrator and Memory Integrity disabled.")
         self._opt(parent, "ram.dimm_throttle_protection",
                   "Enable DIMM thermal protection",
                   "Reduces CPU ceiling when DIMM temps exceed threshold")
@@ -1386,8 +1386,7 @@ class SettingsWindow:
                 r = sensors.get_readings()
                 ram_temps = r.get("ram_temps", [])
                 if not ram_temps:
-                    dimm_lbl.config(text="No DIMM temperature data (requires LHM bridge).",
-                                    fg=FG_DIM)
+                    dimm_lbl.config(text="No DIMM temperature data (LHM bridge required).", fg=FG_DIM)
                 else:
                     lines = []
                     for d in ram_temps:
