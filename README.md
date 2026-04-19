@@ -1,9 +1,31 @@
-# AlienCore
+<div align="center">
 
-Adaptive system optimizer for Windows — runs as a background service, tweaks
-CPU clocks, GPU power, RAM, network, storage, and privacy settings automatically
-based on what you're doing. Replaces ThrottleStop's display with live temps in
-the system tray and/or a floating overlay.
+# ⟁ AlienCore
+
+### One app. Every tweak. Always adapting.
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue?style=flat-square)](https://github.com/mourninggrace/AlienCore)
+[![CPU](https://img.shields.io/badge/CPU-Intel%20%7C%20AMD-0071C5?style=flat-square)](https://github.com/mourninggrace/AlienCore)
+[![GPU](https://img.shields.io/badge/GPU-NVIDIA-76B900?style=flat-square)](https://github.com/mourninggrace/AlienCore)
+[![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](./LICENSE)
+[![Trial](https://img.shields.io/badge/Free%20Trial-30%20Days-brightgreen?style=flat-square)](https://github.com/mourninggrace/AlienCore)
+
+*Your PC has dozens of power, thermal, and priority settings. AlienCore adjusts them automatically based on what you're actually doing — gaming, streaming, working, or idle.*
+
+</div>
+
+---
+
+## What Is AlienCore?
+
+AlienCore is an **adaptive Windows system optimizer** that watches your workload in real time and applies the right CPU, GPU, RAM, network, and privacy settings automatically — without you touching anything.
+
+Instead of juggling HWiNFO, MSI Afterburner, Process Lasso, ThrottleStop, RAMMap, and a folder full of PowerShell scripts, AlienCore replaces all of them with a single lightweight background service, a floating sensor bar, and an optional AI assistant.
+
+Launch a game → clocks ramp, network latency drops, background processes get demoted, GPU power opens up. In under a second.  
+Close the game → everything winds back down. Quieter fans. Cooler silicon. Better battery.
+
+That's the way Windows should have worked out of the box.
 
 ---
 
@@ -13,71 +35,194 @@ the system tray and/or a floating overlay.
 
 ![Sensor bar at idle](assets/screenshots/sensor-bar-idle.png)
 
-The sensor bar is the always-on-top heads-up display that lives at the top (or side) of your screen. This is what it looks like when the system is quiet: profile badge reads **IDLE**, CPU is loafing at 46°C and 5%, the GPU is barely awake, and AlienCore has dropped the CPU ceiling into its low-power band. Every cell is live — the sparkline under each number shows the last 90 seconds of history, color-shifting green/amber/red as values cross the warn and critical thresholds you set in Settings. The bar is fully resizable by dragging its bottom edge and can be toggled vertical.
+The always-on-top heads-up display that lives at the top of your screen. At idle: profile badge reads **IDLE**, CPU is loafing at 46°C and 5%, GPU is barely awake, and AlienCore has dropped the CPU ceiling into its low-power band. Every cell is live — the sparkline under each number shows the last 90 seconds of history, color-shifting green/amber/red as values cross your configured thresholds. Fully resizable by dragging its bottom edge. Can be toggled vertical.
 
 ### Floating sensor bar — under gaming load
 
 ![Sensor bar under gaming load](assets/screenshots/sensor-bar-gaming.png)
 
-Same bar, seconds after launching a game. The profile badge has automatically flipped to **GAMING**, the fan cell is now showing **7.4K RPM in red** because the fans have ramped, and the NVM1/NVM2/DIMM cells are tracking the drives spinning up. The transition is automatic — you don't click anything. AlienCore detected the workload from the process list, GPU activity, and load signature, then swapped profiles and applied the matching power, scheduler, network, and GPU tweaks in under a second.
+Same bar, seconds after launching a game. Profile badge has automatically flipped to **GAMING**, the fan cell is showing **7.4K RPM in red**, and NVM1/NVM2/DIMM cells are tracking drives spinning up. The transition is automatic — AlienCore detected the workload from the process list, GPU activity, and load signature, then swapped profiles and applied matching tweaks in under a second.
 
 ### Sparkline pop-outs
 
 ![Sparkline history windows](assets/screenshots/sensor-bar-sparklines.png)
 
-Double-click any cell on the sensor bar to pop out a larger 90-second history graph. You can open as many as you want and drag them anywhere on the desktop — shown here with NVMe temp, VRAM usage, CPU load, and GPU temp all tracked side-by-side. Each window keeps updating in real time. Useful when you want to watch a specific metric during a benchmark or troubleshoot a spike without cluttering the main bar.
+Double-click any cell to pop out a larger 90-second history graph. Open as many as you want and drag them anywhere — shown here with NVMe temp, VRAM usage, CPU load, and GPU temp tracked side-by-side.
 
 ### Tray icon right-click menu
 
 ![Tray right-click menu](assets/screenshots/tray-menu.png)
 
-The alien-head tray icon is the main entry point to everything AlienCore does. It color-shifts between green, amber, and red based on CPU package temperature, so a quick glance at your taskbar tells you how hot the system is. Right-click exposes the full menu: open Settings, override the profile manually, open the AI tools, toggle the overlay or bar visibility, view the log, send feedback, toggle Windows startup, or quit the app cleanly. The two AI menu items (**AI Config Advisor**, **Open AI Chat**) are Pro features and only show up when a valid AI provider is configured.
+The alien-head tray icon color-shifts between green, amber, and red based on CPU package temperature. Right-click exposes the full menu: open Settings, override the active profile, open AI tools, toggle overlay visibility, view the log, toggle Windows startup, or quit cleanly. AI menu items are Pro features and only appear when a valid AI provider is configured.
 
 ### Settings — CPU tab
 
 ![Settings CPU tab](assets/screenshots/settings-cpu.png)
 
-The CPU tab detects your processor (Intel Core i9 14900HX here, 24 cores / 32 threads, 2.2 GHz base) and exposes every clock and power knob AlienCore manages for it. Dynamic throttle at idle with adjustable temp-and-load triggers, idle and throttle-trigger ceilings with live sliders, full-power toggles for gaming and streaming, and the **TVB Headroom & Thermal Velocity Boost Optimizer** — which watches your live CPU-package temp against the TVB threshold and grants extra boost headroom when you're running cool. At the bottom is the **Boost Clock Sustainability Score**, a rolling rating of how much of your CPU's theoretical boost budget you're actually getting (scored by frequency, thermal headroom, or core parking — three selectable formulas).
+Detects your processor and exposes every clock and power knob AlienCore manages. Dynamic throttle at idle with adjustable temp-and-load triggers, idle and throttle-trigger ceilings with live sliders, full-power toggles for gaming and streaming, the **TVB Headroom & Thermal Velocity Boost Optimizer**, and the **Boost Clock Sustainability Score** — a rolling rating of how much of your CPU's theoretical boost budget you're actually getting.
 
 ### Settings — GPU tab
 
 ![Settings GPU tab](assets/screenshots/settings-gpu.png)
 
-GPU tuning is NVIDIA-first and hooks directly into NVML, the same API MSI Afterburner uses. You get VRAM idle-clock locking (drops memory to 405 MHz at idle to save power and heat, releases on gaming), NVIDIA driver feature toggles like **Hardware-Accelerated GPU Scheduling** and **Prefer Maximum Performance**, and a live **Thermal Throttle Event Log** that captures timestamped throttle events so you can verify whether your fan curve or power limit is actually holding. The **Power vs. Performance Efficiency** panel at the bottom gives you a %load/Watt score — a single number telling you how much work your GPU is doing per watt, averaged across a rolling sample window.
+NVIDIA-first via NVML — the same API MSI Afterburner uses. VRAM idle-clock locking, NVIDIA driver feature toggles, a live **Thermal Throttle Event Log** with timestamped captures, and a **Power vs. Performance Efficiency** panel giving you a %load/Watt score across a rolling sample window.
 
 ### Settings — RAM tab
 
 ![Settings RAM tab](assets/screenshots/settings-memory.png)
 
-RAM management breaks down Windows memory into real categories (**In Use / Modified / Standby / Free**), shows **Unified Memory Pressure** across system RAM and VRAM together (important on laptops where the iGPU shares memory), and exposes the **Working Set Trimmer** — a per-process RAM reclaim tool. Select any background process and trim its working set without killing it; Windows will reload its pages on demand when the process needs them. At the bottom is the **Memory Leak Watchdog**, which monitors per-process RSS growth rate and alerts you when a process is leaking (a common Chrome/Slack/Electron failure mode that's otherwise invisible until you run out of RAM).
+Breaks Windows memory into real categories (In Use / Modified / Standby / Free), shows **Unified Memory Pressure** across system RAM and VRAM together, exposes the **Working Set Trimmer** for per-process RAM reclaim without killing, and includes the **Memory Leak Watchdog** to catch per-process RSS growth before you run out of RAM.
 
 ### Settings — Insights tab
 
-![Insights tab showing learned patterns](assets/screenshots/settings-insights.png)
+![Insights tab](assets/screenshots/settings-insights.png)
 
-The Insights tab is where the **Learning Engine** surfaces what AlienCore has noticed about your system over time. Shown here: 7 days of data, 1537 events logged, 16 gaming sessions, 671 thermal warnings, peak gaming hour (17:00–18:00), peak streaming hour (10:00–11:00). Below that, actionable suggestions — "CPU getting warm at idle (CPU hit warning temp 523 times over 7 days — lower trigger to 70°C?)" with a one-click button to accept, and a behavioral pattern note that you tend to game around 17:00. All learning happens locally; nothing is sent to any server.
+The **Learning Engine** surfaces what AlienCore has noticed about your system over time — events logged, gaming sessions, thermal warnings, peak usage hours, and actionable one-click suggestions. All learning happens locally. Nothing is sent to any server.
 
 ### Settings — Drivers tab
 
-![Installed drivers tab](assets/screenshots/settings-drivers.png)
+![Drivers tab](assets/screenshots/settings-drivers.png)
 
-The Drivers tab scans your installed driver stack (WMI-backed, mirrors `pnputil /enum-drivers`), shows version + date + vendor for every driver that touches a real device, and highlights any driver with a newer version available upstream. Click the **Download** column link to jump straight to the vendor page for that driver — NVIDIA links go to their driver portal, Intel to DSA, Realtek to Realtek's audio page, etc. Saves the "which of my drivers is actually out of date" question that normally takes opening five websites to answer.
+Scans your installed driver stack, shows version + date + vendor for every driver touching a real device, and highlights any driver with a newer version available upstream. Click **Download** to jump straight to the vendor page.
 
 ### AI Config Advisor
 
-![AI Config Advisor window](assets/screenshots/ai-config-advisor.png)
+![AI Config Advisor](assets/screenshots/ai-config-advisor.png)
 
-The **AI Config Advisor** is a Pro feature that sends a snapshot of your current configuration plus recent sensor history to the AI provider of your choice (Claude, GPT, Gemini, Groq, Mistral, or a local Ollama / LM Studio instance) and asks it to propose tuned values. The result is a table of **Setting → Current → Proposed → Reason**, each row individually checkboxable — you review what the AI wants to change, select the ones you like, and click **Apply Selected**. Nothing gets applied without your explicit confirmation, and the **Rollback** button at the bottom right restores the config snapshot from the last time the Advisor was run.
+A Pro feature that sends a snapshot of your current config plus recent sensor history to your AI provider of choice and asks it to propose tuned values. Returns a **Setting → Current → Proposed → Reason** table — each row individually checkboxable. Nothing applied without your explicit confirmation. **Rollback** button restores the previous config snapshot.
 
 ### AI Chat
 
-![AI chat window](assets/screenshots/ai-chat.png)
+![AI Chat](assets/screenshots/ai-chat.png)
 
-The **AI Chat** window is a direct pipe to any OpenAI-compatible provider, with AlienCore's live system context (temps, clocks, active profile, detected hardware) silently attached to every conversation. Ask *"why is my CPU at 85°C just browsing?"* and it can actually see your sensor readings and config when it answers. Clear and Context buttons in the top-right let you reset or inspect what's being sent. Provider selection happens on the Settings → AI tab — same chat window regardless of who's behind it.
+A direct pipe to any OpenAI-compatible provider, with AlienCore's live system context silently attached to every conversation. Ask *"why is my CPU at 85°C just browsing?"* and it can actually see your sensor readings and config when it answers.
 
 ---
 
-## Project structure
+## Features
+
+### 🎯 Adaptive Profile Engine
+Detects your workload every 15 seconds (Idle / Gaming / Streaming / Custom) and applies a matched profile covering CPU clocks, GPU power, scheduler priorities, network latency, and storage behavior. Transitions happen in real time — no manual switching.
+
+### 🌡️ Floating Sensor Bar
+Always-on-top readout showing live CPU, GPU, hotspot, NVMe, DIMM temps, clocks, watts, fan RPMs, network and disk I/O, VRAM usage, battery, and system clock. Drag to resize. Click any cell for a 90-sample sparkline. Pulsing perimeter doubles as an ambient CPU-load indicator.
+
+### 🧊 Dynamic CPU Ceiling
+Drops max processor state to 25% when idle and cool. Ramps to 45 / 80 / 100% based on live temperature and load. Quieter, cooler, better battery — without the sluggishness of a fixed Battery Saver plan.
+
+### 🎮 NVIDIA GPU Tuning
+Core and memory clock offsets, firmware-clamped power limit, manual or automatic fan duty — all via NVIDIA's official NVML API. Same tuning surface as MSI Afterburner, wired into your profile automations.
+
+### 💎 Alienware Integration *(auto-detected)*
+Direct AWCC WMI hook for thermal profile sync (Quiet / Balanced / Performance / G-Mode), real fan RPMs, and Turbo Cool max-fan mode — without ever opening Alienware Command Center. Validated on the m18 R2 and all post-2019 Alienware chassis.
+
+### 🧠 AI Assistant *(optional, Pro)*
+Chat with Claude, GPT, Gemini, Mistral, Groq, or your own local Ollama / LM Studio instance. Live sensor context is attached to every conversation automatically. The AI Config Advisor proposes tuned values for your specific hardware. High-risk actions are gated behind an explicit confirmation dialog — the AI cannot silently damage your system.
+
+### 🔒 Privacy + System Baseline
+One-click, reversible disable of Windows telemetry (DiagTrack), advertising ID, activity history, Cortana, and feedback prompts. NIC-level tuning (RSS, EEE, flow control, interrupt moderation). Storage baseline (TRIM, disable 8.3 names, disable last-access timestamps). Every change undone with `--restore-defaults`.
+
+### 🛡️ RAM Watchdog + Standby Cache
+Detects memory leaks by monitoring per-process RSS growth rate. Automatically clears Windows standby cache when memory pressure crosses a threshold. DIMM throttle protection stays active when modules run hot.
+
+### 🤖 Learning Engine
+Logs every profile transition and tweak effect to a local database, runs hourly analysis to identify patterns, and surfaces actionable suggestions. No cloud. No data sent anywhere.
+
+### 🔄 Auto-Update
+Checks GitHub Releases automatically — 30 seconds after launch, then every 6 hours. A plain HTTPS GET to `api.github.com`. No data leaves your machine.
+
+| Choice | What happens |
+|--------|-------------|
+| **Update Now** | Downloads the release zip, extracts it, and relaunches automatically |
+| **Not Now** | Dismisses the dialog; an amber **Update Available** button appears in Settings |
+| **Remind Me in 24h** | Suppresses the dialog for 24 hours |
+
+---
+
+## What AlienCore Replaces
+
+| Tool | What It Does | AlienCore |
+|------|-------------|-----------|
+| HWiNFO | Sensor monitoring | ✅ Built in — and acts on the data |
+| MSI Afterburner | GPU tuning | ✅ Same NVML tuning surface |
+| ThrottleStop | Intel CPU tuning | ✅ Built in (MSR scaffolding ready) |
+| Process Lasso | Per-process CPU priority | ✅ Profile-driven EcoQoS + priority |
+| RAMMap / EmptyStandbyList | Standby cache clearing | ✅ Built in + automatic |
+| Alienware Command Center | Thermal profiles | ✅ Direct WMI integration |
+| O&O ShutUp10 / WPD | Privacy tweaks | ✅ Baseline tweaks cover it |
+| Custom PowerShell scripts | One-off system changes | ✅ Built in |
+
+---
+
+## Who It's For
+
+- **Laptop owners** fighting heat, fan noise, and thermal throttling — especially Alienware and gaming laptops
+- **Gamers** who want one profile for Warzone and another for browsing without manually flipping anything
+- **Streamers** who need network + encoder priority + background-process demotion locked in before going live
+- **Power users** tired of stacking half a dozen utilities just to have a properly tuned machine
+- **Privacy-conscious users** who want Windows telemetry silenced without a dedicated tool
+- **Alienware owners** — gets more out of AWCC than Alienware Command Center does, with a fraction of the bloat
+
+---
+
+## Pricing
+
+| Tier | Price | What's Included |
+|------|-------|----------------|
+| **Base** | $19.99 one-time | Adaptive profiles, sensor bar, tray icon, all OS tweaks, NVIDIA GPU tuning, Alienware AWCC integration, privacy baseline, learning engine |
+| **Pro Add-on** | +$4.99 one-time | AI chat, AI watchdog, AI Config Advisor, advanced CPU/GPU/RAM tuning, Windows services manager |
+| **Priority Support** | +$4.99 one-time | Direct support email, 24-hour guaranteed reply |
+| **Free Trial** | 30 days | Full base feature set — no payment required, hardware-fingerprinted |
+
+---
+
+## Setup
+
+1. **Install Python 3.10+** from [python.org](https://python.org) — check *Add to PATH* during install
+
+2. **Run the dependency installer as Administrator:**
+   ```
+   python install_deps.py
+   ```
+
+3. **First run (opens settings GUI):**
+   ```
+   python aliencore.py --firstrun
+   ```
+   Choose your tweaks, click Save. AlienCore initializes immediately.
+
+4. **Install as a Windows service** (run as Administrator):
+   ```
+   python aliencore.py --install
+   ```
+   AlienCore will now start automatically at boot, before login.
+
+---
+
+## Daily Use
+
+- **System tray icon** shows current profile (Idle / Streaming / Gaming / Manual)
+- **Tray → Open Settings** to change any option at any time
+- **Tray → Override Profile** to manually lock a profile
+- **Tray → View Log** to open `aliencore.log`
+- **Tray → Exit** gracefully stops the service
+
+---
+
+## Uninstall
+
+```
+python aliencore.py --uninstall
+```
+
+Reverse all registry tweaks:
+```
+python aliencore.py --restore-defaults
+```
+
+---
+
+## Project Structure
 
 ```
 aliencore/
@@ -92,13 +237,13 @@ aliencore/
 │   ├── logger.py           ← Rotating log setup
 │   ├── hardware.py         ← Hardware fingerprint (CPU/GPU/RAM/drives)
 │   ├── sensors.py          ← Live sensor polling (temps, RPM, usage)
-│   ├── amd_smu.py          ← AMD CPU temp via Ryzen Master Platform.dll (Ring0 fallback)
+│   ├── amd_smu.py          ← AMD CPU temp via Ryzen Master Platform.dll
 │   ├── tweaks.py           ← Applies all system tweaks
 │   ├── profiles.py         ← Profile detection and switching logic
 │   └── monitor.py          ← Resident monitor loop
 │
 ├── gui/
-│   └── settings_gui.py     ← Full settings UI (accessible any time)
+│   └── settings_gui.py     ← Full settings UI
 │
 ├── assets/
 │   ├── icon.png            ← Tray icon base image
@@ -111,134 +256,81 @@ aliencore/
 
 ---
 
-## Setup (first time)
+## System Requirements
 
-1. **Install Python 3.10+** from python.org (add to PATH during install)
+**Minimum**
+- Windows 10 21H2 / Windows 11 (64-bit)
+- Python 3.10+
+- Intel 12th Gen+ or AMD Ryzen (Zen 3 / Zen 4)
+- NVIDIA GeForce GPU (for GPU tuning features)
+- 4 GB RAM / 150 MB storage
+- Administrator rights (required for CPU temp and MSR access)
 
-2. **Run the dependency installer as Administrator:**
-   ```
-   python install_deps.py
-   ```
-
-3. **First run (shows settings GUI):**
-   ```
-   python aliencore.py --firstrun
-   ```
-   Choose your tweaks, click Save. AlienCore initializes immediately.
-
-4. **Install as a Windows service** (run as Administrator):
-   ```
-   python aliencore.py --install
-   ```
-   AlienCore will now start automatically at boot, before login.
+**Recommended**
+- Windows 11 (64-bit)
+- Intel 13th/14th Gen or AMD Ryzen 7000 series
+- NVIDIA RTX with current driver
+- 16 GB RAM
+- Alienware m18 R2 or any post-2019 Alienware chassis *(unlocks full AWCC integration)*
 
 ---
 
-## Daily use
+## CPU Feature Matrix
 
-- **System tray icon** shows current profile (Idle / Streaming / Gaming / Manual)
-- **Tray → Open Settings** to change any option at any time
-- **Tray → Override Profile** to manually lock a profile
-- **Tray → View Log** to open aliencore.log
-- **Tray → Exit** gracefully stops the service
-
-### Updates
-
-AlienCore checks GitHub for new releases automatically. 30 seconds after launch it
-polls the GitHub Releases API; it rechecks every 6 hours while running.
-
-When a new version is available a dialog appears with three choices:
-
-| Choice | What happens |
-|---|---|
-| **Update Now** | Downloads the release zip, extracts it, and relaunches automatically. |
-| **Not Now** | Dismisses the dialog; an amber **Update Available** button appears in the Settings footer until you update. |
-| **Remind Me in 24h** | Suppresses the dialog for 24 hours, then shows it again on next launch. |
-
-The tray icon also gains a **"Update Available → vX.Y.Z"** menu item while an
-update is pending. No data leaves your machine for the update check — it's a
-plain HTTPS GET to `api.github.com`.
+| Feature | Intel 12th+ | AMD Ryzen |
+|---------|------------|-----------|
+| Sensor bar (temp / load / watts) | ✅ | ✅ |
+| Per-core temp / load | ✅ P/E split | ✅ per-CCD |
+| Thread Director / hetero-scheduling | ✅ | N/A (Precision Boost) |
+| TVB Optimizer | ✅ i9 Raptor | ❌ |
+| AI voltage tool (MSR) | ✅ scaffolded | 🔜 v2 |
 
 ---
 
 ## Portability
 
-AlienCore v1 is designed to run on **any Windows machine with an NVIDIA GPU**,
-not just your Alienware.
-
-On first run on a new machine, it fingerprints the hardware and calculates
-appropriate tweak values for that machine's CPU, GPU, and RAM. Generic OS
-tweaks (power plan, scheduler, network, storage, privacy) apply regardless
-of silicon. Hardware-specific features degrade gracefully when not supported:
-
-- **AMD Ryzen CPU** — fully supported for sensor readings (temp, watts,
-  per-core, CCD topology), power plan management, and core parking.
-  Intel-specific features (Thread Director, TVB optimizer, MSR voltage) are
-  automatically skipped.
-- **Intel 12th Gen+** — full feature set including Thread Director,
-  heterogeneous scheduling, and TVB headroom optimizer.
-- **NVIDIA GPU** — full tuning (NVML clock/power/fan, VRAM idle lock,
-  PowerMizer, throttle event log).
-- **AMD Radeon / Intel Arc GPU** — sensor readings via LHM (temp, load,
-  clocks); runtime tuning planned for a future release.
-
-Alienware-specific features (AWCC fan curve integration, G-Mode) are
-only activated if an Alienware chassis is detected.
+AlienCore runs on **any Windows machine with an NVIDIA GPU**, not just Alienware. On first run it fingerprints your hardware and calculates appropriate tweak values for your specific CPU, GPU, and RAM. Hardware-specific features degrade gracefully when not supported. Alienware-specific features (AWCC integration, G-Mode) only activate when an Alienware chassis is detected.
 
 ---
 
-## Uninstall service
+## Technical Notes
 
-```
-python aliencore.py --uninstall
-```
-
-All registry tweaks applied by AlienCore can be reversed via:
-```
-python aliencore.py --restore-defaults
-```
+- No kernel driver installed by AlienCore itself. CPU MSR reads use the signed `WinRing0.sys` from LibreHardwareMonitor — the same driver HWiNFO uses.
+- Licensing is hardware-fingerprinted but not online-gated. AlienCore continues working if the license server is unreachable.
+- Undervolting (MSR 0x150) is wired through the UI but the MSR backend is currently stubbed — functional release planned. All other tuning features are live.
+- Pure Python source. No obfuscation. Config in plain JSON. Logs to a rotating text file. Audit-friendly by design.
+- Reference hardware: Alienware m18 R2 (i9-14900HX, RTX 4090 Mobile, 32 GB DDR5, Windows 11 Pro). Actively validated under daily load.
 
 ---
 
-## Requirements
+## Dependencies
 
-- Windows 10 21H2 / 11
-- Python 3.10+
-- **CPU**: Intel 12th Gen+ or AMD Ryzen (Zen 3 / Zen 4). AMD CPU temps are
-  read via LibreHardwareMonitor (Ring0) or Ryzen Master's Platform.dll as a
-  fallback. Intel-specific features (Thread Director, TVB optimizer, MSR
-  voltage) are skipped on AMD.
-- **GPU**: NVIDIA GeForce (tuning via NVML / pynvml). AMD Radeon / Intel Arc
-  tuning are planned for a future release; sensor readings still work for
-  these through LibreHardwareMonitor, but runtime clock/power/fan control
-  is NVIDIA-only in v1.
-- LibreHardwareMonitor is bundled via `lhm_bridge.exe` and provides
-  NVMe temps, fan RPM, non-NVIDIA GPU readings, and CPU package temp/watts.
-  DIMM temperature sensors are hardware-dependent — many DDR4/DDR5 DIMMs
-  do not expose thermal data; requires LHM Ring0 access (Memory Integrity
-  must be disabled).
+Installed automatically by `install_deps.py`:
 
-Python packages (installed by install_deps.py):
-- psutil
-- pywin32
-- wmi
-- pystray
-- Pillow
-- nvidia-ml-py (pynvml — NVIDIA GPU direct NVML calls)
+- `psutil` — process and system metrics
+- `pywin32` — Windows API access
+- `wmi` — WMI interface
+- `pystray` — system tray icon
+- `Pillow` — image handling
+- `nvidia-ml-py` (`pynvml`) — NVIDIA NVML direct calls
 
-## CPU Feature Matrix (v1)
-
-| Feature                                  | Intel 12th+     | AMD Ryzen       |
-|------------------------------------------|-----------------|-----------------|
-| Sensor bar (temp / load / watts)         | Yes             | Yes             |
-| Per-core temp / load                     | Yes (P/E split) | Yes (per-CCD)   |
-| Thread Director / hetero-scheduling      | Yes             | N/A (Precision Boost) |
-| TVB Optimizer                            | Yes (i9 Raptor) | No              |
-| AI voltage tool (read + write scaffolded)| MSR 0x150       | Planned (v2)    |
+LibreHardwareMonitor is bundled via `lhm_bridge.exe` and provides NVMe temps, fan RPM, non-NVIDIA GPU readings, and CPU package temp/watts. DIMM temperature sensors are hardware-dependent — many DDR4/DDR5 DIMMs do not expose thermal data; requires LHM Ring0 access (Memory Integrity must be disabled).
 
 ---
 
 ## Credits
 
-AlienCore bundles **LibreHardwareMonitor** (MPL-2.0) for hardware sensor
-readings. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details.
+AlienCore bundles **LibreHardwareMonitor** (MPL-2.0) for hardware sensor readings. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details.
+
+---
+
+## License
+
+Copyright © 2026 Kyle Williams. All Rights Reserved.  
+See [LICENSE](./LICENSE) for full terms.
+
+---
+
+<div align="center">
+<sub>Built for people who know their hardware deserves better than whatever Windows shipped with.</sub>
+</div>
