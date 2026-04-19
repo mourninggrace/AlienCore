@@ -545,7 +545,7 @@
   </table>
 
   <div class="box box-tip">
-    <strong>Tip:</strong> Double-click any value in the sensor bar to open a 90-second history chart for that sensor, with live min / avg / max stats and auto-refresh every 2 seconds. Because each NVMe drive has its own cell, the history chart now shows per-drive data instead of merging both drives into one trace.
+    <strong>Tip:</strong> Double-click any value in the sensor bar to open a 90-second history chart for that sensor, with live min / avg / max stats and auto-refresh every 2 seconds. Because each NVMe drive has its own cell, the history chart now shows per-drive data instead of merging both drives into one trace. The <strong>NET</strong> cell is special: hovering shows both download (↓) and upload (↑) live, and double-clicking opens two side-by-side charts so you can watch each direction independently.
   </div>
 
   <h3>Profile Badge &amp; System Clock</h3>
@@ -1049,7 +1049,7 @@ python aliencore.py --uninstall # remove the service</code></pre>
     <tr><td class="setting">DIMM Throttle Temp</td><td class="default">52°C</td><td>Temperature above which throttling is applied. DDR5 is spec'd to 85°C max, but sustained operation above 50–55°C degrades reliability over time.</td></tr>
   </table>
 
-  <p>The panel shows a live readout of each DIMM's temperature with color coding (green / amber / red).</p>
+  <p>The panel below the settings shows a live animated gauge for each DIMM. Each row has a horizontal track with a two-tone gradient fill that shifts colour as temperature climbs (cool → warm → alert), a dashed line marking the current alert threshold, a faint history trail under the bar showing recent samples, and a softly-pulsing dot at the leading edge. Numeric °C readouts on the right glide toward each new sample rather than snapping, so changes are easy to track at a glance.</p>
 </section>
 
 <section id="ram-pagefile">

@@ -7,6 +7,7 @@ Hardware profile cached once at init. No blocking disk reads per tab.
 import json
 import os
 import copy
+import math
 import logging
 import threading
 import tkinter as tk
@@ -328,23 +329,43 @@ class SettingsWindow:
         self.nb = ttk.Notebook(self.root)
         self.nb.pack(fill="both", expand=True)
 
-        self._tab_display()
-        self._tab_cpu()
-        self._tab_gpu()
-        self._tab_ram()
-        self._tab_visual()
-        self._tab_network()
-        self._tab_storage()
-        self._tab_privacy()
-        self._tab_profiles()
-        self._tab_custom_profiles()
-        self._tab_service()
-        self._tab_thresholds()
-        self._tab_ai()
-        self._tab_insights()
-        self._tab_drivers()
-        self._tab_about()
-        self._tab_account()
+        # Tabs are built lazily — the window opens fast, then each tab is
+        # built on first selection.  Remaining tabs prewarm in idle time
+        # so switching feels instant.
+        self._tab_defs = [
+            ("Display",         self._tab_display),
+            ("CPU",             self._tab_cpu),
+            ("GPU",             self._tab_gpu),
+            ("RAM",             self._tab_ram),
+            ("Visual",          self._tab_visual),
+            ("Network",         self._tab_network),
+            ("Storage",         self._tab_storage),
+            ("Privacy",         self._tab_privacy),
+            ("Profiles",        self._tab_profiles),
+            ("Custom Profiles", self._tab_custom_profiles),
+            ("Service",         self._tab_service),
+            ("Thresholds",      self._tab_thresholds),
+            ("AI",              self._tab_ai),
+            ("Insights",        self._tab_insights),
+            ("Drivers",         self._tab_drivers),
+            ("About",           self._tab_about),
+            ("Account",         self._tab_account),
+        ]
+        self._tab_built  = [False] * len(self._tab_defs)
+        self._tab_frames = []
+        for label, _ in self._tab_defs:
+            ph = ttk.Frame(self.nb)
+            self.nb.add(ph, text=f"  {label}  ")
+            self._tab_frames.append(ph)
+
+        # Build the first tab eagerly so the user has content immediately
+        self._build_tab(0)
+
+        # Build any other tab on first selection (idempotent)
+        self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+        # Prewarm the rest in the background so switches feel instant
+        self.root.after(80, lambda: self._prewarm_tabs(1))
 
         # Footer
         tk.Frame(self.root, bg=SEP, height=1).pack(fill="x")
@@ -1371,38 +1392,200 @@ class SettingsWindow:
                      "DIMM temp alert threshold (°C)", 40, 75, 1,
                      fmt=lambda v: f"{int(v)}°C")
 
-        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=8)
+        panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
         panel.pack(fill="x", padx=16, pady=(4, 8))
-        tk.Label(panel, text="Live DIMM Temperatures", font=("Segoe UI", 9, "bold"),
-                 bg=BG_HW, fg=FG_HEAD).pack(anchor="w", pady=(0, 4))
-        dimm_lbl = tk.Label(panel, text="—", font=("Segoe UI", 8),
-                            bg=BG_HW, fg=FG_DIM, anchor="w")
-        dimm_lbl.pack(anchor="w")
+
+        hdr = tk.Frame(panel, bg=BG_HW)
+        hdr.pack(fill="x", pady=(0, 6))
+        tk.Label(hdr, text="Live DIMM Temperatures",
+                 font=("Segoe UI", 9, "bold"),
+                 bg=BG_HW, fg=FG_HEAD).pack(side="left")
+        legend = tk.Label(hdr, text="cool · warn · alert",
+                          font=("Segoe UI", 7), bg=BG_HW, fg=FG_DIM)
+        legend.pack(side="right")
+
+        rows_frame = tk.Frame(panel, bg=BG_HW)
+        rows_frame.pack(fill="x", anchor="w")
+
+        status_lbl = tk.Label(panel, text="Reading sensors…",
+                              font=("Segoe UI", 8),
+                              bg=BG_HW, fg=FG_DIM, anchor="w")
+        status_lbl.pack(anchor="w", pady=(4, 0))
+
+        BAR_W = 360
+        BAR_H = 22
+
+        state = {
+            "rows":       {},     # name -> dict(canvas, val_lbl, target, current, phase, history)
+            "scale_min":  30,
+            "scale_max":  80,
+            "anim_after": None,
+        }
+
+        def _hex_to_rgb(c):
+            return int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)
+
+        def _shade(c, factor):
+            try:
+                r, g, b = _hex_to_rgb(c)
+                f = max(0.0, min(1.0, factor))
+                return f"#{int(r*f):02x}{int(g*f):02x}{int(b*f):02x}"
+            except Exception:
+                return c
+
+        def _color_for_temp(t, threshold):
+            if t >= threshold:        return DANGER
+            if t >= threshold - 4:    return WARN
+            if t >= threshold - 12:   return ACCENT2
+            return ACCENT
+
+        def _ensure_row(name):
+            if name in state["rows"]:
+                return state["rows"][name]
+            row = tk.Frame(rows_frame, bg=BG_HW)
+            row.pack(fill="x", pady=3)
+            tk.Label(row, text=name, font=("Consolas", 9, "bold"),
+                     bg=BG_HW, fg=FG, width=10, anchor="w").pack(side="left")
+            canvas = tk.Canvas(row, width=BAR_W, height=BAR_H,
+                               bg=BG_HW, highlightthickness=0, bd=0)
+            canvas.pack(side="left", padx=(8, 10))
+            val_lbl = tk.Label(row, text="—",
+                               font=("Consolas", 11, "bold"),
+                               bg=BG_HW, fg=FG_DIM, width=6, anchor="w")
+            val_lbl.pack(side="left")
+            rec = {
+                "canvas":  canvas, "val_lbl": val_lbl,
+                "target":  None,   "current": None,
+                "phase":   0.0,    "history": [],
+            }
+            state["rows"][name] = rec
+            return rec
+
+        def _draw_row(rec, threshold):
+            canvas = rec["canvas"]
+            canvas.delete("all")
+            smin = state["scale_min"]
+            smax = state["scale_max"]
+            span = max(smax - smin, 1)
+
+            # Track background
+            canvas.create_rectangle(0, 6, BAR_W, BAR_H - 4,
+                                    fill=_shade(BG_PANEL, 0.85), outline="")
+
+            # Subtle gridline ticks every ~10°C
+            tick_temp = int(smin + 10 - (smin % 10)) if smin % 10 else smin + 10
+            while tick_temp < smax:
+                gx = int((tick_temp - smin) / span * BAR_W)
+                canvas.create_line(gx, 7, gx, BAR_H - 5,
+                                   fill=_shade(BG_PANEL, 0.55))
+                tick_temp += 10
+
+            # Threshold line
+            tx = int((threshold - smin) / span * BAR_W)
+            canvas.create_line(tx, 2, tx, BAR_H - 2,
+                               fill=WARN, width=1, dash=(2, 3))
+
+            # Faint history trail under the bar
+            hist = rec["history"]
+            if len(hist) >= 2:
+                pts = []
+                for i, v in enumerate(hist):
+                    px = int(i * BAR_W / max(len(hist) - 1, 1))
+                    py = BAR_H - 4 - int((v - smin) / span * (BAR_H - 10))
+                    py = max(6, min(BAR_H - 4, py))
+                    pts.extend((px, py))
+                canvas.create_line(*pts, fill=_shade(FG_DIM, 0.6),
+                                   width=1, smooth=True)
+
+            cur = rec["current"]
+            if cur is None:
+                return
+
+            # Filled bar with two-tone gradient feel
+            fx = max(2, int((cur - smin) / span * BAR_W))
+            fx = min(BAR_W, fx)
+            col = _color_for_temp(cur, threshold)
+            dark = _shade(col, 0.35)
+            canvas.create_rectangle(0, 6, fx, BAR_H - 4,
+                                    fill=dark, outline="")
+            canvas.create_rectangle(0, 6, fx, (BAR_H + 2) // 2,
+                                    fill=col, outline="", stipple="gray50")
+            # Leading edge accent line
+            canvas.create_line(fx, 5, fx, BAR_H - 3, fill=col, width=2)
+
+            # Pulsing dot at the current value
+            ph = rec["phase"]
+            radius = 3.2 + 1.6 * (0.5 + 0.5 * math.sin(ph))
+            cy = (BAR_H + 2) / 2
+            canvas.create_oval(fx - radius, cy - radius,
+                               fx + radius, cy + radius,
+                               fill=col, outline="")
+            # Soft halo
+            halo = radius + 2
+            canvas.create_oval(fx - halo, cy - halo,
+                               fx + halo, cy + halo,
+                               outline=_shade(col, 0.5))
+
+            rec["val_lbl"].config(text=f"{cur:.0f}°C", fg=col)
+
+        def _animate():
+            if not panel.winfo_exists():
+                state["anim_after"] = None
+                return
+            try:
+                threshold = self._cfg_get("ram.dimm_throttle_temp_c") or 52
+                for rec in state["rows"].values():
+                    target = rec["target"]
+                    if target is None:
+                        continue
+                    cur = rec["current"]
+                    if cur is None:
+                        rec["current"] = float(target)
+                    else:
+                        # Ease toward target so changes glide rather than snap
+                        rec["current"] = cur + (target - cur) * 0.18
+                    rec["phase"] = (rec["phase"] + 0.16) % (2 * math.pi)
+                    _draw_row(rec, threshold)
+            except Exception:
+                pass
+            state["anim_after"] = panel.after(60, _animate)
 
         def _refresh():
+            if not panel.winfo_exists():
+                return
             try:
                 from core import sensors
-                threshold = self._cfg_get("ram.dimm_throttle_temp_c") or 52
                 r = sensors.get_readings()
                 ram_temps = r.get("ram_temps", [])
                 if not ram_temps:
-                    dimm_lbl.config(text="No DIMM temperature data (LHM bridge required).", fg=FG_DIM)
+                    status_lbl.config(
+                        text="No DIMM temperature data (LHM bridge required).",
+                        fg=FG_DIM)
+                    if not status_lbl.winfo_ismapped():
+                        status_lbl.pack(anchor="w", pady=(4, 0))
+                    for rec in state["rows"].values():
+                        rec["target"] = None
                 else:
-                    lines = []
+                    if status_lbl.winfo_ismapped():
+                        status_lbl.pack_forget()
+                    threshold = self._cfg_get("ram.dimm_throttle_temp_c") or 52
+                    hot = max(d["temp_c"] for d in ram_temps)
+                    state["scale_min"] = 30
+                    state["scale_max"] = max(80, int(hot) + 10,
+                                             int(threshold) + 10)
                     for d in ram_temps:
-                        tc = d["temp_c"]
-                        lines.append(f"{d['name']}: {tc:.0f}°C")
-                    # Use the last temp color for the whole label
-                    hottest = max(d["temp_c"] for d in ram_temps)
-                    fg = (DANGER if hottest >= threshold else
-                          WARN   if hottest >= threshold - 5 else ACCENT2)
-                    dimm_lbl.config(text="   ".join(lines), fg=fg)
+                        rec = _ensure_row(d["name"])
+                        rec["target"] = float(d["temp_c"])
+                        rec["history"].append(float(d["temp_c"]))
+                        if len(rec["history"]) > 60:
+                            rec["history"].pop(0)
             except Exception:
                 pass
             if panel.winfo_exists():
-                panel.after(3000, _refresh)
+                panel.after(2000, _refresh)
 
-        panel.after(600, _refresh)
+        panel.after(300, _refresh)
+        state["anim_after"] = panel.after(80, _animate)
 
     def _ram_pagefile_advisor_panel(self, parent):
         self._section(parent, "Smart Pagefile Advisor")
@@ -3219,9 +3402,43 @@ class SettingsWindow:
 
     # ── Widget helpers ────────────────────────────────────────────────────────
 
+    def _build_tab(self, idx: int):
+        """Construct the widgets for tab `idx` if not already built."""
+        if not (0 <= idx < len(self._tab_defs)):
+            return
+        if self._tab_built[idx]:
+            return
+        self._tab_built[idx] = True
+        self._lazy_idx = idx
+        try:
+            _, builder = self._tab_defs[idx]
+            builder()
+        finally:
+            self._lazy_idx = None
+
+    def _on_tab_changed(self, event=None):
+        try:
+            idx = self.nb.index(self.nb.select())
+        except Exception:
+            return
+        self._build_tab(idx)
+
+    def _prewarm_tabs(self, idx: int):
+        """Build remaining tabs one per idle slice so the UI stays responsive."""
+        if not getattr(self, "_tab_built", None):
+            return
+        if idx >= len(self._tab_defs):
+            return
+        self._build_tab(idx)
+        self.root.after(40, lambda: self._prewarm_tabs(idx + 1))
+
     def _make_tab(self, label: str) -> tk.Frame:
-        outer = ttk.Frame(self.nb)
-        self.nb.add(outer, text=f"  {label}  ")
+        idx = getattr(self, "_lazy_idx", None)
+        if idx is not None and idx < len(getattr(self, "_tab_frames", [])):
+            outer = self._tab_frames[idx]
+        else:
+            outer = ttk.Frame(self.nb)
+            self.nb.add(outer, text=f"  {label}  ")
         canvas = tk.Canvas(outer, bg=BG_SECT, highlightthickness=0, bd=0)
         sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview,
                            style="Vertical.TScrollbar")
@@ -3272,6 +3489,11 @@ class SettingsWindow:
             v = tk.IntVar(value=int(val) if val is not None else 0)
         self.vars[key] = v
         v.trace_add("write", self._mark_dirty)
+        # Seed the dirty baseline for lazily-built tabs so newly created
+        # vars (matching current config) aren't flagged as dirty.
+        saved = getattr(self, "_saved_state", None)
+        if saved is not None and key not in saved:
+            saved[key] = v.get()
         return v
 
     def _cfg_get(self, dot_key: str):

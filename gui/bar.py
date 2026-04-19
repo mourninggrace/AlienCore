@@ -165,7 +165,8 @@ class _Sparkline:
 
     @classmethod
     def show(cls, config_key: str, label: str,
-             history: collections.deque, unit: str):
+             history: collections.deque, unit: str,
+             position_idx: int = 0, position_count: int = 1):
         if config_key in cls._open:
             try:
                 cls._open[config_key]["win"].destroy()
@@ -354,11 +355,15 @@ class _Sparkline:
 
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
-        win.geometry(
-            f"{cls._W + 36}x{cls._H + 140}"
-            f"+{(sw - cls._W - 36) // 2}"
-            f"+{(sh - cls._H - 140) // 2}"
-        )
+        win_w  = cls._W + 36
+        win_h  = cls._H + 140
+        # Stagger sibling windows (e.g. NET ↓ + NET ↑) so they don't overlap.
+        gap     = 24
+        total_w = win_w * position_count + gap * max(0, position_count - 1)
+        start_x = max(20, (sw - total_w) // 2)
+        x_pos   = start_x + position_idx * (win_w + gap)
+        y_pos   = (sh - win_h) // 2
+        win.geometry(f"{win_w}x{win_h}+{x_pos}+{y_pos}")
         win.deiconify()
 
         win.protocol("WM_DELETE_WINDOW", lambda: cls._close(config_key))
@@ -1193,6 +1198,19 @@ class SensorBar:
             self._sync_outer_size()
 
     def _tooltip_text(self, label: str, config_key: str) -> str:
+        if config_key == "net_io":
+            unit    = self._cell_unit(config_key)
+            dn_hist = self._history.get("net_io")
+            up_hist = self._history.get("net_io_up")
+            dn = next((v for v in reversed(dn_hist) if v is not None), None) \
+                if dn_hist else None
+            up = next((v for v in reversed(up_hist) if v is not None), None) \
+                if up_hist else None
+            if dn is None and up is None:
+                return label
+            dn_s = f"{dn:.1f}" if dn is not None else "—"
+            up_s = f"{up:.1f}" if up is not None else "—"
+            return f"{label}  ↓ {dn_s} {unit}   ↑ {up_s} {unit}"
         hist = self._history.get(config_key)
         if hist:
             vals = [v for v in hist if v is not None]
@@ -1209,6 +1227,15 @@ class SensorBar:
         return self._cells.get(config_key, {}).get("unit", "")
 
     def _open_sparkline(self, config_key: str, label: str, unit: str):
+        if config_key == "net_io":
+            u       = self._cell_unit(config_key)
+            dn_hist = self._history.get("net_io",    collections.deque())
+            up_hist = self._history.get("net_io_up", collections.deque())
+            _Sparkline.show("net_io",    f"{label} ↓ Download",
+                            dn_hist, u, position_idx=0, position_count=2)
+            _Sparkline.show("net_io_up", f"{label} ↑ Upload",
+                            up_hist, u, position_idx=1, position_count=2)
+            return
         hist = self._history.get(config_key, collections.deque())
         _Sparkline.show(config_key, label, hist, self._cell_unit(config_key))
 
@@ -1466,10 +1493,11 @@ class SensorBar:
         }
         if config_key in simple:
             return readings.get(simple[config_key])
-        if config_key == "net_io":
+        if config_key in ("net_io", "net_io_up"):
             # Store history in the user-chosen unit so tooltip/sparkline
             # agree with the cell text.  Sensor emits MiB/s internally.
-            val = readings.get("net_down_mbps")
+            field = "net_up_mbps" if config_key == "net_io_up" else "net_down_mbps"
+            val = readings.get(field)
             if val is None:
                 return None
             unit = cfg.get_value("display", "net_unit", default="MB/s")
@@ -1514,6 +1542,13 @@ class SensorBar:
             self._history[key].append(val)
             if val is not None:
                 self._sample_log[key].append((now, float(val)))
+        # Track upload separately so the tooltip can show both directions
+        # and the user can open a standalone upload sparkline window.
+        if "net_io" in self._cells:
+            if "net_io_up" not in self._history:
+                self._history["net_io_up"] = collections.deque(maxlen=90)
+            up_val = self._extract_numeric("net_io_up", readings)
+            self._history["net_io_up"].append(up_val)
 
     # ── Fullscreen auto-hide ──────────────────────────────────────────────────
 
