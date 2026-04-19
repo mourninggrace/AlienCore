@@ -293,9 +293,11 @@ class AdvisorWindow:
         try:
             from core import ai_advisor
             assessment, proposals = ai_advisor.analyze()
-            self.root.after(0, self._on_analysis_done, assessment, proposals, None)
+            if self.root.winfo_exists():
+                self.root.after(0, self._on_analysis_done, assessment, proposals, None)
         except Exception as e:
-            self.root.after(0, self._on_analysis_done, "", [], str(e))
+            if self.root.winfo_exists():
+                self.root.after(0, self._on_analysis_done, "", [], str(e))
 
     def _on_analysis_done(self, assessment: str, proposals: list, error: str):
         self._busy = False

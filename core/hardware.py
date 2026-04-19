@@ -11,7 +11,6 @@ import os
 import platform
 import re
 import subprocess
-import wmi
 import psutil
 from core.constants import HARDWARE_CACHE
 
@@ -69,6 +68,7 @@ def _wmi_connect():
     except Exception:
         pass
     try:
+        import wmi  # lazy — requires pywin32; guarded here so import failure is local
         return wmi.WMI()
     except Exception as e:
         logger.error("WMI connection failed: %s", e)

@@ -183,9 +183,9 @@ def _check_user_profiles(running: set, c: dict) -> str | None:
         return None
     sorted_profiles = sorted(user_profiles, key=lambda p: p.get("priority", 50))
     for up in sorted_profiles:
-        processes = {p.lower() for p in up.get("processes", [])}
+        processes = {str(p).lower() for p in up.get("processes", [])}
         if processes and running & processes:
-            return up["name"]
+            return up.get("name") or None
     return None
 
 

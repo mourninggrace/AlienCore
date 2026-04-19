@@ -1664,7 +1664,8 @@ class SensorBar:
         except Exception as e:
             logger.debug("Bar update error: %s", e)
 
-        self.root.after(int(self._get_interval_ms()), self._update)
+        if self.root.winfo_exists():
+            self.root.after(int(self._get_interval_ms()), self._update)
 
     def _draw_frame(self):
         """Redraw inline charts + perimeter comet at CHART_DRAW_INTERVAL_MS.
@@ -1695,7 +1696,8 @@ class SensorBar:
         except Exception as e:
             logger.debug("Bar draw frame error: %s", e)
 
-        self.root.after(CHART_DRAW_INTERVAL_MS, self._draw_frame)
+        if self.root.winfo_exists():
+            self.root.after(CHART_DRAW_INTERVAL_MS, self._draw_frame)
 
     def _tick_clock(self):
         """Update the profile-badge clock text when the wall-clock second

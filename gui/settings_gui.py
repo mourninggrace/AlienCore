@@ -353,10 +353,20 @@ class SettingsWindow:
         tk.Label(foot, text="Changes take effect immediately.",
                  font=("Segoe UI", 9), bg=BG, fg=FG_DIM).pack(side="left")
         self._btn(foot, "User Manual", self._open_manual, ACCENT2).pack(side="left", padx=(12, 0))
-        self._btn(foot, "Cancel",           self._cancel,   FG_DIM).pack(side="right", padx=4)
+        self._cancel_btn  = self._btn(foot, "Cancel",           self._cancel,   FG_DIM)
+        self._cancel_btn.pack(side="right", padx=4)
         self._btn(foot, "Restore Defaults", self._defaults, WARN).pack(side="right", padx=4)
         self._save_btn = self._btn(foot, "  Close  ", self._close, FG_DIM, bold=True)
         self._save_btn.pack(side="right", padx=4)
+
+        # Update-available button — shown on the left when an update is ready.
+        # Checked immediately (in case the check ran before settings opened) and
+        # again after 35 s (covers the 30 s startup delay before first check).
+        self._update_foot_btn = None
+        self._update_foot_frame = tk.Frame(foot, bg=BG)
+        self._update_foot_frame.pack(side="left", padx=(14, 0))
+        self.root.after(500,   self._refresh_update_button)
+        self.root.after(35000, self._refresh_update_button)
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
 
@@ -689,11 +699,19 @@ class SettingsWindow:
         panel.after(800, _refresh)
 
     def _cpu_core_role_panel(self, parent):
-        self._section(parent, "P-core / E-core Topology")
-        self._note(parent,
-            "Detected P-cores handle high-priority foreground threads. E-cores handle "
-            "background work via EcoQoS. Intel Thread Director automatically routes threads — "
-            "the settings below tune how aggressively Windows defers to the hardware scheduler.")
+        _is_intel = self._hw.get("cpu", {}).get("is_intel", True)
+        if _is_intel:
+            self._section(parent, "P-core / E-core Topology")
+            self._note(parent,
+                "Detected P-cores handle high-priority foreground threads. E-cores handle "
+                "background work via EcoQoS. Intel Thread Director automatically routes threads — "
+                "the settings below tune how aggressively Windows defers to the hardware scheduler.")
+        else:
+            self._section(parent, "CPU Topology & Core Management")
+            self._note(parent,
+                "AMD Ryzen has no E-core concept — all cores are full-performance. "
+                "Precision Boost handles frequency scaling automatically. "
+                "Core parking and processor state controls below still apply.")
 
         panel = tk.Frame(parent, bg=BG_HW, padx=16, pady=10)
         panel.pack(fill="x", padx=16, pady=(4, 8))
@@ -706,17 +724,29 @@ class SettingsWindow:
 
         def _load_topo():
             try:
-                from core import cpu_topology
-                t = cpu_topology.get_topology()
+                from core import cpu_topology, hardware as hw_mod
+                t   = cpu_topology.get_topology()
+                cpu = hw_mod.get_cached().get("cpu", {})
                 confirmed = "confirmed" if t["detected"] else "estimated"
-                if t["p_cores"]:
-                    p_range = f"LPs {t['p_cores'][0]}–{t['p_cores'][-1]}"
+                if cpu.get("is_amd"):
+                    ccds = t.get("ccds", [])
+                    if ccds:
+                        ccd_parts = "  |  ".join(
+                            f"CCD{c['ccd_id']}: {c['core_count']} cores" for c in ccds
+                        )
+                        txt = (f"AMD Ryzen — {t['p_count']} logical processors  "
+                               f"|  {len(ccds)} CCD(s): {ccd_parts}  ({confirmed})")
+                    else:
+                        txt = (f"AMD Ryzen — {t['p_count']} logical processors  ({confirmed})")
                 else:
-                    p_range = "none detected"
-                txt = (f"P-cores: {t['p_count']} logical processors  "
-                       f"({p_range})  "
-                       f"|  E-cores: {t['e_count']} logical processors  "
-                       f"({confirmed})")
+                    if t["p_cores"]:
+                        p_range = f"LPs {t['p_cores'][0]}–{t['p_cores'][-1]}"
+                    else:
+                        p_range = "none detected"
+                    txt = (f"P-cores: {t['p_count']} logical processors  "
+                           f"({p_range})  "
+                           f"|  E-cores: {t['e_count']} logical processors  "
+                           f"({confirmed})")
                 if panel.winfo_exists():
                     panel.after(0, lambda: topo_lbl.config(text=txt, fg=ACCENT))
             except Exception as e:
@@ -726,20 +756,32 @@ class SettingsWindow:
         import threading as _t
         _t.Thread(target=_load_topo, daemon=True).start()
 
+        _cpu_is_intel = self._hw.get("cpu", {}).get("is_intel", True)
         self._opt(parent, "cpu.hetero_scheduling",
-                  "Intel Thread Director (heterogeneous scheduling)",
-                  "Lets Intel's microcontroller guide thread placement across P/E-cores")
+                  "Intel Thread Director (heterogeneous scheduling)" if _cpu_is_intel
+                  else "Heterogeneous scheduling (Intel-only, no effect on AMD)",
+                  "Lets Intel's microcontroller guide thread placement across P/E-cores"
+                  if _cpu_is_intel else
+                  "No-op on AMD Ryzen — AMD's boost algorithm handles thread placement automatically")
         self._opt(parent, "cpu.core_parking_gaming",
                   "Unpark all cores during gaming/streaming",
                   "Eliminates wakeup latency — all 32 logical processors always ready")
 
     def _cpu_interrupt_steering_panel(self, parent):
         self._section(parent, "Interrupt Affinity Steering")
-        self._note(parent,
-            "Routes hardware interrupt requests (IRQs) from your NIC, NVMe, and GPU "
-            "toward P-cores instead of E-cores. This reduces DPC interrupt latency by "
-            "ensuring your fastest cores service device events. Requires admin. "
-            "A reboot is recommended after applying.")
+        _is_intel = self._hw.get("cpu", {}).get("is_intel", True)
+        if _is_intel:
+            self._note(parent,
+                "Routes hardware interrupt requests (IRQs) from your NIC, NVMe, and GPU "
+                "toward P-cores instead of E-cores. This reduces DPC interrupt latency by "
+                "ensuring your fastest cores service device events. Requires admin. "
+                "A reboot is recommended after applying.")
+        else:
+            self._note(parent,
+                "Routes hardware interrupt requests (IRQs) from your NIC, NVMe, and GPU "
+                "toward performance cores. On AMD Ryzen, all cores are performance cores — "
+                "the affinity mask covers all logical processors equally. Requires admin. "
+                "A reboot is recommended after applying.")
         self._opt(parent, "cpu.interrupt_steering",
                   "Enable interrupt steering (stored in config)",
                   "Apply/revert buttons below take effect immediately")
@@ -770,7 +812,9 @@ class SettingsWindow:
                     msg if ok else f"Failed: {msg}"))
             threading.Thread(target=_work, daemon=True).start()
 
-        self._btn(ctrl, "Apply to P-cores", _apply, ACCENT2, bold=True).pack(side="left", padx=(0, 8))
+        _is_intel2 = self._hw.get("cpu", {}).get("is_intel", True)
+        _apply_lbl = "Apply to P-cores" if _is_intel2 else "Apply to all cores"
+        self._btn(ctrl, _apply_lbl, _apply, ACCENT2, bold=True).pack(side="left", padx=(0, 8))
         self._btn(ctrl, "Revert to Windows Auto", _revert, FG_DIM).pack(side="left")
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -822,7 +866,7 @@ class SettingsWindow:
                         text=("Throttle: " + ", ".join(reasons)) if reasons else "Throttle: none",
                         fg=DANGER if perf_lost else FG_DIM)
                 else:
-                    boost_lbl.config(text="GPU data not available (NVML / nvidia-smi not responding)", fg=FG_DIM)
+                    boost_lbl.config(text="GPU data not available — check sensor service and GPU drivers", fg=FG_DIM)
             except Exception:
                 pass
             if panel.winfo_exists():
@@ -832,6 +876,12 @@ class SettingsWindow:
 
     def _gpu_vram_clock_panel(self, parent):
         self._section(parent, "VRAM Idle Clock Reduction")
+        _has_nvidia = any(g.get("is_nvidia") for g in self._hw.get("gpu", []))
+        if not _has_nvidia:
+            self._note(parent,
+                "Not available — VRAM idle clock lock requires an NVIDIA GPU. "
+                "No NVIDIA GPU was detected on this system.")
+            return
         self._note(parent,
             "Locks VRAM to a low idle clock state when not gaming. "
             "Reduces memory controller heat and saves 10-15W at idle. "
@@ -3379,6 +3429,38 @@ class SettingsWindow:
         self._saved_state = {k: v.get() for k, v in self.vars.items()}
         self._saved_theme = self._cfg_get("display.settings_theme") or "Void"
         self._save_btn.config(text="  Close  ", command=self._close, fg=FG_DIM)
+
+    def _refresh_update_button(self):
+        """Show or hide the footer 'Update Available' button based on updater state."""
+        try:
+            if not self.root.winfo_exists():
+                return
+            from core import updater as _upd
+            info = _upd.get_update_info()
+            should_show = info is not None and _upd.should_show_button()
+            if should_show and self._update_foot_btn is None:
+                def _open_update():
+                    from gui import update_dialog
+                    import threading as _t
+                    _t.Thread(
+                        target=update_dialog.show_standalone,
+                        args=(info,),
+                        name="UpdateDialog",
+                        daemon=True,
+                    ).start()
+                self._update_foot_btn = self._btn(
+                    self._update_foot_frame,
+                    f"  Update Available  v{info['version']}  ",
+                    _open_update,
+                    "#FFAA00",
+                    bold=True,
+                )
+                self._update_foot_btn.pack(side="left")
+            elif not should_show and self._update_foot_btn is not None:
+                self._update_foot_btn.destroy()
+                self._update_foot_btn = None
+        except Exception:
+            pass
 
     def _close(self):
         self.root.destroy()

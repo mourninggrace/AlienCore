@@ -141,38 +141,48 @@ aliencore/
 - **Tray → View Log** to open aliencore.log
 - **Tray → Exit** gracefully stops the service
 
+### Updates
+
+AlienCore checks GitHub for new releases automatically. 30 seconds after launch it
+polls the GitHub Releases API; it rechecks every 6 hours while running.
+
+When a new version is available a dialog appears with three choices:
+
+| Choice | What happens |
+|---|---|
+| **Update Now** | Downloads the release zip, extracts it, and relaunches automatically. |
+| **Not Now** | Dismisses the dialog; an amber **Update Available** button appears in the Settings footer until you update. |
+| **Remind Me in 24h** | Suppresses the dialog for 24 hours, then shows it again on next launch. |
+
+The tray icon also gains a **"Update Available → vX.Y.Z"** menu item while an
+update is pending. No data leaves your machine for the update check — it's a
+plain HTTPS GET to `api.github.com`.
+
 ---
 
 ## Portability
 
-AlienCore v1 is designed to run on **any Intel + NVIDIA Windows machine**,
+AlienCore v1 is designed to run on **any Windows machine with an NVIDIA GPU**,
 not just your Alienware.
 
 On first run on a new machine, it fingerprints the hardware and calculates
-appropriate tweak values for that machine's CPU, GPU, and RAM. Tuning
-features (voltage offsets, GPU clock/power/fan control) require an
-Intel CPU and an NVIDIA GPU. Generic OS tweaks (power plan, scheduler,
-network, storage, privacy) apply to any Windows machine regardless of
-silicon.
+appropriate tweak values for that machine's CPU, GPU, and RAM. Generic OS
+tweaks (power plan, scheduler, network, storage, privacy) apply regardless
+of silicon. Hardware-specific features degrade gracefully when not supported:
 
-AMD Ryzen and Radeon tuning are planned for a future release.
+- **AMD Ryzen CPU** — fully supported for sensor readings (temp, watts,
+  per-core, CCD topology), power plan management, and core parking.
+  Intel-specific features (Thread Director, TVB optimizer, MSR voltage) are
+  automatically skipped.
+- **Intel 12th Gen+** — full feature set including Thread Director,
+  heterogeneous scheduling, and TVB headroom optimizer.
+- **NVIDIA GPU** — full tuning (NVML clock/power/fan, VRAM idle lock,
+  PowerMizer, throttle event log).
+- **AMD Radeon / Intel Arc GPU** — sensor readings via LHM (temp, load,
+  clocks); runtime tuning planned for a future release.
 
 Alienware-specific features (AWCC fan curve integration, G-Mode) are
 only activated if an Alienware chassis is detected.
-
----
-
-## Sensor note (NVMe temps & fan RPM)
-
-For the most complete sensor coverage, run **LibreHardwareMonitor** (the
-actively maintained fork of OpenHardwareMonitor) in the background:
-
-- Download from: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-- Enable: Options → Run On Windows Startup
-- Enable: Options → Start Minimized
-
-AlienCore connects to its WMI interface automatically if it's running.
-Without it, NVMe temps and fan RPM may be unavailable or less accurate.
 
 ---
 
@@ -213,10 +223,17 @@ Python packages (installed by install_deps.py):
 
 ## CPU Feature Matrix (v1)
 
-| Feature                                  | Intel 12th+     |
-|------------------------------------------|-----------------|
-| Sensor bar (temp / load / watts)         | Yes             |
-| Per-core temp / load                     | Yes (P/E split) |
-| Thread Director / hetero-scheduling      | Yes             |
-| TVB Optimizer                            | Yes (i9 Raptor) |
-| AI voltage tool (read + write scaffolded)| MSR 0x150       |
+| Feature                                  | Intel 12th+     | AMD Ryzen       |
+|------------------------------------------|-----------------|-----------------|
+| Sensor bar (temp / load / watts)         | Yes             | Yes             |
+| Per-core temp / load                     | Yes (P/E split) | Yes (per-CCD)   |
+| Thread Director / hetero-scheduling      | Yes             | N/A (Precision Boost) |
+| TVB Optimizer                            | Yes (i9 Raptor) | No              |
+| AI voltage tool (read + write scaffolded)| MSR 0x150       | Planned (v2)    |
+
+---
+
+## Credits
+
+AlienCore bundles **LibreHardwareMonitor** (MPL-2.0) for hardware sensor
+readings. See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for details.

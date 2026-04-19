@@ -263,6 +263,31 @@ def _update_loop():
         except Exception as e:
             logger.debug("Alert toast error: %s", e)
 
+        # ── Update available — show dialog once when first detected ───────────
+        try:
+            from core import updater as _upd
+            if _upd.is_dialog_pending():
+                _upd.clear_dialog_pending()
+                info = _upd.get_update_info()
+                if info:
+                    # Toast notification first so the user knows something happened
+                    if _icons:
+                        _icons[0].notify(
+                            f"v{info['version']} is ready to install. "
+                            f"Open Settings or click the tray menu to update.",
+                            f"{APP_NAME} Update Available",
+                        )
+                    # Show the full dialog on a dedicated thread (Tk is fine
+                    # from non-main threads on Windows; tray callbacks do this too).
+                    threading.Thread(
+                        target=_show_update_dialog_standalone,
+                        args=(info,),
+                        name="UpdateDialog",
+                        daemon=True,
+                    ).start()
+        except Exception as e:
+            logger.debug("Update dialog trigger error: %s", e)
+
         # Tray colour/tooltip only needs to refresh on the same cadence as the
         # sensor thread — sleeping less just burns CPU on cached data.
         time.sleep(4)
@@ -533,6 +558,15 @@ def _build_menu(on_settings_open, on_quit):
         pystray.MenuItem(
             lambda item: f"Profile: {profiles.get_current().upper()}",
             None, enabled=False
+        ),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            lambda item: (
+                f"Update Available \u2192 v{_get_update_version()}"
+                if _update_available() else "Check for Updates"
+            ),
+            lambda item: _open_update_dialog(),
+            visible=lambda item: _update_available(),
         ),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Open Settings",
@@ -891,6 +925,46 @@ def _open_about():
         root.mainloop()
 
     threading.Thread(target=_build, daemon=True, name="AboutDialog").start()
+
+
+def _show_update_dialog_standalone(info: dict):
+    """Open the update dialog on a dedicated thread (safe from tray callbacks)."""
+    try:
+        from gui import update_dialog
+        update_dialog.show_standalone(info)
+    except Exception as e:
+        logger.debug("Update dialog error: %s", e)
+
+
+def _open_update_dialog():
+    """Tray menu action — open update dialog if an update is available."""
+    from core import updater as _upd
+    info = _upd.get_update_info()
+    if info:
+        threading.Thread(
+            target=_show_update_dialog_standalone,
+            args=(info,),
+            name="UpdateDialog",
+            daemon=True,
+        ).start()
+
+
+def _update_available() -> bool:
+    """Returns True when an update is available."""
+    try:
+        from core import updater as _upd
+        return _upd.get_update_info() is not None
+    except Exception:
+        return False
+
+
+def _get_update_version() -> str:
+    try:
+        from core import updater as _upd
+        info = _upd.get_update_info()
+        return info["version"] if info else ""
+    except Exception:
+        return ""
 
 
 def _safe(fn):

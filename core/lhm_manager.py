@@ -59,14 +59,16 @@ def get_sensors() -> list:
         _log_failure("lhm_bridge.exe not found at expected path")
         return []
 
-    # Backoff: don't spawn a new CLR process until the delay has passed.
-    # Each failure doubles the wait; success resets it to zero.
-    if _last_kill_time > 0:
-        elapsed = time.time() - _last_kill_time
-        if elapsed < _restart_delay_secs:
-            return []   # still in back-off window
-
     with _lock:
+        # Backoff: don't spawn a new CLR process until the delay has passed.
+        # Each failure doubles the wait; success resets it to zero.
+        # Check is inside the lock so two racing threads can't both pass
+        # the elapsed check and simultaneously spawn a new bridge process.
+        if _last_kill_time > 0:
+            elapsed = time.time() - _last_kill_time
+            if elapsed < _restart_delay_secs:
+                return []   # still in back-off window
+
         proc = _ensure_running(exe)
         if proc is None:
             return []

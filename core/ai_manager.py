@@ -162,7 +162,7 @@ def get_system_context() -> str:
         "gpu_mem_temp_c":readings.get("gpu_temp_memory"),
         "gpu_load_pct": readings.get("gpu_load"),
         "gpu_watts":    readings.get("gpu_watts"),
-        "gpu_throttled":gpu_throttled if gpu_throttled else None,
+        "gpu_throttled":gpu_throttled if gpu_throttled is not None else None,
         "ram_pct":      readings.get("ram_usage_pct"),
         "nvme_max_c":   nvme_max,
         "nvme_temps":   nvme_each,

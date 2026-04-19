@@ -1062,6 +1062,12 @@ def set_vram_clock_lock(enabled: bool, mem_mhz: int = 405, dry_run: bool = False
     When disabled: resets application clocks so the driver can boost freely.
     Returns (success: bool, message: str).
     """
+    from core import hardware as hw_mod
+    hw = hw_mod.get_cached()
+    if not any(g.get("is_nvidia") for g in hw.get("gpu", [])):
+        names = ", ".join(g.get("name", "Unknown") for g in hw.get("gpu", [])) or "none"
+        return False, f"VRAM clock control requires NVIDIA GPU (detected: {names})."
+
     try:
         if dry_run:
             action = f"lock mem={mem_mhz}MHz" if enabled else "reset clocks"
@@ -1101,19 +1107,25 @@ def set_vram_clock_lock(enabled: bool, mem_mhz: int = 405, dry_run: bool = False
 
 def apply_interrupt_steering(dry_run: bool = False) -> tuple:
     """
-    Steer performance-critical interrupt sources toward P-cores.
-    Uses the Windows registry key HKLM\\SYSTEM\\CurrentControlSet\\Control\\IRQ Routing
-    and device-specific AffinityPolicy overrides.
+    Steer performance-critical interrupt sources toward performance cores.
+    Uses device class registry keys to set InterruptPolicyMask for NIC, GPU,
+    and storage controllers.
 
-    P-core affinity mask for i9-14900HX (32 logical, LP 0-15 = P-cores):
-      0x000000000000FFFF = logical processors 0-15 (P-core threads only)
+    The affinity mask is computed from the actual CPU topology so this works
+    correctly on both Intel hybrid CPUs (P-cores only) and AMD Ryzen (all cores
+    are performance cores — mask covers all logical processors).
 
     Returns (success: bool, message: str).
     """
+    from core import cpu_topology
+    topo   = cpu_topology.get_topology()
+    p_list = topo.get("p_cores", [])
+    if not p_list:
+        return False, "No performance cores detected — cannot compute interrupt affinity mask."
+    P_MASK = sum(1 << lp for lp in p_list)
+
     # Interrupt affinity policy registry path
     BASE    = r"HKLM\SYSTEM\CurrentControlSet\Control\PnP\Pci"
-    # Affinity mask for logical processors 0-15 (P-cores on i9-14900HX)
-    P_MASK  = 0x000000000000FFFF
 
     # Devices to steer to P-cores: NIC, NVME, GPU (class GUIDs)
     # These are device class GUIDs that get interrupt policy overrides
@@ -1124,8 +1136,8 @@ def apply_interrupt_steering(dry_run: bool = False) -> tuple:
     }
 
     if dry_run:
-        logger.info("[DRY RUN] Would steer device interrupts to P-cores (mask=0x%X)", P_MASK)
-        return True, f"[DRY RUN] Would steer interrupts to P-cores (mask=0x{P_MASK:X})."
+        logger.info("[DRY RUN] Would steer device interrupts to performance cores (mask=0x%X)", P_MASK)
+        return True, f"[DRY RUN] Would steer interrupts to performance cores (mask=0x{P_MASK:X}, {len(p_list)} LPs)."
 
     applied = 0
     errors  = 0

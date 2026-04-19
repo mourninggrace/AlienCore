@@ -11,6 +11,7 @@ APP_NAME = "AlienCore"
 
 # ── Support / feedback ────────────────────────────────────────────────────────
 SUPPORT_EMAIL     = "mourning.grace.2014@gmail.com"
+GITHUB_REPO       = "mourninggrace/AlienCore"
 GITHUB_ISSUES_URL = "https://github.com/mourninggrace/AlienCore/issues/new"
 
 # ── Licensing backend ────────────────────────────────────────────────────────

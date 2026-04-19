@@ -220,6 +220,10 @@ def _run(firstrun: bool = False):
     import threading as _threading
     _threading.Thread(target=_start_bar, daemon=True, name="SensorBar").start()
 
+    # 10b. Start background update checker (non-blocking, 30s delayed first check)
+    from core import updater as _updater
+    _updater.start_background_check()
+
     # 11. Start tray icon (blocks until Exit is chosen)
     _start_tray(hw)
 

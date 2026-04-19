@@ -138,7 +138,22 @@ def _build_topology() -> dict:
         except Exception as e:
             logger.debug("CCD detection failed: %s", e)
 
-    # ── Try GetLogicalProcessorInformationEx for P/E cores ──
+    # ── AMD: no hybrid architecture — all cores are performance cores ──
+    # AMD Ryzen CPUs report EfficiencyClass=0 for every core (no E-core concept).
+    # _query_glpix would wrongly assign all 32 LPs to e_cores; skip it for AMD
+    # and treat all logical processors as P-cores instead.
+    if is_amd:
+        total = result["total_logical"]
+        if total > 0:
+            result["p_cores"]  = list(range(total))
+            result["e_cores"]  = []
+            result["p_count"]  = total
+            result["e_count"]  = 0
+            result["detected"] = True
+            logger.info("AMD topology: %d logical processors (all performance cores)", total)
+        return result
+
+    # ── Try GetLogicalProcessorInformationEx for P/E cores (Intel hybrid) ──
     try:
         p_cores, e_cores = _query_glpix()
         if p_cores or e_cores:

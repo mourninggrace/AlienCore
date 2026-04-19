@@ -227,7 +227,8 @@ class FeedbackWindow:
 
         self._sysinfo = "\n".join(lines)
         self._sysinfo_ready = True
-        self.root.after(0, self._on_sysinfo_ready)
+        if self.root.winfo_exists():
+            self.root.after(0, self._on_sysinfo_ready)
 
     def _on_sysinfo_ready(self):
         self._info_status.config(text="ready", fg=ACCENT2)
