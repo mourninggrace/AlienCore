@@ -2677,7 +2677,7 @@ class SettingsWindow:
             return
 
         import webbrowser, urllib.parse
-        from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL
+        from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL, PAYPAL_CHECKOUT_URL
         from core import auth
 
         is_pro_feature = feature in lic.PRO_FEATURES
@@ -2712,7 +2712,7 @@ class SettingsWindow:
                 "custom":        email,
                 "notify_url":    BACKEND_URL.rstrip("/") + "/paypal/ipn",
             })
-            webbrowser.open(f"https://www.paypal.com/cgi-bin/webscr?{params}")
+            webbrowser.open(f"{PAYPAL_CHECKOUT_URL}?{params}")
 
         if not auth.is_logged_in():
             self._btn(btn_row, "Sign In", self._open_login, ACCENT,
@@ -2756,7 +2756,7 @@ class SettingsWindow:
     def _tab_account(self):
         import webbrowser, urllib.parse
         from core import auth
-        from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL
+        from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL, PAYPAL_CHECKOUT_URL
 
         t = self._make_tab("Account")
 
@@ -2779,6 +2779,26 @@ class SettingsWindow:
                                 font=("Segoe UI", 8, "italic"),
                                 bg=BG_HW, fg=FG_DIM, anchor="w", wraplength=800)
         status_feed.pack(anchor="w", pady=(0, 8))
+
+        # Action buttons row — rebuilt by _refresh_display() on state changes
+        act_row = tk.Frame(status_panel, bg=BG_HW)
+        act_row.pack(anchor="w")
+
+        def _do_refresh():
+            status_msg.set("Refreshing license...")
+            def _work():
+                ok, msg = auth.refresh_license()
+                status_panel.after(0, lambda: (
+                    status_msg.set(msg),
+                    status_feed.config(fg=ACCENT2 if ok else WARN),
+                    _refresh_display(),
+                ))
+            threading.Thread(target=_work, daemon=True).start()
+
+        def _do_logout():
+            auth.logout()
+            status_msg.set("Signed out.")
+            _refresh_display()
 
         def _refresh_display():
             if auth.is_logged_in():
@@ -2806,36 +2826,18 @@ class SettingsWindow:
                 email_lbl.config(text="Not signed in", fg=FG_DIM)
                 tier_lbl.config(text="", fg=FG_DIM)
 
+            for w in act_row.winfo_children():
+                w.destroy()
+            if auth.is_logged_in():
+                self._btn(act_row, "Refresh License", _do_refresh,
+                          ACCENT, bold=True).pack(side="left", padx=(0, 8))
+                self._btn(act_row, "Sign Out", _do_logout,
+                          FG_DIM).pack(side="left")
+            else:
+                self._btn(act_row, "Sign In",
+                          self._open_login, ACCENT, bold=True).pack(side="left")
+
         _refresh_display()
-
-        # Action buttons row
-        act_row = tk.Frame(status_panel, bg=BG_HW)
-        act_row.pack(anchor="w")
-
-        def _do_refresh():
-            status_msg.set("Refreshing license...")
-            def _work():
-                ok, msg = auth.refresh_license()
-                status_panel.after(0, lambda: (
-                    status_msg.set(msg),
-                    status_feed.config(fg=ACCENT2 if ok else WARN),
-                    _refresh_display(),
-                ))
-            threading.Thread(target=_work, daemon=True).start()
-
-        def _do_logout():
-            auth.logout()
-            _refresh_display()
-            status_msg.set("Signed out.")
-
-        if auth.is_logged_in():
-            self._btn(act_row, "Refresh License", _do_refresh,
-                      ACCENT, bold=True).pack(side="left", padx=(0, 8))
-            self._btn(act_row, "Sign Out", _do_logout,
-                      FG_DIM).pack(side="left")
-        else:
-            self._btn(act_row, "Sign In",
-                      self._open_login, ACCENT, bold=True).pack(side="left")
 
         # ── Purchase / upgrade ────────────────────────────────────────────────
         self._section(t, "Licenses & Add-ons")
@@ -2856,7 +2858,7 @@ class SettingsWindow:
                 "custom":        email,
                 "notify_url":    BACKEND_URL.rstrip("/") + "/paypal/ipn",
             })
-            webbrowser.open(f"https://www.paypal.com/cgi-bin/webscr?{params}")
+            webbrowser.open(f"{PAYPAL_CHECKOUT_URL}?{params}")
 
         products = tk.Frame(t, bg=BG_HW, padx=24, pady=18)
         products.pack(fill="x", padx=16, pady=(4, 8))

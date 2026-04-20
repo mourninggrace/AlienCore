@@ -13,7 +13,9 @@ import webbrowser
 import urllib.parse
 
 from core import auth
-from core.constants import APP_NAME, VERSION, PAYPAL_BUSINESS_EMAIL, BACKEND_URL
+from core.constants import (
+    APP_NAME, VERSION, PAYPAL_BUSINESS_EMAIL, BACKEND_URL, PAYPAL_CHECKOUT_URL,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -248,6 +250,13 @@ class _LoginDialog:
         """Create a button that opens the PayPal payment page."""
         def _open():
             email = self.email_var.get().strip()
+            if not email or "@" not in email:
+                self._status(
+                    "Enter your email above first — it's attached to the "
+                    "payment so your license activates automatically.",
+                    self.DANGER)
+                self.email_entry.focus_set()
+                return
             params = urllib.parse.urlencode({
                 "cmd":           "_xclick",
                 "business":      PAYPAL_BUSINESS_EMAIL,
@@ -258,5 +267,5 @@ class _LoginDialog:
                 "custom":        email,
                 "notify_url":    BACKEND_URL.rstrip("/") + "/paypal/ipn",
             })
-            webbrowser.open(f"https://www.paypal.com/cgi-bin/webscr?{params}")
+            webbrowser.open(f"{PAYPAL_CHECKOUT_URL}?{params}")
         return self._btn(parent, label, _open, color)

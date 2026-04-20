@@ -22,6 +22,16 @@ BACKEND_URL = "https://aliencoreapp.duckdns.org"
 # PayPal account that receives payments
 PAYPAL_BUSINESS_EMAIL = "mourning.grace.2014@gmail.com"
 
+# PayPal environment: "live" for real payments, "sandbox" for test payments.
+# The sandbox URL accepts fake accounts from developer.paypal.com for pre-release
+# integration testing. Flip to "sandbox" locally when testing; keep "live" in git.
+PAYPAL_MODE = "live"
+PAYPAL_CHECKOUT_URL = (
+    "https://www.sandbox.paypal.com/cgi-bin/webscr"
+    if PAYPAL_MODE == "sandbox"
+    else "https://www.paypal.com/cgi-bin/webscr"
+)
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE_DIR              = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH           = os.path.join(BASE_DIR, "config.json")
