@@ -7,7 +7,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 [![CPU](https://img.shields.io/badge/CPU-Intel%20%7C%20AMD-0071C5?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 [![GPU](https://img.shields.io/badge/GPU-NVIDIA-76B900?style=flat-square)](https://github.com/mourninggrace/AlienCore)
-[![License](https://img.shields.io/badge/License-Proprietary-red?style=flat-square)](./LICENSE)
+[![License](https://img.shields.io/badge/License-Source--Available-orange?style=flat-square)](./LICENSE)
 [![Trial](https://img.shields.io/badge/Free%20Trial-30%20Days-brightgreen?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 
 *Your PC has dozens of power, thermal, and priority settings. AlienCore adjusts them automatically based on what you're actually doing — gaming, streaming, working, or idle.*
@@ -325,6 +325,12 @@ AlienCore bundles **LibreHardwareMonitor** (MPL-2.0) for hardware sensor reading
 ---
 
 ## License
+
+AlienCore is **source-available commercial software** — not open source. The
+source is published so you can read it, audit it, and verify for yourself that
+it isn't malware, isn't spyware, and isn't collecting anything beyond what the
+documentation discloses. You may **not** fork it, redistribute it, modify it,
+or resell it. Use requires a purchased license (or the 30-day free trial).
 
 Copyright © 2026 George Kyle Yeroshefsky. All Rights Reserved.  
 See [LICENSE](./LICENSE) for full terms.

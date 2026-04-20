@@ -2,23 +2,44 @@ Copyright (c) 2026 George Kyle Yeroshefsky. All Rights Reserved.
 
 ALIENCORE SOFTWARE LICENSE
 
-This software and associated documentation files (the "Software") are the exclusive
-intellectual property of George Kyle Yeroshefsky and are protected by United States and
-international copyright law.
+This software and associated documentation files (the "Software") are the
+exclusive intellectual property of George Kyle Yeroshefsky and are protected
+by United States and international copyright law.
+
+AlienCore is source-available commercial software. The source code is
+published so that customers and the general public may read, review, and
+audit it — including confirming the absence of malware, spyware, or any
+data collection beyond what the documentation discloses. Publishing the
+source does not make AlienCore open source within the meaning of the Open
+Source Initiative, and no rights beyond those explicitly granted below are
+conveyed.
 
 RESTRICTIONS:
-- You may NOT copy, modify, merge, publish, distribute, sublicense, or sell
-  copies of the Software or any portion thereof.
-- You may NOT reverse engineer, decompile, disassemble, or attempt to derive
-  the source code of the Software.
-- You may NOT create derivative works based on the Software.
-- You may NOT use the Software for commercial purposes without explicit written
-  permission from the copyright holder.
+- You may NOT copy, fork, mirror, republish, redistribute, sublicense, or
+  sell the Software, the source code, or any portion thereof.
+- You may NOT modify the Software or create derivative works based on it,
+  whether for personal use or distribution.
+- You may NOT extract, transform, or repackage the compiled Software in
+  order to produce an independent program, bypass the license system, or
+  circumvent trial or payment restrictions.
+- You may NOT use the Software, in whole or in part, for any commercial
+  purpose without explicit written permission from the copyright holder.
+  This includes, without limitation, bundling AlienCore into another
+  product, offering it as a hosted or managed service, or reselling
+  access to it.
 
 PERMITTED USE:
-- Registered licensees may install and use the Software on their own hardware
-  in accordance with the terms of their purchased license.
-- The 30-day free trial is granted solely for personal evaluation purposes.
+- Registered licensees may install and use the Software on their own
+  hardware in accordance with the terms of their purchased license.
+- The 30-day free trial is granted solely for personal evaluation
+  purposes.
+- Any person may read the published source code for the purpose of
+  personal study, security review, or independent audit. Reading the
+  source in this way does not grant any right to copy, modify,
+  redistribute, or reuse it. Any output derived from such review — for
+  example, an audit report or short excerpts quoted in public
+  discussion — must identify AlienCore as the copyrighted work of
+  George Kyle Yeroshefsky.
 
 DISCLAIMER:
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
