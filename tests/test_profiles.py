@@ -80,8 +80,11 @@ def test_gaming_by_process_known_game(base_config):
 
 
 def test_gaming_by_process_launcher(base_config):
+    # Launcher processes (steam.exe, epicgameslauncher.exe, ...) are
+    # intentionally NOT in GAMING_PROCESSES — they run whenever the platform
+    # is open. Only processes that imply a game is actually running count.
     from core.profiles import _is_gaming_by_process
-    running = {"steam.exe", "chrome.exe"}
+    running = {"thedivision2.exe", "chrome.exe"}
     assert _is_gaming_by_process(running, base_config) is True
 
 
@@ -177,7 +180,7 @@ def test_evaluate_idle_when_nothing_running(base_config, monkeypatch):
 
 def test_evaluate_gaming_by_process(base_config, monkeypatch):
     import core.profiles as p
-    monkeypatch.setattr(p, "_get_running_processes", lambda: {"steam.exe"})
+    monkeypatch.setattr(p, "_get_running_processes", lambda: {"thedivision2.exe"})
     result = p.evaluate({"gpu_load": 5, "cpu_load_pct": 5})
     assert result == "gaming"
 
@@ -199,7 +202,12 @@ def test_evaluate_manual_override_bypasses_detection(base_config, monkeypatch):
 
 
 def test_evaluate_gaming_by_load_fallback(base_config, monkeypatch):
+    # Load-based detection requires _LOAD_HIT_NEEDED consecutive hits before
+    # committing to gaming (anti-flap hysteresis). Call evaluate() enough
+    # times to clear the threshold.
     import core.profiles as p
     monkeypatch.setattr(p, "_get_running_processes", lambda: set())
-    result = p.evaluate({"gpu_load": 80, "cpu_load_pct": 50})
+    result = None
+    for _ in range(p._LOAD_HIT_NEEDED):
+        result = p.evaluate({"gpu_load": 80, "cpu_load_pct": 50})
     assert result == "gaming"

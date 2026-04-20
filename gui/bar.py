@@ -1829,7 +1829,9 @@ class SensorBar:
             h  = self.root.winfo_height()
         except Exception:
             return ""
-        edge = _RESIZE_EDGE_PX
+        # Scale the hotzone with the bar — at _SCALE_MIN a 7-px zone is a
+        # large fraction of the bar; at _SCALE_MAX it becomes fiddly.
+        edge = max(5, int(round(_RESIZE_EDGE_PX * self._scale)))
         if self._orient == "vertical":
             if 0 <= wy <= h and (w - edge) <= wx <= w:
                 return "x"

@@ -37,6 +37,13 @@ def patch_cfg(monkeypatch):
     from core.constants import DEFAULT_CONFIG
     import copy
     monkeypatch.setattr(cm, "_config", copy.deepcopy(DEFAULT_CONFIG))
+    # cm.get() returns a cached snapshot and reassigns _cache on rebuild.
+    # Patch both _cache (so monkeypatch captures+restores the pre-test
+    # reference) and _cache_valid (so the next get() rebuilds from our
+    # patched _config). Without this, a test leaves the module cache
+    # pointing at its patched config and poisons subsequent tests.
+    monkeypatch.setattr(cm, "_cache", {})
+    monkeypatch.setattr(cm, "_cache_valid", False)
     yield
 
 
@@ -221,6 +228,8 @@ def config_with_user_profile(monkeypatch):
         "priority": 50,
     }]
     monkeypatch.setattr(cm, "_config", c)
+    monkeypatch.setattr(cm, "_cache", {})
+    monkeypatch.setattr(cm, "_cache_valid", False)
     yield c
 
 

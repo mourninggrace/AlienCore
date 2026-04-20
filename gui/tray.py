@@ -159,7 +159,7 @@ def start(on_settings_open, on_quit):
 
 
 def stop():
-    global _running
+    global _running, _overlay
     _running = False
     for icon in _icons:
         try:
@@ -171,6 +171,9 @@ def stop():
             _overlay.root.destroy()
         except Exception:
             pass
+        # Clear the handle so a subsequent overlay toggle spawns a fresh
+        # thread rather than reading a dangling Tk root.
+        _overlay = None
     logger.info("Tray stopped.")
 
 
@@ -732,24 +735,30 @@ def _start_overlay():
                 self.root.geometry(f"+{x}+{y}")
 
             def _update(self):
-                if not cfg.get_value("display", "overlay_enabled", default=True):
-                    self.root.withdraw()
+                # If the root was destroyed (e.g. tray.stop() during shutdown),
+                # any Tk call here raises TclError — bail out silently instead
+                # of spraying tracebacks into the daemon thread.
+                try:
+                    if not cfg.get_value("display", "overlay_enabled", default=True):
+                        self.root.withdraw()
+                        self.root.after(2000, self._update)
+                        return
+                    self.root.deiconify()
+                    readings = sensors.get_readings()
+                    thresh   = cfg.get().get("thresholds", {})
+                    for _, label, reading_key, unit, kind in SENSOR_DEFS:
+                        lbl = self.labels.get(label)
+                        if not lbl:
+                            continue
+                        try:
+                            text, color = _get_reading(
+                                kind, reading_key, label, unit, readings, thresh)
+                            lbl.config(text=text, fg=color)
+                        except Exception:
+                            pass
                     self.root.after(2000, self._update)
+                except tk.TclError:
                     return
-                self.root.deiconify()
-                readings = sensors.get_readings()
-                thresh   = cfg.get().get("thresholds", {})
-                for _, label, reading_key, unit, kind in SENSOR_DEFS:
-                    lbl = self.labels.get(label)
-                    if not lbl:
-                        continue
-                    try:
-                        text, color = _get_reading(
-                            kind, reading_key, label, unit, readings, thresh)
-                        lbl.config(text=text, fg=color)
-                    except Exception:
-                        pass
-                self.root.after(2000, self._update)
 
             def run(self):
                 self.root.mainloop()

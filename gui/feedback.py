@@ -35,19 +35,21 @@ ACCENT2  = "#00cc66"
 BORDER   = "#2a2d38"
 
 _instance = None
+_instance_lock = threading.Lock()
 
 
 def open_feedback():
     """Open the feedback window (singleton — raises existing if already open)."""
     global _instance
-    if _instance is not None:
-        try:
-            _instance.root.lift()
-            _instance.root.focus_force()
-            return
-        except Exception:
-            _instance = None
-    _instance = FeedbackWindow()
+    with _instance_lock:
+        if _instance is not None:
+            try:
+                _instance.root.lift()
+                _instance.root.focus_force()
+                return
+            except Exception:
+                _instance = None
+        _instance = FeedbackWindow()
     _instance.run()
 
 

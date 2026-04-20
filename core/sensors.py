@@ -102,45 +102,54 @@ def _poll_loop():
     # COM must be initialized on every thread that uses WMI.
     # Doing it here ensures the AWCC WMI connection is created on this thread,
     # which is required by the COM STA apartment model.
+    import pythoncom
+    com_ready = False
     try:
-        import pythoncom
         pythoncom.CoInitialize()
+        com_ready = True
     except Exception as e:
         logger.warning("SensorThread CoInitialize failed: %s", e)
 
-    while _running:
-        try:
-            flat = _get_lhm_sensors()
+    try:
+        while _running:
+            try:
+                flat = _get_lhm_sensors()
 
-            data = {}
-            data.update(_parse_cpu_temp(flat))
-            data.update(_parse_gpu_temp(flat))
-            data.update(_parse_nvme_temp(flat))
-            data.update(_parse_ram_temp(flat))
-            data.update(_parse_fan_rpm(flat))
-            data.update(_parse_cpu_watts(flat))
-            data.update(_read_gpu_nvidia_smi())
-            # AMD / Intel Arc / any non-NVIDIA discrete GPU:
-            # fill missing GPU fields from the LHM flat list.
-            _fill_gpu_from_lhm(data, flat)
-            data.update(_read_ram_usage())
-            data.update(_read_cpu_freq())
-            data.update(_read_cpu_load())
-            # Feed boost tracker with latest freq + temp + per-core load
-            # (must happen after _read_cpu_load so cpu_load_cores is populated)
-            _update_boost_tracker(data)
-            data.update(_read_battery())
-            data.update(_read_network_io())
-            data.update(_read_disk_io())
-            data.update(_read_awcc_data())
+                data = {}
+                data.update(_parse_cpu_temp(flat))
+                data.update(_parse_gpu_temp(flat))
+                data.update(_parse_nvme_temp(flat))
+                data.update(_parse_ram_temp(flat))
+                data.update(_parse_fan_rpm(flat))
+                data.update(_parse_cpu_watts(flat))
+                data.update(_read_gpu_nvidia_smi())
+                # AMD / Intel Arc / any non-NVIDIA discrete GPU:
+                # fill missing GPU fields from the LHM flat list.
+                _fill_gpu_from_lhm(data, flat)
+                data.update(_read_ram_usage())
+                data.update(_read_cpu_freq())
+                data.update(_read_cpu_load())
+                # Feed boost tracker with latest freq + temp + per-core load
+                # (must happen after _read_cpu_load so cpu_load_cores is populated)
+                _update_boost_tracker(data)
+                data.update(_read_battery())
+                data.update(_read_network_io())
+                data.update(_read_disk_io())
+                data.update(_read_awcc_data())
 
-            with _lock:
-                _readings.update(data)
+                with _lock:
+                    _readings.update(data)
 
-        except Exception as e:
-            logger.debug("Sensor poll error: %s", e)
+            except Exception as e:
+                logger.debug("Sensor poll error: %s", e)
 
-        time.sleep(SENSOR_POLL_INTERVAL)
+            time.sleep(SENSOR_POLL_INTERVAL)
+    finally:
+        if com_ready:
+            try:
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

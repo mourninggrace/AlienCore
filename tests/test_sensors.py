@@ -43,6 +43,8 @@ def test_fmt_temp_fahrenheit(monkeypatch):
     c = copy.deepcopy(DEFAULT_CONFIG)
     c["display"]["temp_unit"] = "fahrenheit"
     monkeypatch.setattr(cm, "_config", c)
+    monkeypatch.setattr(cm, "_cache", {})
+    monkeypatch.setattr(cm, "_cache_valid", False)
     from core.sensors import fmt_temp
     # 0°C = 32°F
     assert fmt_temp(0.0) == "32°"
