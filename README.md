@@ -326,7 +326,7 @@ AlienCore bundles **LibreHardwareMonitor** (MPL-2.0) for hardware sensor reading
 
 ## License
 
-Copyright © 2026 Kyle Williams. All Rights Reserved.  
+Copyright © 2026 George Kyle Yeroshefsky. All Rights Reserved.  
 See [LICENSE](./LICENSE) for full terms.
 
 ---
