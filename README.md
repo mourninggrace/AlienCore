@@ -169,9 +169,8 @@ Checks GitHub Releases automatically — 30 seconds after launch, then every 6 h
 
 | Tier | Price | What's Included |
 |------|-------|----------------|
-| **Base** | $19.99 one-time | Adaptive profiles, sensor bar, tray icon, all OS tweaks, NVIDIA GPU tuning, Alienware AWCC integration, privacy baseline, learning engine |
-| **Pro Add-on** | +$4.99 one-time | AI chat, AI watchdog, AI Config Advisor, advanced CPU/GPU/RAM tuning, Windows services manager |
-| **Priority Support** | +$4.99 one-time | Direct support email, 24-hour guaranteed reply |
+| **Base** | $19.99 one-time | All features — adaptive profiles, sensor bar, tray icon, OS tweaks, NVIDIA GPU tuning, Alienware AWCC integration, advanced CPU/GPU/RAM tuning, Windows services manager, privacy baseline, learning engine |
+| **Pro Add-on** | +$4.99 one-time | AI chat, AI watchdog, AI Config Advisor |
 | **Free Trial** | 30 days | Full base feature set — no payment required, hardware-fingerprinted |
 
 ---

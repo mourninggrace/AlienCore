@@ -9,7 +9,7 @@ import json
 import urllib.error
 import urllib.request
 
-from backend.config import BREVO_API_KEY, FROM_EMAIL, FROM_NAME, KYLE_EMAIL
+from backend.config import BREVO_API_KEY, FROM_EMAIL, FROM_NAME
 
 _BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
@@ -102,35 +102,3 @@ If you didn't request this, you can safely ignore this email.
 </html>"""
 
     _send(to_email, subject, text, html)
-
-
-def send_support_notification(from_email: str, message: str):
-    """Notify Kyle that a priority support ticket was submitted."""
-    subject = f"[AlienCore Support] New ticket from {from_email}"
-
-    text = f"""Priority support ticket received.
-
-From: {from_email}
-
-Message:
-{message}
-
----
-Reply directly to {from_email} within 24 hours per the support agreement.
-If this issue cannot be resolved, issue a PayPal refund and run:
-  POST /paypal/refund-support  {{admin_key, email}}
-"""
-    html = f"""<html><body style="font-family:monospace;background:#111;color:#eee;padding:24px;">
-<h3 style="color:#00aaff;">AlienCore Priority Support Ticket</h3>
-<p><strong>From:</strong> {from_email}</p>
-<hr style="border-color:#333;">
-<pre style="background:#1a1a1a;padding:16px;border-radius:6px;">{message}</pre>
-<hr style="border-color:#333;">
-<p style="color:#888;font-size:12px;">
-Reply to {from_email} within 24 hours.<br>
-If unresolvable: issue PayPal refund + call
-<code>POST /paypal/refund-support</code> to restore their credit.
-</p>
-</body></html>"""
-
-    _send(KYLE_EMAIL, subject, text, html)

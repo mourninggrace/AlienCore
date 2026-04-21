@@ -41,9 +41,6 @@ FROM_NAME     = "AlienCore"
 PAYPAL_EMAIL = os.getenv("AC_PAYPAL_EMAIL", "mourning.grace.2014@gmail.com")
 PAYPAL_MODE  = os.getenv("AC_PAYPAL_MODE",  "live")   # "live" | "sandbox"
 
-# Kyle's notification email — support tickets land here
-KYLE_EMAIL   = os.getenv("AC_KYLE_EMAIL", "mourning.grace.2014@gmail.com")
-
 # ── Database ──────────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("AC_DB_PATH", "aliencore.db")
 
@@ -55,5 +52,4 @@ TOKEN_EXPIRY_DAYS  = 30
 PRODUCTS = {
     "AC_BASE":    {"name": "AlienCore — Lifetime License",      "amount": "19.99"},
     "AC_PRO":     {"name": "AlienCore Pro Add-on",              "amount": "4.99"},
-    "AC_SUPPORT": {"name": "AlienCore Priority Support (1x)",   "amount": "4.99"},
 }

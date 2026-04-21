@@ -22,7 +22,6 @@ def init_db():
                 email            TEXT PRIMARY KEY,
                 has_base         INTEGER NOT NULL DEFAULT 0,
                 has_pro          INTEGER NOT NULL DEFAULT 0,
-                support_credits  INTEGER NOT NULL DEFAULT 0,
                 trial_started_at REAL    DEFAULT NULL,
                 created_at       REAL    NOT NULL DEFAULT (unixepoch())
             );
@@ -61,15 +60,6 @@ def init_db():
                 first_email      TEXT NOT NULL,
                 trial_started_at REAL NOT NULL DEFAULT (unixepoch()),
                 has_paid         INTEGER NOT NULL DEFAULT 0
-            );
-
-            -- Support tickets
-            CREATE TABLE IF NOT EXISTS support_tickets (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                email      TEXT    NOT NULL,
-                message    TEXT    NOT NULL,
-                status     TEXT    NOT NULL DEFAULT 'open',
-                created_at REAL    NOT NULL DEFAULT (unixepoch())
             );
         """)
         # Migration: add trial_started_at to existing databases

@@ -2,20 +2,17 @@
 AlienCore - login_dialog.py
 Email + PIN authentication dialog.
 
-Shown when AlienCore starts with no valid session.
-The user enters their email → receives a 6-digit PIN → enters it to sign in.
-First-time users are prompted to purchase a license.
+Shown when AlienCore starts with no valid session. The user enters their
+email → receives a 6-digit PIN → enters it to sign in. First-time users
+start a free 30-day trial automatically; purchases happen from the
+Account tab in Settings after signing in.
 """
 
 import threading
 import tkinter as tk
-import webbrowser
-import urllib.parse
 
 from core import auth
-from core.constants import (
-    APP_NAME, VERSION, PAYPAL_BUSINESS_EMAIL, BACKEND_URL, PAYPAL_CHECKOUT_URL,
-)
+from core.constants import APP_NAME, VERSION
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +35,7 @@ def show(on_complete=None):
 
     # Center on screen
     root.update_idletasks()
-    w, h = 480, 560
+    w, h = 460, 540
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
     root.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
     root.mainloop()
@@ -93,8 +90,8 @@ class _LoginDialog:
         tk.Label(card, text="Sign in with your email",
                  font=("Segoe UI", 13, "bold"), bg=BG_CARD, fg=FG).pack(anchor="w")
         tk.Label(card,
-                 text="Enter your email and we'll send a one-time PIN to log in.\n"
-                      "First time?  Purchase a license below, then sign in.",
+                 text="Enter your email and we'll send a one-time PIN to sign in.\n"
+                      "New users get a free 30-day trial — no card needed.",
                  font=("Segoe UI", 8), bg=BG_CARD, fg=FG_DIM,
                  justify="left").pack(anchor="w", pady=(4, 14))
 
@@ -108,8 +105,11 @@ class _LoginDialog:
             relief="flat", font=("Segoe UI", 11),
             disabledbackground=self.BG_FIELD, disabledforeground="#555555",
         )
-        self.email_entry.pack(fill="x", ipady=7, pady=(3, 12))
+        self.email_entry.pack(fill="x", ipady=7, pady=(3, 2))
         self.email_entry.focus_set()
+        tk.Label(card, text="Press Enter",
+                 font=("Segoe UI", 8, "italic"),
+                 bg=BG_CARD, fg=FG_DIM).pack(anchor="w", pady=(0, 12))
 
         # PIN field (hidden until email is sent)
         self._pin_outer = tk.Frame(card, bg=BG_CARD)
@@ -122,7 +122,10 @@ class _LoginDialog:
             bg=self.BG_FIELD, fg=self.ACCENT, insertbackground=self.ACCENT,
             relief="flat", font=("Consolas", 22, "bold"), justify="center",
         )
-        self.pin_entry.pack(fill="x", ipady=10, pady=(3, 0))
+        self.pin_entry.pack(fill="x", ipady=10, pady=(3, 2))
+        tk.Label(self._pin_outer, text="Press Enter",
+                 font=("Segoe UI", 8, "italic"),
+                 bg=BG_CARD, fg=FG_DIM).pack(anchor="w", pady=(0, 0))
 
         # Status
         self.status_var = tk.StringVar(value="")
@@ -136,37 +139,21 @@ class _LoginDialog:
         btn_row = tk.Frame(card, bg=BG_CARD)
         btn_row.pack(anchor="w", pady=(14, 0))
 
-        self.send_btn   = self._btn(btn_row, "Send PIN",
+        # Send PIN is triggered by pressing Enter in the email field;
+        # this button only appears after the first send, as a Resend affordance.
+        self.send_btn   = self._btn(btn_row, "Resend PIN",
                                     self._send_pin, self.ACCENT, bold=True)
-        self.send_btn.pack(side="left", padx=(0, 8))
 
         self.verify_btn = self._btn(btn_row, "Verify & Sign In",
                                     self._verify_pin, self.GREEN, bold=True)
-        # verify_btn appears after PIN is sent
+        # verify_btn and send_btn (as Resend) both appear after PIN is sent
 
-        # Purchase section
-        tk.Frame(outer, bg="#2a2a2a", height=1).pack(fill="x", pady=(16, 12))
-
-        tk.Label(outer, text="New to AlienCore?",
-                 font=("Segoe UI", 10, "bold"), bg=BG, fg=FG).pack(anchor="w")
+        # Pricing teaser
         tk.Label(outer,
-                 text="First sign-in starts a free 30-day trial of all base features — no card needed.  "
-                      "One-time payments, no subscriptions, lifetime license.",
+                 text="Free 30-day trial  ·  $19.99 lifetime afterward  ·  "
+                      "Buy from Settings → Account after signing in",
                  font=("Segoe UI", 8), bg=BG, fg=FG_DIM,
-                 wraplength=420, justify="left").pack(anchor="w",
-                 pady=(3, 10))
-
-        purchase_row = tk.Frame(outer, bg=BG)
-        purchase_row.pack(anchor="w")
-        self._buy_btn(purchase_row, "Buy AlienCore   $19.99",
-                      "AC_BASE",    "AlienCore — Lifetime License", "19.99",
-                      self.GREEN).pack(side="left", padx=(0, 8))
-        self._buy_btn(purchase_row, "Pro Add-on   +$4.99",
-                      "AC_PRO",     "AlienCore Pro Add-on",          "4.99",
-                      self.ACCENT).pack(side="left", padx=(0, 8))
-        self._buy_btn(purchase_row, "Priority Support   $4.99",
-                      "AC_SUPPORT", "AlienCore Priority Support (1x)","4.99",
-                      self.WARN).pack(side="left")
+                 justify="center", wraplength=380).pack(pady=(14, 0))
 
         # Keybinds
         self.email_entry.bind("<Return>", lambda e: self._send_pin())
@@ -191,8 +178,10 @@ class _LoginDialog:
                 if not self._pin_mode:
                     self._pin_mode = True
                     self.email_entry.config(state="disabled")
-                    self._pin_outer.pack(fill="x", pady=(0, 0))
-                    self.verify_btn.pack(side="left")
+                    self._pin_outer.pack(fill="x", pady=(0, 0),
+                                         before=self.status_lbl)
+                    self.verify_btn.pack(side="left", padx=(0, 8))
+                    self.send_btn.pack(side="left")
                     self.pin_entry.focus_set()
                     self.send_btn.config(text="Resend PIN")
                 if ok:
@@ -246,26 +235,3 @@ class _LoginDialog:
             cursor="hand2", bd=0, highlightthickness=0,
         )
 
-    def _buy_btn(self, parent, label, item_number, item_name, amount, color):
-        """Create a button that opens the PayPal payment page."""
-        def _open():
-            email = self.email_var.get().strip()
-            if not email or "@" not in email:
-                self._status(
-                    "Enter your email above first — it's attached to the "
-                    "payment so your license activates automatically.",
-                    self.DANGER)
-                self.email_entry.focus_set()
-                return
-            params = urllib.parse.urlencode({
-                "cmd":           "_xclick",
-                "business":      PAYPAL_BUSINESS_EMAIL,
-                "item_name":     item_name,
-                "item_number":   item_number,
-                "amount":        amount,
-                "currency_code": "USD",
-                "custom":        email,
-                "notify_url":    BACKEND_URL.rstrip("/") + "/paypal/ipn",
-            })
-            webbrowser.open(f"{PAYPAL_CHECKOUT_URL}?{params}")
-        return self._btn(parent, label, _open, color)

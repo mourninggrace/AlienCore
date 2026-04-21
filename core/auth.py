@@ -141,13 +141,6 @@ def is_pro() -> bool:
     return is_licensed() and bool(get_session().get("has_pro"))
 
 
-def support_credits() -> int:
-    """Number of unused priority support credits."""
-    if not is_licensed():
-        return 0
-    return int(get_session().get("support_credits", 0))
-
-
 def get_email() -> str:
     return get_session().get("email", "")
 
@@ -181,7 +174,6 @@ def verify_pin(email: str, pin: str) -> tuple[bool, str]:
             "token":           "3e8f1a042c9b7d6e5f0a4c2b1d9e7f83",
             "has_base":        True,
             "has_pro":         True,
-            "support_credits": 0,
             "expires_at":      time.time() + 365 * 86400,
         })
         return True, "Signed in successfully."
@@ -243,26 +235,6 @@ def logout():
     logger.info("Logged out.")
 
 
-def submit_support_ticket(message: str) -> tuple[bool, str]:
-    """Submit a priority support ticket (consumes one credit)."""
-    s = get_session()
-    if not s.get("token"):
-        return False, "Not logged in."
-    try:
-        resp = _post("/support/submit", {"token": s["token"], "message": message})
-        if resp.get("ok"):
-            # Decrement local credit optimistically
-            with _lock:
-                _session["support_credits"] = max(0, _session.get("support_credits", 1) - 1)
-            _persist()
-            return True, resp.get("message", "Support ticket submitted.")
-        return False, resp.get("error", "Failed to submit ticket.")
-    except urllib.error.URLError:
-        return False, "Cannot reach server."
-    except Exception as e:
-        return False, f"Error: {e}"
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -292,7 +264,6 @@ def _save_session(data: dict):
         "token":            data.get("token", ""),
         "has_base":         bool(data.get("has_base")),
         "has_pro":          bool(data.get("has_pro")),
-        "support_credits":  int(data.get("support_credits", 0)),
         "trial_started_at": trial,
         "expires_at":       float(data.get("expires_at", 0)),
         "last_verified_at": time.time(),
@@ -309,7 +280,6 @@ def _merge_session(data: dict):
         _session.update({
             "has_base":         bool(data.get("has_base")),
             "has_pro":          bool(data.get("has_pro")),
-            "support_credits":  int(data.get("support_credits", 0)),
             "trial_started_at": data.get("trial_started_at") or existing_trial,
             "expires_at":       float(data.get("expires_at", _session.get("expires_at", 0))),
             "last_verified_at": time.time(),

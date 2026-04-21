@@ -2807,8 +2807,6 @@ class SettingsWindow:
                 parts = []
                 if s.get("has_base"): parts.append("Base License")
                 if s.get("has_pro"):  parts.append("Pro Add-on")
-                creds = s.get("support_credits", 0)
-                if creds:             parts.append(f"{creds}x Priority Support")
                 if parts:
                     tier_lbl.config(text="Licensed: " + " · ".join(parts),
                                     fg=ACCENT2)
@@ -2843,11 +2841,65 @@ class SettingsWindow:
         self._section(t, "Licenses & Add-ons")
         self._note(t,
             "One-time payments. No subscriptions. Lifetime license includes "
-            "all future updates. Enter your email in the sign-in field first — "
-            "your email is attached to the payment so your license activates automatically.")
+            "all future updates. Your license attaches to the email you signed "
+            "in with — no further action needed after PayPal checkout, the "
+            "status above will update automatically.")
+
+        import time
+
+        # Track the active purchase poll so a second Buy click cancels the first.
+        poll_gen = {"n": 0}
+
+        def _license_signature():
+            s = auth.get_session()
+            return (
+                1 if s.get("has_base") else 0,
+                1 if s.get("has_pro") else 0,
+            )
+
+        def _poll_for_purchase(baseline, my_gen):
+            # Poll backend every 3s for up to 3 minutes (60 * 3s = 180s).
+            for _ in range(60):
+                if poll_gen["n"] != my_gen:
+                    return                  # another purchase started
+                time.sleep(3)
+                try:
+                    auth.refresh_license()
+                except Exception:
+                    pass
+                if _license_signature() != baseline:
+                    def _done():
+                        try:
+                            if poll_gen["n"] != my_gen:
+                                return
+                            status_msg.set(
+                                "License activated — thanks for supporting "
+                                "AlienCore!")
+                            status_feed.config(fg=ACCENT2)
+                            _refresh_display()
+                        except tk.TclError:
+                            pass
+                    status_panel.after(0, _done)
+                    return
+            def _timeout():
+                try:
+                    if poll_gen["n"] != my_gen:
+                        return
+                    status_msg.set(
+                        "No PayPal confirmation received after 3 minutes. "
+                        "Click 'Refresh License' in a moment, or contact "
+                        "support if the license doesn't appear.")
+                    status_feed.config(fg=WARN)
+                except tk.TclError:
+                    pass
+            status_panel.after(0, _timeout)
 
         def _paypal(item_number, item_name, amount):
             email = auth.get_email()
+            if not email:
+                status_msg.set("Sign in first before purchasing.")
+                status_feed.config(fg=WARN)
+                return
             params = urllib.parse.urlencode({
                 "cmd":           "_xclick",
                 "business":      PAYPAL_BUSINESS_EMAIL,
@@ -2859,6 +2911,17 @@ class SettingsWindow:
                 "notify_url":    BACKEND_URL.rstrip("/") + "/paypal/ipn",
             })
             webbrowser.open(f"{PAYPAL_CHECKOUT_URL}?{params}")
+            status_msg.set(
+                "Payment window opened in your browser. Waiting for PayPal "
+                "confirmation — usually 10-30 seconds after you complete "
+                "checkout…")
+            status_feed.config(fg=ACCENT)
+            poll_gen["n"] += 1
+            my_gen = poll_gen["n"]
+            baseline = _license_signature()
+            threading.Thread(target=_poll_for_purchase,
+                             args=(baseline, my_gen),
+                             daemon=True, name="PurchasePoll").start()
 
         products = tk.Frame(t, bg=BG_HW, padx=24, pady=18)
         products.pack(fill="x", padx=16, pady=(4, 8))
@@ -2874,12 +2937,6 @@ class SettingsWindow:
              "+$4.99",
              "Unlocks AI Chat, AI Watchdog, and AI Config Advisor.",
              "#cc44ff"),
-            ("AC_SUPPORT",
-             "Priority Support  —  Single Incident",
-             "$4.99",
-             "24-hour response to one bug report or technical issue. "
-             "Full refund if I can't resolve it.",
-             WARN),
         ]:
             row = tk.Frame(products, bg=BG_SECT, padx=16, pady=10)
             row.pack(fill="x", pady=(0, 6))
@@ -2899,51 +2956,6 @@ class SettingsWindow:
                       lambda n=_n, l=label, p=_p: _paypal(
                           n, l, p.replace("+", "").replace("$", "").strip()),
                       color, bold=True).pack(side="right", padx=(12, 0))
-
-        # ── Priority Support ticket form ───────────────────────────────────────
-        self._section(t, "Submit a Priority Support Ticket")
-        creds = auth.support_credits()
-        if creds > 0:
-            self._note(t,
-                f"You have {creds} support credit(s). Describe your issue below. "
-                f"Kyle will respond within 24 hours. If it can't be fixed, you'll receive a full refund.")
-
-            ticket_panel = tk.Frame(t, bg=BG_HW, padx=16, pady=12)
-            ticket_panel.pack(fill="x", padx=16, pady=(4, 8))
-
-            msg_box = tk.Text(ticket_panel, height=6, width=80,
-                              bg=BG_PANEL, fg=FG, insertbackground=FG,
-                              relief="flat", font=("Segoe UI", 9),
-                              padx=8, pady=6, wrap="word")
-            msg_box.pack(fill="x")
-
-            ticket_status = tk.StringVar(value="")
-            tk.Label(ticket_panel, textvariable=ticket_status,
-                     font=("Segoe UI", 8, "italic"),
-                     bg=BG_HW, fg=FG_DIM, anchor="w").pack(fill="x", pady=(6, 0))
-
-            ctrl = tk.Frame(ticket_panel, bg=BG_HW)
-            ctrl.pack(anchor="w", pady=(8, 0))
-
-            def _submit_ticket():
-                message = msg_box.get("1.0", "end").strip()
-                if not message:
-                    ticket_status.set("Please describe your issue first.")
-                    return
-                ticket_status.set("Submitting...")
-                def _work():
-                    ok, resp = auth.submit_support_ticket(message)
-                    ticket_panel.after(0, lambda: (
-                        ticket_status.set(resp),
-                        _refresh_display(),
-                    ))
-                threading.Thread(target=_work, daemon=True).start()
-
-            self._btn(ctrl, "Submit Ticket", _submit_ticket,
-                      ACCENT2, bold=True).pack(side="left")
-        else:
-            self._note(t,
-                "No support credits. Purchase Priority Support above to submit a ticket.")
 
     # ─────────────────────────────────────────────────────────────────────────
     # About tab

@@ -30,7 +30,7 @@ from flask import Flask, request, jsonify
 
 from backend import db, mail
 from backend.config import (
-    BACKEND_HOST, BACKEND_PORT, SECRET_KEY,
+    BACKEND_HOST, BACKEND_PORT,
     PIN_EXPIRY_MINUTES, TOKEN_EXPIRY_DAYS,
     PAYPAL_EMAIL, PAYPAL_MODE, PRODUCTS,
 )
@@ -122,7 +122,7 @@ def verify_pin():
 
         conn.execute("INSERT OR IGNORE INTO users (email) VALUES (?)", (email,))
         user = conn.execute(
-            "SELECT has_base, has_pro, support_credits, trial_started_at FROM users WHERE email=?",
+            "SELECT has_base, has_pro, trial_started_at FROM users WHERE email=?",
             (email,),
         ).fetchone()
 
@@ -184,7 +184,6 @@ def verify_pin():
         "email":            email,
         "has_base":         bool(user["has_base"]),
         "has_pro":          bool(user["has_pro"]),
-        "support_credits":  user["support_credits"],
         "trial_started_at": trial_started_at,
         "expires_at":       expires_at,
     })
@@ -211,7 +210,7 @@ def check_token():
 
         email = row["email"]
         user  = conn.execute(
-            "SELECT has_base, has_pro, support_credits, trial_started_at FROM users WHERE email=?",
+            "SELECT has_base, has_pro, trial_started_at FROM users WHERE email=?",
             (email,),
         ).fetchone()
 
@@ -226,7 +225,6 @@ def check_token():
         "email":            email,
         "has_base":         bool(user["has_base"]),
         "has_pro":          bool(user["has_pro"]),
-        "support_credits":  user["support_credits"],
         "trial_started_at": user["trial_started_at"],
         "expires_at":       new_expiry,
     })
@@ -346,12 +344,6 @@ def paypal_ipn():
         elif item_number == "AC_PRO":
             conn.execute("UPDATE users SET has_pro=1 WHERE email=?", (email,))
             logger.info("Granted PRO add-on to %s", email)
-        elif item_number == "AC_SUPPORT":
-            conn.execute(
-                "UPDATE users SET support_credits=support_credits+1 WHERE email=?",
-                (email,),
-            )
-            logger.info("Granted support credit to %s", email)
 
     return "", 200
 
@@ -372,84 +364,7 @@ def _handle_refund(txn_id: str):
             conn.execute("UPDATE users SET has_base=0 WHERE email=?", (email,))
         elif item == "AC_PRO":
             conn.execute("UPDATE users SET has_pro=0  WHERE email=?", (email,))
-        elif item == "AC_SUPPORT":
-            conn.execute(
-                "UPDATE users SET support_credits=MAX(0, support_credits-1)"
-                " WHERE email=?", (email,)
-            )
         logger.info("Refund processed: %s → %s", txn_id, email)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Support ticket
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.route("/support/submit", methods=["POST"])
-def submit_support():
-    data    = request.get_json(force=True, silent=True) or {}
-    token   = (data.get("token")   or "").strip()
-    message = (data.get("message") or "").strip()
-
-    if not message:
-        return jsonify({"ok": False, "error": "Message cannot be empty."}), 400
-
-    with db.get_conn() as conn:
-        sess = conn.execute(
-            "SELECT email, expires_at FROM sessions WHERE token=?", (token,)
-        ).fetchone()
-        if not sess or time.time() > sess["expires_at"]:
-            return jsonify({"ok": False, "error": "Not logged in."}), 401
-
-        email = sess["email"]
-        user  = conn.execute(
-            "SELECT support_credits FROM users WHERE email=?", (email,)
-        ).fetchone()
-
-        if not user or user["support_credits"] < 1:
-            return jsonify({
-                "ok":    False,
-                "error": "No support credits. Purchase Priority Support first.",
-            }), 403
-
-        conn.execute(
-            "UPDATE users SET support_credits=support_credits-1 WHERE email=?",
-            (email,),
-        )
-        conn.execute(
-            "INSERT INTO support_tickets (email, message) VALUES (?,?)",
-            (email, message),
-        )
-
-    try:
-        mail.send_support_notification(email, message)
-    except Exception as e:
-        logger.error("Failed to notify Kyle of support ticket: %s", e)
-
-    logger.info("Support ticket from %s", email)
-    return jsonify({
-        "ok":      True,
-        "message": "Received. Kyle will respond within 24 hours.",
-    })
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Admin — remove a support credit before issuing a PayPal refund
-# POST /paypal/refund-support  {"admin_key": SECRET, "email": "user@example.com"}
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.route("/paypal/refund-support", methods=["POST"])
-def refund_support():
-    data  = request.get_json(force=True, silent=True) or {}
-    if data.get("admin_key") != SECRET_KEY:
-        return jsonify({"ok": False, "error": "Unauthorized."}), 403
-    email = (data.get("email") or "").strip().lower()
-    with db.get_conn() as conn:
-        conn.execute(
-            "UPDATE users SET support_credits=MAX(0, support_credits-1)"
-            " WHERE email=?", (email,)
-        )
-    logger.info("Admin: removed support credit from %s", email)
-    return jsonify({"ok": True})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

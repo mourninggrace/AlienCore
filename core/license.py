@@ -5,8 +5,8 @@ feature needs to be gated behind a purchase.
 
 Tier definitions
 ────────────────
-  BASE ($20 one-time)  — all core hardware features
-  PRO  (+$5 add-on)    — AI integration (chat, watchdog, advisor)
+  BASE ($19.99 one-time) — every feature in the app except the AI tab
+  PRO  (+$4.99 add-on)   — AI integration only (chat, watchdog, advisor)
 
 To change which features live in each tier, edit the sets below.
 """
@@ -15,41 +15,12 @@ from core import auth
 
 _TRIAL_DAYS = 30   # must match auth._TRIAL_DAYS
 
-# ── Features that require the base license ($19.99) ──────────────────────────
-BASE_FEATURES: set[str] = {
-    # RAM — basic visibility panels
-    "ram_composition",
-    "ram_unified_pressure",
-    # Tabs
-    "tab_insights",
-    "tab_drivers",
-    "tab_custom_profiles",
-}
-
-# ── Features that require the Pro add-on (+$5) ───────────────────────────────
+# ── Features that require the Pro add-on (+$4.99) ────────────────────────────
+# Everything NOT in this set falls back to the base license tier.
 PRO_FEATURES: set[str] = {
-    # AI
     "ai_chat",
     "ai_watchdog",
     "ai_advisor",
-    # CPU advanced
-    "cpu_tvb_optimizer",
-    "cpu_interrupt_steering",
-    "cpu_boost_score",
-    "cpu_topology",
-    # GPU advanced
-    "gpu_dynamic_boost",
-    "gpu_vram_clock_lock",
-    "gpu_throttle_log",
-    "gpu_efficiency_curve",
-    "gpu_driver_features",
-    # RAM advanced
-    "ram_working_set_trimmer",
-    "ram_leak_watchdog",
-    "ram_dimm_protection",
-    "ram_pagefile_advisor",
-    # Services
-    "services_management",
 }
 
 
