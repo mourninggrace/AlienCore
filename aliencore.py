@@ -106,6 +106,8 @@ def main():
         cfg.load()
         from core import auth as _auth
         _auth.load_session()
+        if not _auth.is_logged_in():
+            _auth.try_dev_unlock()
         # Load cached hardware profile so boost_tracker has correct thresholds
         hw = hardware.build_profile(force_refresh=False)
         from core import boost_tracker as _bt
@@ -127,6 +129,10 @@ def main():
     # z-order.  Subprocess isolation makes the issue structurally impossible.
     if args.ai_chat:
         cfg.load()
+        from core import auth as _auth
+        _auth.load_session()
+        if not _auth.is_logged_in():
+            _auth.try_dev_unlock()
         # The chat needs live sensor readings to build its system-context
         # snapshot; start sensors but skip the heavier monitor / tweaks stack.
         sensors.start()
@@ -166,15 +172,16 @@ def main():
 def _run(firstrun: bool = False):
     """Full AlienCore startup — hardware scan, tweaks, sensors, monitor, tray."""
 
-    # 0. Auth — load cached session, show login if needed
+    # 0. Auth — load cached session, YubiKey dev-unlock, or show login
     from core import auth as _auth
     _auth.load_session()
     if not _auth.is_logged_in():
-        _show_login()
-        if not _auth.is_logged_in():
-            # User closed the window without signing in — exit gracefully
-            logging.getLogger("aliencore").info("No session — exiting.")
-            return
+        if not _auth.try_dev_unlock():
+            _show_login()
+            if not _auth.is_logged_in():
+                # User closed the window without signing in — exit gracefully
+                logging.getLogger("aliencore").info("No session — exiting.")
+                return
     # Refresh license from server in the background (non-blocking)
     _auth.refresh_session_async()
 
@@ -188,7 +195,12 @@ def _run(firstrun: bool = False):
     _startup.sync(c["service"].get("start_with_windows", True))
 
     # 3. Hardware fingerprint
-    force_refresh = c["service"].get("hardware_refresh_on_startup", True)
+    # On a first run, the welcome dialog just refreshed the cache — skip the
+    # redundant rescan here.
+    force_refresh = (
+        False if firstrun
+        else c["service"].get("hardware_refresh_on_startup", True)
+    )
     hw = hardware.build_profile(force_refresh=force_refresh)
 
     # 3b. Configure boost tracker with detected CPU max frequency
@@ -247,11 +259,8 @@ def _show_login():
 
 
 def _show_first_run_gui():
-    from gui.settings_gui import open_settings
-    open_settings(
-        on_save_callback=None,
-        is_first_run=True,
-    )
+    from gui.first_run_dialog import show as show_welcome
+    show_welcome()
     cfg.reload()
 
 

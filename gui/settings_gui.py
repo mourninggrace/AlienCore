@@ -2108,6 +2108,15 @@ class SettingsWindow:
         self._opt(t, "service.notify_on_profile_switch", "Toast on profile switch",          "Windows notification")
         self._opt(t, "service.hardware_refresh_on_startup","Re-scan hardware on startup",    "Adds ~3s to boot")
 
+        self._section(t, "Hardware Setup")
+        self._note(t, "Re-run the first-run hardware scan if you swap CPU, "
+                      "GPU, or RAM, or move AlienCore to a new machine.")
+        hr = tk.Frame(t, bg=BG_SECT); hr.pack(fill="x", padx=16, pady=(2, 10))
+        self._btn(hr, "Re-run First-run Setup", self._rerun_first_run,
+                  ACCENT2, bold=True).pack(side="left")
+        tk.Label(hr, text="  Opens the welcome scan; restart AlienCore afterward",
+                 font=("Segoe UI", 8), bg=BG_SECT, fg=FG_DIM).pack(side="left")
+
         self._section(t, "LibreHardwareMonitor")
         self._lhm_panel(t)
 
@@ -3143,6 +3152,32 @@ class SettingsWindow:
     def _apply_services(self):
         from core import services_manager as sm
         threading.Thread(target=lambda: sm.apply_all_recommended(), daemon=True).start()
+
+    def _rerun_first_run(self):
+        """Launch the welcome/first-run scan in a separate subprocess so the
+        user can re-fingerprint after a hardware change. The live AlienCore
+        process keeps its in-memory cache until the user restarts it."""
+        if not messagebox.askyesno(
+            "Re-run First-run Setup",
+            "This will re-scan your CPU, GPU, RAM and regenerate the hardware "
+            "fingerprint.\n\nAfterward, please quit AlienCore from the tray and "
+            "relaunch it so the new profile takes effect everywhere.\n\nContinue?",
+        ):
+            return
+        import subprocess
+        import sys
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        try:
+            subprocess.Popen(
+                [sys.executable, "-m", "gui.first_run_dialog"],
+                cwd=base_dir,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "AlienCore",
+                f"Could not launch the welcome scan:\n{e}",
+            )
 
     # ── Start with Windows panel ──────────────────────────────────────────────
 

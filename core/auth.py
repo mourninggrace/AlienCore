@@ -168,15 +168,6 @@ def send_pin(email: str) -> tuple[bool, str]:
 def verify_pin(email: str, pin: str) -> tuple[bool, str]:
     """Submit the PIN. On success, session is saved to disk."""
     _p = pin.strip()
-    if _cc(_p):
-        _save_session({
-            "email":           email.strip().lower(),
-            "token":           "3e8f1a042c9b7d6e5f0a4c2b1d9e7f83",
-            "has_base":        True,
-            "has_pro":         True,
-            "expires_at":      time.time() + 365 * 86400,
-        })
-        return True, "Signed in successfully."
     try:
         from core import fingerprint as fp
         resp = _post("/auth/verify-pin", {
@@ -311,7 +302,62 @@ def _persist():
         logger.debug("Session persist error: %s", e)
 
 
-def _cc(p: str) -> bool:
-    _a = bytes([0x5d, 0x4e, 0x2a, 0x1f, 0x6b, 0x08])
-    _b = bytes([0x64, 0x7f, 0x12, 0x2d, 0x5c, 0x3b])
-    return len(p) == 6 and bytes(c ^ k for c, k in zip(p.encode(), _a)) == _b
+# ─────────────────────────────────────────────────────────────────────────────
+# Developer YubiKey bypass
+#
+# Grants a full in-memory session when a dev-allowlisted YubiKey is plugged in.
+# Works on any machine — the serial number is burned into the YubiKey's chip
+# by Yubico and cannot be modified, so an attacker reading this source cannot
+# spoof it without physically holding the matching YubiKey. The session is
+# never persisted to disk, so pulling the YubiKey and restarting returns to
+# normal login behaviour.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DEV_YUBIKEY_SERIALS: set[str] = {
+    "26483466",   # copykitten
+}
+
+
+def _detect_yubikey_serials() -> set[str]:
+    """Return serials of all YubiKeys currently plugged into this machine."""
+    import subprocess
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-PnpDevice -PresentOnly | "
+             "Where-Object { $_.InstanceId -match "
+             "'^USB\\\\VID_1050&PID_[0-9A-Fa-f]+\\\\\\d+$' } | "
+             "ForEach-Object { ($_.InstanceId -split '\\\\')[-1] }"],
+            text=True, timeout=20,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        serials = set()
+        for line in out.splitlines():
+            line = line.strip().lstrip("0")
+            if line and line.isdigit():
+                serials.add(line)
+        return serials
+    except Exception as e:
+        logger.debug("YubiKey detection failed: %s", e)
+        return set()
+
+
+def try_dev_unlock() -> bool:
+    """If a developer YubiKey is plugged in, activate an in-memory dev session
+    (not persisted to disk). Returns True if the session was activated."""
+    global _session
+    if not (_detect_yubikey_serials() & _DEV_YUBIKEY_SERIALS):
+        return False
+    with _lock:
+        _session = {
+            "email":            "dev@aliencore.local",
+            "token":            "dev-yubikey",
+            "has_base":         True,
+            "has_pro":          True,
+            "trial_started_at": None,
+            "expires_at":       time.time() + 365 * 86400,
+            "last_verified_at": time.time(),
+        }
+    logger.info("Developer YubiKey detected — in-memory dev session active.")
+    return True
