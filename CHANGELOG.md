@@ -5,6 +5,13 @@ All notable changes to AlienCore are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Post-update "What's New" dialog no longer silently skips itself the first
+  time you launch after applying an update.
+
 ## [1.0.0] — 2026-04-21
 
 Initial public release.
