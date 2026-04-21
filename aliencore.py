@@ -106,8 +106,13 @@ def main():
         cfg.load()
         from core import auth as _auth
         _auth.load_session()
+        # Dev YubiKey detection runs PowerShell (Get-PnpDevice) which has a
+        # highly variable cold-start cost (300 ms → 5 s+). Don't block window
+        # open on it — resolve in the background so Settings pops up fast and
+        # the Account tab refreshes once detection completes.
         if not _auth.is_logged_in():
-            _auth.try_dev_unlock()
+            threading.Thread(target=_auth.try_dev_unlock, daemon=True,
+                             name="SettingsDevUnlock").start()
         # Load cached hardware profile so boost_tracker has correct thresholds
         hw = hardware.build_profile(force_refresh=False)
         from core import boost_tracker as _bt
@@ -119,6 +124,20 @@ def main():
         sensors.stop()
         from core import lhm_manager
         lhm_manager.stop()
+        return
+
+    # ── Login dialog only (subprocess) ────────────────────────────────────────
+    # Launched from Settings → Account → Sign In. Running a second tk.Tk()
+    # root inside the settings process breaks keyboard event routing, so we
+    # subprocess-isolate the login dialog the same way we do AI chat.
+    if args.login:
+        cfg.load()
+        from core import auth as _auth
+        _auth.load_session()
+        if _auth.is_logged_in():
+            return   # already signed in; nothing to do
+        from gui.login_dialog import show as show_login
+        show_login()
         return
 
     # ── AI chat only (subprocess) ────────────────────────────────────────────
@@ -188,6 +207,15 @@ def _run(firstrun: bool = False):
     # 1. First-run GUI (blocks until user saves or closes)
     if firstrun:
         _show_first_run_gui()
+
+    # 1b. "What's new in v{VERSION}" — shown once after every upgrade.
+    # Fresh installs pass is_first_run=True so the welcome flow handles
+    # introductions and this dialog just records VERSION as seen.
+    try:
+        from gui.whats_new_dialog import show_if_updated as _show_whats_new
+        _show_whats_new(is_first_run=firstrun)
+    except Exception as e:
+        logging.getLogger("aliencore").debug("What's New dialog skipped: %s", e)
 
     # 2. Sync startup registry entry with config
     c = cfg.get()
@@ -396,6 +424,7 @@ def _parse_args():
     )
     p.add_argument("--firstrun",  action="store_true", help="Force first-run settings GUI")
     p.add_argument("--settings",  action="store_true", help="Open settings GUI only")
+    p.add_argument("--login",     action="store_true", help="Open login dialog only (subprocess)")
     p.add_argument("--ai-chat",   action="store_true", help="Open AI chat window only (subprocess)")
     p.add_argument("--dryrun",    action="store_true", help="Show tweaks without applying")
     p.add_argument("--install",   action="store_true", help="Install as Windows service (Admin)")
@@ -413,7 +442,7 @@ def _should_auto_elevate(args) -> bool:
     """
     if getattr(args, "no_elevate", False):
         return False
-    if args.settings or args.ai_chat or args.dryrun or args.restore:
+    if args.settings or args.login or args.ai_chat or args.dryrun or args.restore:
         return False
     if args.install or args.uninstall:
         return False   # sc.exe fails loudly if not admin — let the user see that

@@ -155,7 +155,7 @@ SEP      = "#333333"
 
 def open_settings(on_save_callback=None, is_first_run=False):
     # Bootstrap — ensure sys.path includes aliencore root
-    import sys, os, time, ctypes
+    import sys, os, ctypes
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if base not in sys.path:
         sys.path.insert(0, base)
@@ -166,10 +166,8 @@ def open_settings(on_save_callback=None, is_first_run=False):
         ctypes.windll.kernel32.CloseHandle(_mutex)
         return
 
-    # Small delay to ensure any in-flight disk writes have completed
-    time.sleep(0.2)
-
-    # Always load config fresh from disk
+    # Always load config fresh from disk. Writes go through os.replace()
+    # (atomic on Windows), so no read/write race to wait out.
     cfg.load()
     _apply_theme(cfg.get_value("display", "settings_theme", default="Venom"))
 
@@ -2752,11 +2750,49 @@ class SettingsWindow:
         self._btn(btn_row, "Refresh License", _refresh_lic,
                   FG_DIM).pack(side="left")
 
-    def _open_login(self):
-        """Open the login dialog from within settings."""
-        from gui.login_dialog import show as show_login
-        threading.Thread(target=show_login, daemon=True,
-                         name="LoginFromSettings").start()
+    def _open_login(self, on_done=None):
+        """Open the login dialog as a separate subprocess.
+
+        A second tk.Tk() root inside this already-running settings process
+        has undefined event routing — keyboard Enter presses silently
+        stop firing bindings. Same isolation pattern as AI chat and
+        settings itself."""
+        import subprocess, sys as _sys, os as _os
+        base_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+
+        def _work():
+            try:
+                subprocess.run(
+                    [_sys.executable,
+                     _os.path.join(base_dir, "aliencore.py"), "--login"],
+                    cwd=base_dir,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                logger.debug("Login subprocess error: %s", e)
+            # Re-read session from disk (email/PIN path) and fall back to
+            # YubiKey dev unlock (in-memory only, so it needs re-running in
+            # the parent even if the subprocess detected it).
+            from core import auth as _auth
+            _auth.load_session()
+            if not _auth.is_logged_in():
+                try:
+                    _auth.try_dev_unlock()
+                except Exception:
+                    pass
+            if on_done is not None:
+                def _safe_call():
+                    try:
+                        on_done()
+                    except Exception:
+                        pass   # settings window torn down or theme rebuilt
+                try:
+                    self.root.after(0, _safe_call)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_work, daemon=True,
+                         name="LoginSubproc").start()
 
     # ─────────────────────────────────────────────────────────────────────────
     # Account tab
@@ -2842,9 +2878,23 @@ class SettingsWindow:
                           FG_DIM).pack(side="left")
             else:
                 self._btn(act_row, "Sign In",
-                          self._open_login, ACCENT, bold=True).pack(side="left")
+                          lambda: self._open_login(on_done=_refresh_display),
+                          ACCENT, bold=True).pack(side="left")
 
         _refresh_display()
+
+        # Background YubiKey dev-unlock may still be resolving when the tab is
+        # opened early after Settings launch. Poll until it lands so "Not
+        # signed in" flips to the real state without the user re-clicking.
+        def _wait_for_auth(attempts=0):
+            if auth.is_logged_in():
+                _refresh_display()
+                return
+            if attempts >= 20:   # ~10 s total — detection is done by then
+                return
+            status_panel.after(500, lambda: _wait_for_auth(attempts + 1))
+        if not auth.is_logged_in():
+            status_panel.after(500, _wait_for_auth)
 
         # ── Purchase / upgrade ────────────────────────────────────────────────
         self._section(t, "Licenses & Add-ons")

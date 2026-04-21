@@ -59,11 +59,15 @@ class _LoginDialog:
     BTN_HOV = "#383838"
 
     def __init__(self, root: tk.Tk, on_complete):
-        self.root        = root
-        self.on_complete = on_complete
-        self._pin_mode   = False   # True after PIN has been sent
+        self.root           = root
+        self.on_complete    = on_complete
+        self._pin_mode      = False   # True after PIN has been sent
+        self._yubikey_stop  = False
+        self._yubikey_found = False
 
         self._build()
+        self._start_yubikey_poll()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -175,16 +179,16 @@ class _LoginDialog:
             def _ui():
                 self.send_btn.config(state="normal",
                                      text="Resend PIN" if self._pin_mode else "Send PIN")
-                if not self._pin_mode:
-                    self._pin_mode = True
-                    self.email_entry.config(state="disabled")
-                    self._pin_outer.pack(fill="x", pady=(0, 0),
-                                         before=self.status_lbl)
-                    self.verify_btn.pack(side="left", padx=(0, 8))
-                    self.send_btn.pack(side="left")
-                    self.pin_entry.focus_set()
-                    self.send_btn.config(text="Resend PIN")
                 if ok:
+                    if not self._pin_mode:
+                        self._pin_mode = True
+                        self.email_entry.config(state="disabled")
+                        self._pin_outer.pack(fill="x", pady=(0, 0),
+                                             before=self.status_lbl)
+                        self.verify_btn.pack(side="left", padx=(0, 8))
+                        self.send_btn.pack(side="left")
+                        self.pin_entry.focus_set()
+                        self.send_btn.config(text="Resend PIN")
                     self._status("PIN sent — check your email.", self.GREEN)
                 else:
                     self._status(msg, self.DANGER)
@@ -213,10 +217,47 @@ class _LoginDialog:
         threading.Thread(target=_work, daemon=True).start()
 
     def _finish(self):
+        self._yubikey_stop = True
         logged_in = auth.is_logged_in()
         self.root.destroy()
         if self.on_complete:
             self.on_complete(logged_in)
+
+    def _on_close(self):
+        self._yubikey_stop = True
+        self.root.destroy()
+        if self.on_complete:
+            self.on_complete(auth.is_logged_in())
+
+    # ── YubiKey dev-unlock polling ────────────────────────────────────────────
+    # The dialog polls for a dev-allowlisted YubiKey in the background so that
+    # plugging the key in AFTER the dialog is already visible still unlocks
+    # (e.g. when the key isn't enumerated yet during cold boot, or when the
+    # dialog was opened from Settings after signing out).
+
+    def _start_yubikey_poll(self):
+        threading.Thread(target=self._yubikey_worker, daemon=True,
+                         name="LoginYubiKeyPoll").start()
+
+    def _yubikey_worker(self):
+        import time as _t
+        while not self._yubikey_stop:
+            try:
+                if auth.try_dev_unlock():
+                    self._yubikey_found = True
+                    self.root.after(0, self._yubikey_unlocked)
+                    return
+            except Exception:
+                pass
+            # PowerShell PnP scan runs for 1–3 s; poll every ~4 s.
+            for _ in range(40):
+                if self._yubikey_stop:
+                    return
+                _t.sleep(0.1)
+
+    def _yubikey_unlocked(self):
+        self._status("Developer YubiKey detected — signing in...", self.GREEN)
+        self.root.after(600, self._finish)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

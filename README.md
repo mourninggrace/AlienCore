@@ -175,6 +175,16 @@ Checks GitHub Releases automatically — 30 seconds after launch, then every 6 h
 
 ---
 
+## Documentation
+
+- **[User Manual](https://mourninggrace.github.io/AlienCore/manual.html)** — full feature walkthrough, every setting explained, troubleshooting, and power-user tips. *(View online; requires GitHub Pages to be enabled — see `docs/manual.html` for the source file.)*
+- **[Download the manual](https://raw.githubusercontent.com/mourninggrace/AlienCore/master/docs/manual.html)** — save the single-file HTML for offline reading.
+- **[Changelog](./CHANGELOG.md)** — every release, what changed, and when.
+
+The manual is also available from inside the app: **Settings → footer → User Manual**.
+
+---
+
 ## Setup
 
 1. **Install Python 3.10+** from [python.org](https://python.org) — check *Add to PATH* during install
