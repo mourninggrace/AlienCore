@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Post-update "What's New" dialog no longer silently skips itself the first
   time you launch after applying an update.
+- YubiKey dev-unlock landing after Settings prewarmed its tabs no longer
+  leaves CPU / GPU / RAM / AI panels stuck on "Sign in" lock cards — the
+  gated tabs now rebuild automatically once the in-memory session flips.
+  Inline "Sign In" buttons on gated panels also trigger the rebuild on
+  return from the login subprocess.
 
 ## [1.0.0] — 2026-04-21
 

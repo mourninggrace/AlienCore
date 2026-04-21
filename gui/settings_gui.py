@@ -189,6 +189,11 @@ if __name__ == "__main__":
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SettingsWindow:
+    # Tab labels whose builders call _gate(). When a background YubiKey
+    # dev-unlock completes after these tabs were already prewarmed, their
+    # lock panels need to be torn down and rebuilt.
+    _GATED_TAB_LABELS = frozenset({"CPU", "GPU", "RAM", "AI"})
+
     def __init__(self, root, on_save_callback=None, is_first_run=False):
         self.root             = root
         self.on_save_callback = on_save_callback
@@ -198,6 +203,9 @@ class SettingsWindow:
         self.vars             = {}
         self._text_widgets    = {}
         self._hw              = self._load_hw()
+
+        from core import auth as _auth
+        self._auth_logged_in_at_init = _auth.is_logged_in()
 
         self._setup_window()
         self._build_ui()
@@ -364,6 +372,14 @@ class SettingsWindow:
 
         # Prewarm the rest in the background so switches feel instant
         self.root.after(80, lambda: self._prewarm_tabs(1))
+
+        # YubiKey dev-unlock in aliencore.py --settings runs on a background
+        # thread so the window opens fast. PowerShell Get-PnpDevice's cold
+        # start (300 ms → 5 s+) can let the prewarm finish before detection
+        # lands, leaving CPU/GPU/RAM/AI tabs stuck on "Sign in" lock cards.
+        # Watch for the auth flip and rebuild those tabs when it happens.
+        if not self._auth_logged_in_at_init:
+            self.root.after(500, self._watch_auth_flip)
 
         # Footer
         tk.Frame(self.root, bg=SEP, height=1).pack(fill="x")
@@ -2780,16 +2796,20 @@ class SettingsWindow:
                     _auth.try_dev_unlock()
                 except Exception:
                     pass
-            if on_done is not None:
-                def _safe_call():
+            def _after_login():
+                try:
+                    self._rebuild_gated_tabs()
+                except Exception:
+                    pass   # settings window torn down or theme rebuilt
+                if on_done is not None:
                     try:
                         on_done()
                     except Exception:
-                        pass   # settings window torn down or theme rebuilt
-                try:
-                    self.root.after(0, _safe_call)
-                except Exception:
-                    pass
+                        pass
+            try:
+                self.root.after(0, _after_login)
+            except Exception:
+                pass
 
         threading.Thread(target=_work, daemon=True,
                          name="LoginSubproc").start()
@@ -3530,6 +3550,45 @@ class SettingsWindow:
             return
         self._build_tab(idx)
         self.root.after(40, lambda: self._prewarm_tabs(idx + 1))
+
+    def _rebuild_gated_tabs(self):
+        """Tear down and rebuild already-built tabs that call _gate().
+        Used after an auth-state flip (YubiKey detect or inline Sign In)
+        so stale 'Sign in' / 'Buy AlienCore' lock cards refresh."""
+        try:
+            active_idx = self.nb.index(self.nb.select())
+        except Exception:
+            active_idx = None
+        for i, (label, _builder) in enumerate(self._tab_defs):
+            if not self._tab_built[i]:
+                continue
+            if label not in self._GATED_TAB_LABELS:
+                continue
+            for child in self._tab_frames[i].winfo_children():
+                try:
+                    child.destroy()
+                except Exception:
+                    pass
+            self._tab_built[i] = False
+            self._build_tab(i)
+        if active_idx is not None:
+            try:
+                self.nb.select(active_idx)
+            except Exception:
+                pass
+
+    def _watch_auth_flip(self, attempts: int = 0):
+        """Poll for a background YubiKey dev-unlock completion. On flip from
+        logged-out to logged-in, rebuild gated tabs. ~20 s total — matches
+        the PowerShell Get-PnpDevice timeout in core.auth."""
+        from core import auth as _auth
+        if _auth.is_logged_in():
+            self._rebuild_gated_tabs()
+            self._auth_logged_in_at_init = True
+            return
+        if attempts >= 40:
+            return
+        self.root.after(500, lambda: self._watch_auth_flip(attempts + 1))
 
     def _make_tab(self, label: str) -> tk.Frame:
         idx = getattr(self, "_lazy_idx", None)
