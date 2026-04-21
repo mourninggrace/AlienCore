@@ -35,10 +35,16 @@ _ever_succeeded = False
 # Repeated CLR + hardware.Open() launches every 2s cause visible CPU spikes.
 # After each failure, double the wait before allowing the next restart.
 # Reset to 0 on first success so future crashes re-enter the ramp from scratch.
+#
+# The first _BACKOFF_GRACE failures retry immediately — under all-core CPU
+# stress the bridge can miss a poll or two purely from scheduler contention
+# even though it's healthy, and we don't want a single transient miss to lock
+# readings out for a minute.
 _last_kill_time:    float = 0.0
 _restart_delay_secs: float = 0.0
-_BACKOFF_MIN  = 5.0    # minimum wait after a failure (seconds)
-_BACKOFF_MAX  = 60.0   # cap — retry at least once per minute
+_BACKOFF_GRACE = 3     # first N failures skip the delay entirely
+_BACKOFF_MIN   = 5.0   # minimum wait after the grace period (seconds)
+_BACKOFF_MAX   = 30.0  # cap — retry at least once per 30 s
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -139,15 +145,22 @@ def _ensure_running(exe: str):
     try:
         env = os.environ.copy()
         env["LHM_DIR"] = os.path.dirname(exe)
+        # ABOVE_NORMAL_PRIORITY_CLASS: keep the bridge schedulable when user
+        # workloads (stress tests, games, encoders) saturate every core.
+        # Without it, Windows starves the .NET poll process, readline() times
+        # out at 15 s, and the sensor bar flips to "---" exactly when the
+        # reading matters most.  The CPU cost is negligible — bridge runs for
+        # <10 ms every 3 s.
         _proc = subprocess.Popen(
             [exe],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=(subprocess.CREATE_NO_WINDOW
+                           | subprocess.ABOVE_NORMAL_PRIORITY_CLASS),
             env=env,
         )
-        logger.info("lhm_bridge daemon started (pid %d)", _proc.pid)
+        logger.info("lhm_bridge daemon started (pid %d, above-normal priority)", _proc.pid)
         # Give the .NET CLR + LibreHardwareMonitor computer.Open() time to initialize.
         # 2 s is the minimum; hardware with many sensors can take up to ~5 s.
         time.sleep(2.0)
@@ -216,8 +229,13 @@ def _kill_proc():
     _proc = None
     _fail_count += 1
     _last_kill_time = time.time()
-    _restart_delay_secs = _BACKOFF_MIN if _restart_delay_secs < _BACKOFF_MIN \
-        else min(_BACKOFF_MAX, _restart_delay_secs * 2)
+    if _fail_count <= _BACKOFF_GRACE:
+        # Transient miss — let the next call retry immediately.
+        _restart_delay_secs = 0.0
+    elif _restart_delay_secs < _BACKOFF_MIN:
+        _restart_delay_secs = _BACKOFF_MIN
+    else:
+        _restart_delay_secs = min(_BACKOFF_MAX, _restart_delay_secs * 2)
 
 
 def _reset_backoff():

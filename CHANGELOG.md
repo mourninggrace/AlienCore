@@ -7,8 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Default sensor bar opacity lowered from 85% to 75%.
+- Settings → CPU tab now shows both base and boost frequency when they
+  differ.  WMI and psutil both report the CPU's base clock (e.g. 2,200 MHz
+  for the i9-14900HX) as "max", which was misleading on any machine
+  capable of Turbo Boost.  A built-in lookup table covers Intel 12/13/14th
+  gen + Core Ultra and AMD Ryzen 5000/7000/9000 — the i9-14900HX now shows
+  Base 2,200 MHz / Max boost 5,800 MHz.  CPUs not in the table fall back
+  to the highest per-core clock LHM has ever observed on this machine.
+
 ### Fixed
 
+- Settings → Display → Overlay opacity slider now actually changes the
+  sensor bar's transparency. The bar reads `display.overlay_opacity` on
+  launch and re-applies it live whenever the slider moves, instead of
+  staying hardcoded at 94%.
+- Sensor bar stays populated during all-core stress tests (OCCT, Prime95,
+  etc.) instead of flipping CPU / GPU / NVMe cells to "---". The LHM
+  bridge process now launches at above-normal priority so the Windows
+  scheduler keeps giving it CPU time under saturation, the last known
+  temps are served for up to 30 s (dimmed) while the bridge misses polls,
+  and the restart backoff allows three immediate retries before doubling
+  (cap lowered 60 s → 30 s) so a transient miss no longer locks readings
+  out for a full minute.
 - Post-update "What's New" dialog no longer silently skips itself the first
   time you launch after applying an update.
 - YubiKey dev-unlock landing after Settings prewarmed its tabs no longer

@@ -150,7 +150,7 @@ DEFAULT_CONFIG = {
         "auto_hide_fullscreen": True,         # withdraw bar when a fullscreen app is active
         "overlay_enabled": False,
         "overlay_position": "bottom_right",   # bottom_right | bottom_left | top_right | top_left
-        "overlay_opacity": 0.85,
+        "overlay_opacity": 0.75,
         "update_interval_value": 2.0,         # numeric interval value
         "update_interval_unit": "seconds",    # "seconds" or "milliseconds"
         "bar_orientation": "horizontal",      # "horizontal" | "vertical"

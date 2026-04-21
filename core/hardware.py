@@ -11,10 +11,160 @@ import os
 import platform
 import re
 import subprocess
+import threading
 import psutil
 from core.constants import HARDWARE_CACHE
 
 logger = logging.getLogger("aliencore.hardware")
+
+# In-process cache for the observed CPU peak clock so we only touch the
+# hardware_profile.json cache file when a new high water mark is reached.
+# sensors.py calls record_observed_cpu_clock() every poll; almost all calls
+# are no-ops (current ≤ cached peak) and return without I/O.
+_peak_lock = threading.Lock()
+_peak_cached_mhz: int = 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CPU max-boost lookup table
+#
+# Neither WMI's Win32_Processor.MaxClockSpeed nor psutil.cpu_freq().max return
+# the true Turbo Boost ceiling on modern laptops — both consistently report the
+# base clock (2.2 GHz on the i9-14900HX, even though it boosts to 5.8 GHz).
+# There's no user-mode API that hands you the boost max directly without
+# reading MSRs, so we ship a static lookup keyed on a substring of the CPU
+# product name.  Matched by the LONGEST matching key so more specific entries
+# (e.g. "14900KS") beat "14900".
+#
+# Values in MHz.  Intel Turbo Boost Max 3.0 / Thermal Velocity Boost ceiling
+# where applicable; AMD Ryzen max boost per AMD spec.  When the user's CPU
+# isn't in this table we fall back to the observed peak from LHM.
+# ─────────────────────────────────────────────────────────────────────────────
+CPU_BOOST_MHZ = {
+    # Intel Core Ultra (Arrow Lake H / HX / mobile)
+    "core ultra 9 285hx": 5500,
+    "core ultra 9 275hx": 5400,
+    "core ultra 7 265hx": 5300,
+    "core ultra 7 255hx": 5200,
+    "core ultra 9 185h":  5100,
+    "core ultra 7 155h":  4800,
+    "core ultra 5 135h":  4600,
+
+    # Intel 14th gen (Raptor Lake Refresh)
+    "14900ks": 6200,
+    "14900kf": 6000,
+    "14900k":  6000,
+    "14900hx": 5800,
+    "14900":   5800,
+    "14700kf": 5600,
+    "14700k":  5600,
+    "14700hx": 5500,
+    "14700":   5400,
+    "14600kf": 5300,
+    "14600k":  5300,
+    "14500":   5000,
+    "14400":   4700,
+
+    # Intel 13th gen (Raptor Lake)
+    "13980hx": 5600,
+    "13950hx": 5500,
+    "13900ks": 6000,
+    "13900kf": 5800,
+    "13900k":  5800,
+    "13900hx": 5400,
+    "13900":   5600,
+    "13700hx": 5000,
+    "13700k":  5400,
+    "13700":   5200,
+    "13600kf": 5100,
+    "13600k":  5100,
+    "13500":   4800,
+
+    # Intel 12th gen (Alder Lake)
+    "12950hx": 5000,
+    "12900ks": 5500,
+    "12900kf": 5200,
+    "12900k":  5200,
+    "12900hx": 5000,
+    "12900":   5100,
+    "12700kf": 5000,
+    "12700k":  5000,
+    "12700":   4900,
+    "12600k":  4900,
+
+    # AMD Ryzen 9000 (Zen 5)
+    "9950x3d": 5700,
+    "9950x":   5700,
+    "9900x3d": 5500,
+    "9900x":   5600,
+    "9800x3d": 5200,
+    "9700x":   5500,
+    "9600x":   5400,
+    "hx 370":  5100,   # AI 9 HX 370
+    "hx 365":  5000,
+
+    # AMD Ryzen 7000 (Zen 4)
+    "7950x3d": 5700,
+    "7950x":   5700,
+    "7900x3d": 5600,
+    "7900x":   5600,
+    "7900":    5400,
+    "7800x3d": 5000,
+    "7700x":   5400,
+    "7700":    5300,
+    "7600x":   5300,
+    "7600":    5100,
+    "7945hx3d": 5400,
+    "7945hx":  5400,
+    "7845hx":  5200,
+    "7745hx":  5100,
+    "7940hs":  5200,
+    "7840hs":  5100,
+
+    # AMD Ryzen 5000 (Zen 3)
+    "5950x":  4900,
+    "5900x":  4800,
+    "5800x3d":4500,
+    "5800x":  4700,
+    "5700x":  4600,
+    "5600x":  4600,
+}
+
+
+def _upgrade_cpu_max_freq(profile: dict):
+    """Refresh max_freq_mhz on a cached profile so existing installs don't
+    keep reporting the base clock after the lookup table ships.  Preserves
+    the base in ``base_freq_mhz``; writes the cache back when the value
+    actually changes."""
+    cpu = profile.get("cpu") or {}
+    name = cpu.get("name", "")
+    cur  = int(cpu.get("max_freq_mhz", 0) or 0)
+    base = int(cpu.get("base_freq_mhz", 0) or 0) or cur
+    looked_up = _lookup_boost_from_name(name)
+    observed  = int(cpu.get("observed_max_clock_mhz", 0) or 0)
+    best = max(base, looked_up, observed)
+    if best > cur or cpu.get("base_freq_mhz") is None:
+        cpu["base_freq_mhz"] = base
+        cpu["max_freq_mhz"]  = best
+        profile["cpu"]       = cpu
+        _save_cache(profile)
+
+
+def _lookup_boost_from_name(name: str) -> int:
+    """Return the max boost clock (MHz) for a known CPU name, or 0 if unknown.
+
+    Matches by the longest substring present in ``name``, case-insensitive,
+    so more-specific keys (e.g. "14900ks") beat less-specific ones ("14900").
+    """
+    if not name:
+        return 0
+    n = name.lower()
+    best_len = 0
+    best_mhz = 0
+    for key, mhz in CPU_BOOST_MHZ.items():
+        if key in n and len(key) > best_len:
+            best_len = len(key)
+            best_mhz = mhz
+    return best_mhz
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,6 +180,7 @@ def build_profile(force_refresh: bool = False) -> dict:
         try:
             with open(HARDWARE_CACHE, "r", encoding="utf-8") as f:
                 profile = json.load(f)
+            _upgrade_cpu_max_freq(profile)
             logger.info("Hardware profile loaded from cache.")
             return profile
         except Exception as e:
@@ -118,6 +269,19 @@ def _get_cpu_info() -> dict:
         freq = psutil.cpu_freq()
         if freq:
             info["max_freq_mhz"] = int(freq.max) or info["max_freq_mhz"]
+
+        # WMI + psutil both return the base clock on modern laptops, never
+        # the Turbo Boost max.  Prefer (in order): a hardcoded lookup by CPU
+        # name (known boost ceiling per Intel/AMD spec), then the observed
+        # peak from LHM if it ever exceeds that, then whatever WMI gave us.
+        info["base_freq_mhz"] = info["max_freq_mhz"]   # preserve the base
+        looked_up = _lookup_boost_from_name(info["name"])
+        if looked_up > info["max_freq_mhz"]:
+            info["max_freq_mhz"] = looked_up
+        observed = _load_observed_peak()
+        info["observed_max_clock_mhz"] = observed
+        if observed > info["max_freq_mhz"]:
+            info["max_freq_mhz"] = observed
 
         name_lower = info["name"].lower()
         info["is_intel"] = "intel" in name_lower
@@ -399,3 +563,81 @@ def _save_cache(profile: dict):
             json.dump(profile, f, indent=2)
     except Exception as e:
         logger.error("Failed to save hardware cache: %s", e)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Observed CPU peak clock
+#
+# WMI's Win32_Processor.MaxClockSpeed and psutil.cpu_freq().max both report
+# the CPU's base clock on modern Intel/AMD laptops (2200 MHz for the i9-14900HX,
+# vs. a real Turbo Boost max of ~5.8–6.0 GHz).  There is no user-mode API that
+# returns the boost ceiling directly without reading MSRs.  Instead, we track
+# the highest per-core clock ever reported by LibreHardwareMonitor and treat
+# that as max_freq_mhz once the machine has actually boosted.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def record_observed_cpu_clock(mhz: float):
+    """Called by the sensor thread with each cycle's peak per-core clock.
+
+    Writes to hardware_profile.json only when a new high water mark is hit,
+    so steady-state cost is a lock + integer compare.  Values below the
+    existing peak are silently dropped.  ``mhz`` may be a float (LHM) or
+    int; rounded down before comparison."""
+    global _peak_cached_mhz
+    if mhz is None:
+        return
+    try:
+        mhz_int = int(mhz)
+    except (TypeError, ValueError):
+        return
+    if mhz_int <= 0 or mhz_int > 10000:   # reject nonsense readings
+        return
+
+    with _peak_lock:
+        # Lazy-load the persisted peak on first call this session.
+        if _peak_cached_mhz == 0:
+            _peak_cached_mhz = _load_observed_peak()
+        if mhz_int <= _peak_cached_mhz:
+            return
+        _peak_cached_mhz = mhz_int
+        new_peak = mhz_int
+
+    _persist_observed_peak(new_peak)
+    logger.info("CPU clock new peak: %d MHz", new_peak)
+
+
+def observed_cpu_peak_mhz() -> int:
+    """Return the highest CPU core clock ever recorded (0 if none yet)."""
+    with _peak_lock:
+        if _peak_cached_mhz == 0:
+            return _load_observed_peak()
+        return _peak_cached_mhz
+
+
+def _load_observed_peak() -> int:
+    try:
+        with open(HARDWARE_CACHE, "r", encoding="utf-8") as f:
+            profile = json.load(f)
+        return int(profile.get("cpu", {}).get("observed_max_clock_mhz", 0) or 0)
+    except Exception:
+        return 0
+
+
+def _persist_observed_peak(mhz: int):
+    """Load, update, save — done under the in-process lock so two racing
+    sensor cycles can't clobber each other."""
+    try:
+        if not os.path.exists(HARDWARE_CACHE):
+            return   # nothing to update yet — next scan will pick it up
+        with open(HARDWARE_CACHE, "r", encoding="utf-8") as f:
+            profile = json.load(f)
+        cpu = profile.setdefault("cpu", {})
+        if mhz <= int(cpu.get("observed_max_clock_mhz", 0) or 0):
+            return
+        cpu["observed_max_clock_mhz"] = mhz
+        # Keep max_freq_mhz (the UI-facing field) in sync with the true ceiling.
+        if mhz > int(cpu.get("max_freq_mhz", 0) or 0):
+            cpu["max_freq_mhz"] = mhz
+        _save_cache(profile)
+    except Exception as e:
+        logger.debug("Failed to persist CPU peak clock: %s", e)

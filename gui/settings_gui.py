@@ -3444,7 +3444,13 @@ class SettingsWindow:
             item("Model",          cpu.get("name","Unknown"))
             item("Physical cores", cpu.get("physical_cores","?"))
             item("Logical cores",  cpu.get("logical_cores","?"))
-            item("Max frequency",  f"{cpu.get('max_freq_mhz',0):,} MHz")
+            base_mhz = int(cpu.get("base_freq_mhz", 0) or 0)
+            max_mhz  = int(cpu.get("max_freq_mhz",  0) or 0)
+            if base_mhz and max_mhz > base_mhz:
+                item("Base frequency", f"{base_mhz:,} MHz")
+                item("Max boost",      f"{max_mhz:,} MHz")
+            else:
+                item("Max frequency",  f"{max_mhz:,} MHz")
             item("Family",         cpu.get("family","Unknown").upper())
 
         elif hw_type == "gpu":

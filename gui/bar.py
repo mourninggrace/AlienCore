@@ -33,6 +33,16 @@ CHART_WINDOW_SECONDS   = 20    # time span shown inside each cell
 CHART_DRAW_INTERVAL_MS = 33    # ~30 fps
 _SAMPLE_LOG_MAXLEN     = 120   # per-sensor (t, v) ring buffer — enough for fast polling
 
+# Cells whose values come from the lhm_bridge daemon (CPU/GPU/NVMe/DIMM temps
+# + CPU package watts).  When sensors.py is serving cached data because the
+# bridge missed a poll, _update() dims these cells.  Others (GPU via pynvml,
+# CPU load/freq via psutil, AWCC fans, battery, net/disk I/O) are sourced
+# independently and stay at full brightness.
+_LHM_SENSOR_KEYS = frozenset({
+    "cpu_temp", "gpu_temp", "gpu_hotspot", "gpu_mem_temp",
+    "nvme_temp", "nvme_temp2", "cpu_watts",
+})
+
 # ── Polish animation tunables ────────────────────────────────────────────────
 _PULSE_PERIOD_SECONDS  = 1.8   # breathing cycle for accent / current-value dot
 _COLOR_LERP_PER_FRAME  = 0.22  # catch-up rate when threshold color changes (~350ms)
@@ -905,7 +915,8 @@ class SensorBar:
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", 0.94)
+        self._last_alpha = self._read_alpha()
+        self.root.attributes("-alpha", self._last_alpha)
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
 
@@ -1624,6 +1635,7 @@ class SensorBar:
     def _update(self):
         try:
             self._check_config_changed()
+            self._apply_alpha_if_changed()
             c        = cfg.get()
             readings = sensors.get_readings()
             thresh   = c.get("thresholds", {})
@@ -1680,6 +1692,12 @@ class SensorBar:
 
             # Sensor cells — value text + accent color update at poll rate.
             # The inline chart is driven by _draw_frame() at ~30 fps.
+            # When the lhm_bridge has missed one or more polls (typically
+            # during an all-core CPU stress test), sensors.py serves the
+            # last good values for up to 30 s with a non-zero
+            # readings["lhm_stale_age_s"]; dim the LHM-sourced cells so the
+            # user sees "recent but stale" data rather than "---".
+            stale_age = readings.get("lhm_stale_age_s") or 0.0
             for key, cell in self._cells.items():
                 try:
                     result = cell["getter"](readings, thresh)
@@ -1688,6 +1706,10 @@ class SensorBar:
                         cell["hud"].update_label(new_label)
                     else:
                         text, color = result
+                    if (stale_age > 0
+                            and key in _LHM_SENSOR_KEYS
+                            and text != "---"):
+                        color = _darken(color, 0.55)
                     cell["hud"].update_value(text, color)
                     self._cell_colors[key] = color
                 except Exception:
@@ -1802,6 +1824,28 @@ class SensorBar:
             if mtime != getattr(self, "_config_mtime", None):
                 cfg.reload()
                 self._config_mtime = mtime
+        except Exception:
+            pass
+
+    def _read_alpha(self) -> float:
+        """Resolve the bar window alpha from the Display → Overlay opacity
+        slider (display.overlay_opacity), clamped to the Tk-supported range."""
+        try:
+            raw = float(cfg.get_value("display", "overlay_opacity", default=0.94))
+        except (TypeError, ValueError):
+            raw = 0.94
+        return max(0.15, min(1.0, raw))
+
+    def _apply_alpha_if_changed(self):
+        """Re-apply the bar window alpha when the slider value changed.
+        Called once per _update tick after _check_config_changed has reloaded
+        the config, so Display → Overlay opacity takes effect live."""
+        new_alpha = self._read_alpha()
+        if abs(new_alpha - getattr(self, "_last_alpha", -1.0)) < 1e-3:
+            return
+        try:
+            self.root.attributes("-alpha", new_alpha)
+            self._last_alpha = new_alpha
         except Exception:
             pass
 

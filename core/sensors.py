@@ -47,6 +47,17 @@ _AWCC_STRIDE = 5    # query sensors every Nth poll (5 × 3s = 15s)
 _awcc_cycle  = 0
 _awcc_cache: dict = {"awcc_available": False, "awcc_fans": [], "awcc_profile": None}
 
+# ── LHM staleness cache ───────────────────────────────────────────────────────
+# When the lhm_bridge .NET process is starved by an all-core stress workload
+# (OCCT, Prime95, render farm, etc.), its readline can time out, and the
+# sensor bar would otherwise flip to "---" in the exact moment the user most
+# needs the reading.  Keep the last good parsed LHM values for up to
+# _LHM_CACHE_MAX_AGE seconds and serve them with a staleness age so the bar
+# can render them dimmed instead of blanking out.
+_LHM_CACHE_MAX_AGE = 30.0
+_lhm_cached_values: dict = {}
+_lhm_last_success: float = 0.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
@@ -114,14 +125,10 @@ def _poll_loop():
         while _running:
             try:
                 flat = _get_lhm_sensors()
+                _record_cpu_peak_clock(flat)
 
                 data = {}
-                data.update(_parse_cpu_temp(flat))
-                data.update(_parse_gpu_temp(flat))
-                data.update(_parse_nvme_temp(flat))
-                data.update(_parse_ram_temp(flat))
-                data.update(_parse_fan_rpm(flat))
-                data.update(_parse_cpu_watts(flat))
+                data.update(_lhm_readings_with_cache(flat))
                 data.update(_read_gpu_nvidia_smi())
                 # AMD / Intel Arc / any non-NVIDIA discrete GPU:
                 # fill missing GPU fields from the LHM flat list.
@@ -160,6 +167,70 @@ def _get_lhm_sensors() -> list:
     """Call lhm_bridge.exe and return its flat sensor list."""
     from core import lhm_manager
     return lhm_manager.get_sensors()
+
+
+def _record_cpu_peak_clock(flat: list):
+    """Scan the LHM flat list for the highest CPU core clock and hand it to
+    hardware.record_observed_cpu_clock, which persists new high water marks
+    to hardware_profile.json.  Covers CPUs whose boost ceiling isn't in our
+    built-in lookup table."""
+    if not flat:
+        return
+    try:
+        clocks = [s.get("value") for s in flat
+                  if s.get("type") == "Clock"
+                  and isinstance(s.get("name"), str)
+                  and ("P-Core #" in s["name"]
+                       or "E-Core #" in s["name"]
+                       or s["name"].startswith("Core #"))]
+        clocks = [v for v in clocks if v is not None]
+        if not clocks:
+            return
+        peak = max(clocks)
+        from core import hardware
+        hardware.record_observed_cpu_clock(peak)
+    except Exception:
+        pass
+
+
+def _lhm_readings_with_cache(flat: list) -> dict:
+    """Parse the LHM flat list and transparently serve cached values on miss.
+
+    When the bridge returned data, cache the fresh parsed values and emit them.
+    When it returned nothing but the cache is <_LHM_CACHE_MAX_AGE seconds old,
+    emit the cached values and surface the age via ``lhm_stale_age_s`` so the
+    bar can dim the affected cells instead of blanking to "---".
+
+    The AMD SMU CPU-temp fallback inside ``_parse_cpu_temp`` still runs on
+    an empty flat list; any real value it produces is preferred over the
+    corresponding cached entry.
+    """
+    global _lhm_cached_values, _lhm_last_success
+
+    parsed: dict = {}
+    parsed.update(_parse_cpu_temp(flat))
+    parsed.update(_parse_gpu_temp(flat))
+    parsed.update(_parse_nvme_temp(flat))
+    parsed.update(_parse_ram_temp(flat))
+    parsed.update(_parse_fan_rpm(flat))
+    parsed.update(_parse_cpu_watts(flat))
+
+    now = time.time()
+    if flat:
+        _lhm_cached_values = dict(parsed)
+        _lhm_last_success  = now
+        parsed["lhm_stale_age_s"] = 0.0
+        return parsed
+
+    age = (now - _lhm_last_success) if _lhm_last_success > 0 else None
+    if age is not None and age < _LHM_CACHE_MAX_AGE and _lhm_cached_values:
+        for k, cached in _lhm_cached_values.items():
+            if parsed.get(k) in (None, [], {}):
+                parsed[k] = cached
+        parsed["lhm_stale_age_s"] = age
+    else:
+        parsed["lhm_stale_age_s"] = age   # None if never-had-data, else ≥ 30
+    return parsed
 
 
 # ─────────────────────────────────────────────────────────────────────────────

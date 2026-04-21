@@ -11,6 +11,7 @@ hardware_profile.json
 learning.json
 learning.json.bak
 suggestions.json
+update_state.json
 logs/
 
 # Claude Code session data
