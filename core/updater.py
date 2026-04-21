@@ -121,8 +121,14 @@ def set_dismissed(version: str):
 
 
 def clear_state():
-    """Clear all suppression — used after a successful update."""
-    _save_state({"remind_after": None, "dismissed_version": None})
+    """Clear update-suppression flags — used after a successful update.
+
+    Preserves other keys (notably last_seen_version used by whats_new_dialog)
+    so the post-update restart still shows the release notes."""
+    state = _load_state()
+    state["remind_after"]      = None
+    state["dismissed_version"] = None
+    _save_state(state)
 
 
 def download_and_apply(zipball_url: str, on_progress=None):

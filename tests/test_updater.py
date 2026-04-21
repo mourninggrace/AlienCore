@@ -196,6 +196,25 @@ def test_set_dismissed_records_version(tmp_path, monkeypatch):
     assert state["remind_after"] is None
 
 
+def test_clear_state_preserves_last_seen_version(tmp_path, monkeypatch):
+    """clear_state() runs after a successful update. It must NOT wipe the
+    last_seen_version key that whats_new_dialog writes into the same file —
+    doing so would silently suppress the post-upgrade release notes dialog."""
+    import core.updater as u
+    state_path = tmp_path / "update_state.json"
+    monkeypatch.setattr(u, "STATE_PATH", str(state_path))
+    state_path.write_text(json.dumps({
+        "remind_after":      12345.0,
+        "dismissed_version": "1.0.0",
+        "last_seen_version": "1.0.0",
+    }))
+    u.clear_state()
+    state = json.loads(state_path.read_text())
+    assert state["remind_after"] is None
+    assert state["dismissed_version"] is None
+    assert state["last_seen_version"] == "1.0.0"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # download_and_apply — exercise the full extract + bat-write pipeline
 # ─────────────────────────────────────────────────────────────────────────────
