@@ -149,6 +149,33 @@ def _upgrade_cpu_max_freq(profile: dict):
         _save_cache(profile)
 
 
+def _upgrade_awcc_detect(profile: dict):
+    """Re-probe for AWCC on cache load so existing installs pick up broader
+    path detection without requiring a manual re-scan. Only flips False→True;
+    never un-sets a prior True (the user may have uninstalled and we don't
+    want to surprise them on the next cache read)."""
+    plat = profile.get("platform") or {}
+    if plat.get("has_awcc"):
+        return
+    awcc_roots = [
+        r"C:\Program Files\Alienware",
+        r"C:\Program Files (x86)\Alienware",
+    ]
+    for root in awcc_roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            for entry in os.listdir(root):
+                low = entry.lower()
+                if "awcc" in low or "command center" in low:
+                    plat["has_awcc"] = True
+                    profile["platform"] = plat
+                    _save_cache(profile)
+                    return
+        except Exception:
+            continue
+
+
 def _lookup_boost_from_name(name: str) -> int:
     """Return the max boost clock (MHz) for a known CPU name, or 0 if unknown.
 
@@ -181,6 +208,7 @@ def build_profile(force_refresh: bool = False) -> dict:
             with open(HARDWARE_CACHE, "r", encoding="utf-8") as f:
                 profile = json.load(f)
             _upgrade_cpu_max_freq(profile)
+            _upgrade_awcc_detect(profile)
             logger.info("Hardware profile loaded from cache.")
             return profile
         except Exception as e:
@@ -533,11 +561,35 @@ def _get_platform_flags() -> dict:
         # before the SensorThread starts, so calling into awcc._instance() would
         # claim the COM STA WMI connection on this thread, permanently locking the
         # SensorThread out.  Live WMI status is read from sensor readings instead.
-        awcc_paths = [
+        # Modern AWCC (6.x+) installs under "Alienware Command Center\AWCC";
+        # legacy builds lived directly under "\AWCC".  We match either, and
+        # also glob for any AWCC subfolder under the Alienware root to cover
+        # unusual install layouts.
+        awcc_roots = [
+            r"C:\Program Files\Alienware",
+            r"C:\Program Files (x86)\Alienware",
+        ]
+        awcc_exact = [
             r"C:\Program Files\Alienware\AWCC",
             r"C:\Program Files (x86)\Alienware\AWCC",
+            r"C:\Program Files\Alienware\Alienware Command Center",
+            r"C:\Program Files (x86)\Alienware\Alienware Command Center",
         ]
-        awcc_installed = any(os.path.exists(p) for p in awcc_paths)
+        awcc_installed = any(os.path.exists(p) for p in awcc_exact)
+        if not awcc_installed:
+            for root in awcc_roots:
+                if not os.path.isdir(root):
+                    continue
+                try:
+                    for entry in os.listdir(root):
+                        low = entry.lower()
+                        if "awcc" in low or "command center" in low:
+                            awcc_installed = True
+                            break
+                except Exception:
+                    pass
+                if awcc_installed:
+                    break
         flags["has_awcc"]     = awcc_installed
         flags["has_awcc_wmi"] = False   # populated at runtime from sensor readings
 

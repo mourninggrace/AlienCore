@@ -368,6 +368,39 @@ def _handle_refund(txn_id: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Support — relay feedback / bug reports to the support inbox
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/support/submit", methods=["POST"])
+def support_submit():
+    data = request.get_json(force=True, silent=True) or {}
+    email        = (data.get("email") or "").strip().lower()
+    feedback_type = (data.get("type") or "Feedback").strip()[:40]
+    description  = (data.get("description") or "").strip()
+    sysinfo      = (data.get("sysinfo") or "").strip()
+
+    if not email or "@" not in email:
+        return jsonify({"ok": False, "error": "Valid email required."}), 400
+    if not description:
+        return jsonify({"ok": False, "error": "Description is empty."}), 400
+    # Length caps so a runaway log can't blow up the email
+    if len(description) > 20000:
+        description = description[:20000] + "\n...(truncated)"
+    if len(sysinfo) > 60000:
+        sysinfo = sysinfo[:60000] + "\n...(truncated)"
+
+    try:
+        mail.send_feedback_email(email, feedback_type, description, sysinfo)
+    except Exception as e:
+        logger.error("Feedback relay failed for %s: %s", email, e)
+        return jsonify({"ok": False,
+                        "error": f"Could not send feedback: {e}"}), 500
+
+    logger.info("Feedback relayed <- %s (%s)", email, feedback_type)
+    return jsonify({"ok": True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Health check
 # ─────────────────────────────────────────────────────────────────────────────
 

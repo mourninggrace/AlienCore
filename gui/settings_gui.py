@@ -194,10 +194,31 @@ class SettingsWindow:
     # lock panels need to be torn down and rebuilt.
     _GATED_TAB_LABELS = frozenset({"CPU", "GPU", "RAM", "AI"})
 
+    # Process-lifetime driver cache.  The PowerShell Win32_PnPSignedDriver
+    # query takes 3-5 s cold; caching across Settings opens makes the Drivers
+    # tab feel instant on repeat visits.  Scaled by installed RAM.
+    _drv_cache: dict | None = None   # {"t": epoch, "data": [...]}
+
+    @staticmethod
+    def _drv_cache_ttl() -> float:
+        try:
+            from core import mem_tier as _mt
+            return _mt.stale_seconds(120.0)   # 2 min base, up to 8 min on 64+ GB
+        except Exception:
+            return 120.0
+
     def __init__(self, root, on_save_callback=None, is_first_run=False):
         self.root             = root
         self.on_save_callback = on_save_callback
         self.is_first_run     = is_first_run
+
+        # Hide the window while we build it — eliminates the flicker /
+        # half-drawn frame visible during cold-boot imports.
+        try:
+            self.root.withdraw()
+        except Exception:
+            pass
+
         cfg.load()                    # ensure fresh from disk
         self.config           = cfg.get()
         self.vars             = {}
@@ -212,6 +233,16 @@ class SettingsWindow:
         # Snapshot clean state for dirty detection
         self._saved_state = {k: v.get() for k, v in self.vars.items()}
         self._saved_theme = self._cfg_get("display.settings_theme") or "Void"
+
+        # Reveal fully-constructed window and bring it to front.
+        try:
+            self.root.deiconify()
+        except Exception:
+            pass
+        self.root.lift()
+        self.root.focus_force()
+        self.root.attributes("-topmost", True)
+        self.root.after(200, lambda: self.root.attributes("-topmost", False))
 
     # ── Setup ─────────────────────────────────────────────────────────────────
 
@@ -231,20 +262,17 @@ class SettingsWindow:
         set_window_icon(self.root)
         self.root.resizable(True, True)
         self.root.minsize(1280, 600)
-        self.root.geometry("1360x840")
-        self.root.update_idletasks()
+        # Compute centered geometry from the screen size without forcing a
+        # pre-build layout pass (update_idletasks mid-construction is slow on
+        # cold boot).
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         x  = max(0, (sw - 1360) // 2)
         y  = max(0, (sh - 840) // 2)
         self.root.geometry(f"1360x840+{x}+{y}")
-        self.root.lift()
-        self.root.focus_force()
-        self.root.attributes("-topmost", True)
-        self.root.after(200, lambda: self.root.attributes("-topmost", False))
         # Force the window to the foreground via Win32 — needed when launched
         # from a subprocess because Windows focus-stealing prevention blocks
-        # the normal lift()/focus_force() path.
+        # the normal lift()/focus_force() path. Fires after deiconify().
         def _force_foreground():
             try:
                 import ctypes as _ct
@@ -254,7 +282,7 @@ class SettingsWindow:
                 _ct.windll.user32.SetForegroundWindow(hwnd)
             except Exception:
                 pass
-        self.root.after(50, _force_foreground)
+        self.root.after(80, _force_foreground)
         self._configure_styles()
 
     def _configure_styles(self):
@@ -348,7 +376,6 @@ class SettingsWindow:
             ("Storage",         self._tab_storage),
             ("Privacy",         self._tab_privacy),
             ("Profiles",        self._tab_profiles),
-            ("Custom Profiles", self._tab_custom_profiles),
             ("Service",         self._tab_service),
             ("Thresholds",      self._tab_thresholds),
             ("AI",              self._tab_ai),
@@ -491,6 +518,16 @@ class SettingsWindow:
         def _on_theme_change(event=None):
             name = theme_var.get()
             self._cfg_set("display.settings_theme", name)
+            # Persist immediately so the bar (which runs in a separate
+            # subprocess) picks up the theme on its next config-mtime poll
+            # — without this, the new theme would only reach the bar after
+            # the user clicked Save.  Update _saved_theme too so the dirty
+            # detector doesn't flag this as unsaved work.
+            try:
+                cfg.set_value("display", "settings_theme", value=name)
+                self._saved_theme = name
+            except Exception:
+                pass
             _apply_theme(name)
             self._rebuild_for_theme()
 
@@ -1873,46 +1910,185 @@ class SettingsWindow:
         self._opt(t, "profiles.detect_by_load",   "Detect by load signals",            "GPU% and CPU% thresholds")
         self._slider(t, "profiles.gaming_gpu_threshold", "Gaming GPU% threshold", 10, 90, 5, fmt=lambda v: f"{int(v)}%")
         self._slider(t, "profiles.gaming_cpu_threshold", "Gaming CPU% threshold", 10, 90, 5, fmt=lambda v: f"{int(v)}%")
+
         self._section(t, "Custom process lists")
-        self._note(t, "Add your own EXEs below — one per line (e.g. mygame.exe)")
-        self._text_list(t, "profiles.custom_streaming_processes", "Additional streaming processes")
-        self._text_list(t, "profiles.custom_gaming_processes",    "Additional gaming processes")
+        self._note(t,
+            "Tell AlienCore which apps count as Streaming or Gaming. "
+            "One app per line — for example, obs64.exe or eldenring.exe. "
+            "Use \u201cPick running app\u201d to add whatever you have open right now.")
+        self._process_list_with_picker(t, "profiles.custom_streaming_processes",
+                                       "Additional streaming apps")
+        self._process_list_with_picker(t, "profiles.custom_gaming_processes",
+                                       "Additional gaming apps")
 
-    def _tab_custom_profiles(self):
-        t = self._make_tab("Custom Profiles")
-        self._section(t, "User-Defined Profiles")
-        self._note(t, (
-            "Create named profiles that activate when specific apps are running. "
-            "Each custom profile inherits the tweaks of a base behavior "
-            "(Idle, Gaming, or Streaming) and appears in the tray Override menu."
-        ))
+        # ── Custom Profiles (moved here from its own tab) ─────────────────────
+        self._section(t, "Custom Profiles")
+        self._note(t,
+            "Create your own named profiles that switch on automatically "
+            "when certain apps are running. Each profile starts from a base "
+            "behavior (Idle, Gaming, or Streaming) and shows up in the tray "
+            "Override menu with a color you choose.")
 
-        # ── Profile list ──────────────────────────────────────────────────────
+        # Profile list
         list_frame = tk.Frame(t, bg=BG_PANEL, padx=12, pady=10)
         list_frame.pack(fill="x", padx=16, pady=(8, 0))
 
-        # Header row
         hdr = tk.Frame(list_frame, bg=BG_PANEL)
         hdr.pack(fill="x", pady=(0, 4))
         for col, w in [("Name", 20), ("Label", 18), ("Behavior", 12),
-                       ("Trigger processes", 30), ("Color", 10)]:
+                       ("Trigger apps", 30), ("Color", 10)]:
             tk.Label(hdr, text=col, font=("Segoe UI", 8, "bold"),
                      bg=BG_PANEL, fg=FG_DIM, width=w, anchor="w").pack(side="left")
 
-        # Scrollable listbox area
         lb_frame = tk.Frame(list_frame, bg=BG_PANEL)
         lb_frame.pack(fill="x")
         self._cp_listbox_frame = lb_frame
 
-        # Button bar
         btn_bar = tk.Frame(t, bg=BG_SECT, pady=6)
-        btn_bar.pack(fill="x", padx=16, pady=(4, 0))
+        btn_bar.pack(fill="x", padx=16, pady=(4, 12))
         self._btn(btn_bar, "+ New Profile",   self._cp_new,    ACCENT2, bold=True).pack(side="left", padx=(0, 8))
         self._btn(btn_bar, "Edit Selected",   self._cp_edit,   ACCENT).pack(side="left", padx=(0, 8))
         self._btn(btn_bar, "Delete Selected", self._cp_delete, DANGER).pack(side="left")
 
-        self._cp_selected = None   # currently selected profile name
+        self._cp_selected = None
         self._cp_refresh()
+
+    # Helper: text list + "Pick running app" button for trigger-process lists
+    def _process_list_with_picker(self, parent, key: str, label: str):
+        self._text_list(parent, key, label)
+        row = tk.Frame(parent, bg=BG_SECT)
+        row.pack(fill="x", padx=20, pady=(0, 6))
+        self._btn(row, "Pick running app\u2026",
+                  lambda k=key: self._append_running_process_to_textlist(k),
+                  ACCENT).pack(side="left")
+        tk.Label(row,
+                 text="  Opens a list of apps running right now",
+                 font=("Segoe UI", 8), bg=BG_SECT,
+                 fg=FG_DIM).pack(side="left")
+
+    def _append_running_process_to_textlist(self, key: str):
+        picked = self._pick_running_processes(multi=True)
+        if not picked:
+            return
+        txt = getattr(self, "_text_widgets", {}).get(key)
+        if not txt:
+            return
+        current = txt.get("1.0", "end").strip().splitlines()
+        existing = {c.strip().lower() for c in current if c.strip()}
+        added = [p for p in picked if p.lower() not in existing]
+        if not added:
+            return
+        combined = [c for c in current if c.strip()] + added
+        txt.delete("1.0", "end")
+        txt.insert("1.0", "\n".join(combined))
+
+    def _pick_running_processes(self, multi: bool = True) -> list:
+        """Modal picker listing EXE names of currently running processes.
+        Returns the selected EXE name(s), or [] if cancelled."""
+        try:
+            import psutil
+        except Exception:
+            return []
+        seen = {}
+        for p in psutil.process_iter(["name"]):
+            try:
+                nm = (p.info.get("name") or "").strip()
+                if not nm or not nm.lower().endswith(".exe"):
+                    continue
+                low = nm.lower()
+                seen[low] = nm
+            except Exception:
+                continue
+        names = sorted(seen.values(), key=str.lower)
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Pick running app" + ("s" if multi else ""))
+        dlg.configure(bg=BG)
+        dlg.geometry("420x480")
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.lift()
+        dlg.focus_force()
+        self.root.update_idletasks()
+        px = self.root.winfo_x() + (self.root.winfo_width()  - 420) // 2
+        py = self.root.winfo_y() + (self.root.winfo_height() - 480) // 2
+        dlg.geometry(f"420x480+{px}+{py}")
+
+        tk.Label(dlg, text="Running apps",
+                 font=("Segoe UI", 13, "bold"),
+                 bg=BG, fg=ACCENT).pack(anchor="w", padx=18, pady=(14, 0))
+        tk.Label(dlg,
+                 text=("Tick the apps to add. Type to filter."
+                       if multi else "Click an app to pick it."),
+                 font=("Segoe UI", 9), bg=BG, fg=FG_DIM).pack(anchor="w", padx=18, pady=(2, 8))
+
+        filt_var = tk.StringVar()
+        tk.Entry(dlg, textvariable=filt_var, font=("Consolas", 10),
+                 bg=BG_PANEL, fg=FG, insertbackground=FG,
+                 relief="flat").pack(fill="x", padx=18, ipady=4)
+
+        list_wrap = tk.Frame(dlg, bg=BG_PANEL)
+        list_wrap.pack(fill="both", expand=True, padx=18, pady=8)
+        canvas = tk.Canvas(list_wrap, bg=BG_PANEL, highlightthickness=0)
+        sb = tk.Scrollbar(list_wrap, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=BG_PANEL)
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+
+        result = {"picked": []}
+        check_vars = {}
+        rows = {}
+
+        def pick_single(nm):
+            result["picked"] = [nm]
+            dlg.destroy()
+
+        def render():
+            for w in inner.winfo_children():
+                w.destroy()
+            rows.clear()
+            q = filt_var.get().strip().lower()
+            for nm in names:
+                if q and q not in nm.lower():
+                    continue
+                if multi:
+                    v = check_vars.get(nm) or tk.BooleanVar(value=False)
+                    check_vars[nm] = v
+                    cb = tk.Checkbutton(inner, text=nm, variable=v,
+                                        font=("Consolas", 10),
+                                        bg=BG_PANEL, fg=FG,
+                                        selectcolor=BG_PANEL,
+                                        activebackground=BG_PANEL,
+                                        activeforeground=ACCENT,
+                                        anchor="w", padx=4, pady=2)
+                    cb.pack(fill="x", anchor="w")
+                    rows[nm] = cb
+                else:
+                    btn = tk.Label(inner, text=nm, font=("Consolas", 10),
+                                   bg=BG_PANEL, fg=FG, anchor="w",
+                                   padx=6, pady=3, cursor="hand2")
+                    btn.pack(fill="x", anchor="w")
+                    btn.bind("<Button-1>", lambda e, n=nm: pick_single(n))
+                    rows[nm] = btn
+
+        filt_var.trace_add("write", lambda *a: render())
+        render()
+
+        foot = tk.Frame(dlg, bg=BG)
+        foot.pack(fill="x", padx=18, pady=(6, 14))
+        if multi:
+            def on_add():
+                result["picked"] = [nm for nm, v in check_vars.items() if v.get()]
+                dlg.destroy()
+            self._btn(foot, "Add Selected", on_add, ACCENT2, bold=True).pack(side="right")
+        self._btn(foot, "Cancel", dlg.destroy, FG_DIM).pack(side="right", padx=(0, 8))
+
+        self.root.wait_window(dlg)
+        return result["picked"]
 
     def _cp_refresh(self):
         """Rebuild the custom profiles list display."""
@@ -2002,104 +2178,193 @@ class SettingsWindow:
         self._cp_refresh()
 
     def _cp_dialog(self, existing: dict | None):
-        """Open a Toplevel dialog to create or edit a custom profile."""
+        """Friendly create/edit dialog for a custom profile."""
+        from tkinter import colorchooser
+
         dlg = tk.Toplevel(self.root)
         dlg.title("Edit Custom Profile" if existing else "New Custom Profile")
         dlg.configure(bg=BG)
         dlg.resizable(False, False)
-        dlg.geometry("520x480")
+        dlg.geometry("560x600")
         dlg.transient(self.root)
         dlg.grab_set()
         dlg.lift()
         dlg.focus_force()
 
-        # Center over parent
         self.root.update_idletasks()
-        px = self.root.winfo_x() + (self.root.winfo_width()  - 520) // 2
-        py = self.root.winfo_y() + (self.root.winfo_height() - 480) // 2
-        dlg.geometry(f"520x480+{px}+{py}")
+        px = self.root.winfo_x() + (self.root.winfo_width()  - 560) // 2
+        py = self.root.winfo_y() + (self.root.winfo_height() - 600) // 2
+        dlg.geometry(f"560x600+{px}+{py}")
 
-        def field(lbl):
-            tk.Label(dlg, text=lbl, font=("Segoe UI", 9),
-                     bg=BG, fg=FG).pack(anchor="w", padx=24, pady=(12, 2))
-
-        def entry(initial=""):
-            e = tk.Entry(dlg, font=("Consolas", 10), bg=BG_PANEL,
-                         fg=FG, insertbackground=FG, relief="flat",
-                         width=44)
-            e.insert(0, initial)
-            e.pack(padx=24, fill="x")
-            return e
-
-        tk.Label(dlg, text="Custom Profile",
+        tk.Label(dlg, text=("Edit Custom Profile" if existing else "New Custom Profile"),
                  font=("Segoe UI", 14, "bold"),
                  bg=BG, fg=ACCENT).pack(anchor="w", padx=24, pady=(20, 0))
         tk.Frame(dlg, bg=SEP, height=1).pack(fill="x", padx=24, pady=(8, 0))
 
-        field("Name  (slug — lowercase, no spaces, e.g.  video_editing)")
-        e_name = entry(existing.get("name", "") if existing else "")
+        body = tk.Frame(dlg, bg=BG)
+        body.pack(fill="both", expand=True, padx=24, pady=6)
 
-        field("Display label  (shown in tray menu)")
-        e_label = entry(existing.get("label", "") if existing else "")
+        def field_label(txt, hint=""):
+            tk.Label(body, text=txt, font=("Segoe UI", 9, "bold"),
+                     bg=BG, fg=FG).pack(anchor="w", pady=(10, 0))
+            if hint:
+                tk.Label(body, text=hint, font=("Segoe UI", 8),
+                         bg=BG, fg=FG_DIM).pack(anchor="w", pady=(0, 2))
 
-        field("Trigger processes  (comma-separated EXE names)")
-        e_procs = entry(", ".join(existing.get("processes", [])) if existing else "")
+        def make_entry(initial=""):
+            e = tk.Entry(body, font=("Consolas", 10), bg=BG_PANEL,
+                         fg=FG, insertbackground=FG, relief="flat")
+            e.insert(0, initial)
+            e.pack(fill="x", ipady=4)
+            return e
 
-        field("Base behavior")
+        # Display label FIRST — this is what the user sees in the tray
+        field_label("Profile name",
+                    "What you\u2019ll see in the tray menu, e.g. \u201cVideo Editing\u201d.")
+        e_label = make_entry(existing.get("label", "") if existing else "")
+
+        # Trigger processes with picker
+        field_label("Trigger apps",
+                    "Profile activates when any of these apps are running. "
+                    "Comma-separated (e.g. premiere.exe, after_fx.exe).")
+        procs_row = tk.Frame(body, bg=BG)
+        procs_row.pack(fill="x")
+        e_procs = tk.Entry(procs_row, font=("Consolas", 10), bg=BG_PANEL,
+                           fg=FG, insertbackground=FG, relief="flat")
+        e_procs.insert(0, ", ".join(existing.get("processes", [])) if existing else "")
+        e_procs.pack(side="left", fill="x", expand=True, ipady=4)
+
+        def pick_procs():
+            picked = self._pick_running_processes(multi=True)
+            if not picked:
+                return
+            current = [p.strip() for p in e_procs.get().split(",") if p.strip()]
+            existing_low = {c.lower() for c in current}
+            added = [p for p in picked if p.lower() not in existing_low]
+            if not added:
+                return
+            e_procs.delete(0, "end")
+            e_procs.insert(0, ", ".join(current + added))
+
+        self._btn(procs_row, "Pick\u2026", pick_procs,
+                  ACCENT).pack(side="left", padx=(8, 0))
+
+        # Base behavior — radio buttons
+        field_label("Base behavior",
+                    "AlienCore starts from this preset and applies your tweaks on top.")
         beh_var = tk.StringVar(value=existing.get("behavior", "idle") if existing else "idle")
-        beh_row = tk.Frame(dlg, bg=BG); beh_row.pack(anchor="w", padx=24)
-        for val, lbl in [("idle", "Idle"), ("gaming", "Gaming"), ("streaming", "Streaming")]:
+        beh_row = tk.Frame(body, bg=BG); beh_row.pack(anchor="w", pady=(2, 0))
+        for val, lbl in [("idle", "Idle / Everyday"),
+                         ("gaming", "Gaming"),
+                         ("streaming", "Streaming / Recording")]:
             tk.Radiobutton(beh_row, text=lbl, variable=beh_var, value=val,
                            bg=BG, fg=FG, selectcolor=BG,
                            activebackground=BG, activeforeground=ACCENT,
-                           font=("Segoe UI", 10)).pack(side="left", padx=10)
+                           font=("Segoe UI", 9)).pack(side="left", padx=(0, 12))
 
-        field("Tray color  (hex, e.g.  #aa00ff)")
-        e_color = entry(existing.get("color", "#7700cc") if existing else "#7700cc")
+        # Color — swatch + picker
+        field_label("Tray color",
+                    "Shown next to the profile in the tray Override menu.")
+        color_row = tk.Frame(body, bg=BG)
+        color_row.pack(fill="x", pady=(2, 0))
+        color_val = {"hex": existing.get("color", "#7700cc") if existing else "#7700cc"}
+        swatch = tk.Frame(color_row, bg=color_val["hex"], width=26, height=26,
+                          highlightthickness=1, highlightbackground=SEP)
+        swatch.pack(side="left")
+        swatch.pack_propagate(False)
+        color_label = tk.Label(color_row, text=f"  {color_val['hex']}",
+                                font=("Consolas", 10), bg=BG, fg=FG)
+        color_label.pack(side="left")
 
-        field("Priority  (lower = checked first among custom profiles)")
-        e_prio = entry(str(existing.get("priority", 50)) if existing else "50")
+        def choose_color():
+            rgb, hx = colorchooser.askcolor(initialcolor=color_val["hex"],
+                                            parent=dlg, title="Pick tray color")
+            if hx:
+                color_val["hex"] = hx
+                swatch.configure(bg=hx)
+                color_label.configure(text=f"  {hx}")
 
-        err_lbl = tk.Label(dlg, text="", font=("Segoe UI", 8),
+        self._btn(color_row, "Change\u2026", choose_color, ACCENT).pack(side="right")
+
+        # Advanced — collapsible (internal name + priority)
+        adv_open = {"v": False}
+        adv_toggle = tk.Label(body, text="\u25b8  Advanced",
+                              font=("Segoe UI", 9, "underline"),
+                              bg=BG, fg=ACCENT, cursor="hand2")
+        adv_toggle.pack(anchor="w", pady=(14, 0))
+        adv_frame = tk.Frame(body, bg=BG)
+
+        tk.Label(adv_frame,
+                 text="Internal name (no spaces — used for saving)",
+                 font=("Segoe UI", 8), bg=BG, fg=FG_DIM).pack(anchor="w", pady=(4, 0))
+        e_name = tk.Entry(adv_frame, font=("Consolas", 10), bg=BG_PANEL,
+                          fg=FG, insertbackground=FG, relief="flat")
+        e_name.insert(0, existing.get("name", "") if existing else "")
+        e_name.pack(fill="x", ipady=3)
+
+        tk.Label(adv_frame,
+                 text="Priority — lower numbers win when two custom profiles both match",
+                 font=("Segoe UI", 8), bg=BG, fg=FG_DIM).pack(anchor="w", pady=(8, 0))
+        e_prio = tk.Entry(adv_frame, font=("Consolas", 10), bg=BG_PANEL,
+                          fg=FG, insertbackground=FG, relief="flat")
+        e_prio.insert(0, str(existing.get("priority", 50)) if existing else "50")
+        e_prio.pack(fill="x", ipady=3)
+
+        def toggle_advanced(_e=None):
+            adv_open["v"] = not adv_open["v"]
+            if adv_open["v"]:
+                adv_frame.pack(fill="x", pady=(2, 0))
+                adv_toggle.configure(text="\u25be  Advanced")
+            else:
+                adv_frame.pack_forget()
+                adv_toggle.configure(text="\u25b8  Advanced")
+        adv_toggle.bind("<Button-1>", toggle_advanced)
+
+        err_lbl = tk.Label(body, text="", font=("Segoe UI", 8),
                            bg=BG, fg=DANGER)
-        err_lbl.pack(anchor="w", padx=24, pady=(6, 0))
+        err_lbl.pack(anchor="w", pady=(6, 0))
+
+        def slugify(s: str) -> str:
+            s = (s or "").strip().lower()
+            return "".join(c if (c.isalnum() or c == "_") else "_" for c in s).strip("_")
 
         def on_save():
-            name  = e_name.get().strip().lower().replace(" ", "_")
-            label = e_label.get().strip() or name
+            label = e_label.get().strip()
+            if not label:
+                err_lbl.config(text="Please enter a profile name.")
+                return
+            name = e_name.get().strip().lower().replace(" ", "_") or slugify(label)
+            if not name:
+                err_lbl.config(text="Please enter a profile name.")
+                return
             procs = [p.strip() for p in e_procs.get().split(",") if p.strip()]
-            color = e_color.get().strip() or "#7700cc"
+            if not procs:
+                err_lbl.config(text="Add at least one trigger app.")
+                return
             try:
                 prio = int(e_prio.get().strip())
             except ValueError:
                 prio = 50
 
-            if not name:
-                err_lbl.config(text="Name is required.")
-                return
-            if not procs:
-                err_lbl.config(text="At least one trigger process is required.")
-                return
-
             profiles_list = self.config.setdefault("profiles", {}).setdefault("user_profiles", [])
 
             if existing:
-                # Update in-place
                 for i, p in enumerate(profiles_list):
                     if p.get("name") == existing["name"]:
                         profiles_list[i] = {
                             "name": name, "label": label, "processes": procs,
-                            "behavior": beh_var.get(), "color": color, "priority": prio,
+                            "behavior": beh_var.get(),
+                            "color": color_val["hex"], "priority": prio,
                         }
                         break
             else:
-                # Check for duplicate name
                 if any(p.get("name") == name for p in profiles_list):
-                    err_lbl.config(text=f"A profile named '{name}' already exists.")
+                    err_lbl.config(text=f"A profile named \u201c{name}\u201d already exists.")
                     return
                 profiles_list.append({
                     "name": name, "label": label, "processes": procs,
-                    "behavior": beh_var.get(), "color": color, "priority": prio,
+                    "behavior": beh_var.get(),
+                    "color": color_val["hex"], "priority": prio,
                 })
 
             dlg.destroy()
@@ -2135,19 +2400,60 @@ class SettingsWindow:
         self._lhm_panel(t)
 
         self._section(t, "Windows Services Manager")
-        self._note(t, "Green = already optimal. Hover a service name for details. "
-                      "Change startup type via dropdown. Locked rows are system-critical.")
+        self._note(t, "Green = already set to the recommended startup type. "
+                      "Hover a service name for details. Change the dropdown to "
+                      "queue a change, then press Apply Pending Changes. "
+                      "Start / Stop controls the service right now. "
+                      "Locked rows are system-critical.")
 
-        # Apply all button
+        # Pending-changes state
+        self._svc_pending = {}   # service name -> new startup type
+        self._svc_rows_by_name = {}
+        self._svc_live = {}      # cached live snapshot per service
+
+        # Admin banner
+        try:
+            from core.elevation import is_admin as _is_admin
+            admin = bool(_is_admin())
+        except Exception:
+            admin = False
+        if not admin:
+            warn = tk.Frame(t, bg="#2a1a1a", padx=12, pady=6)
+            warn.pack(fill="x", padx=16, pady=(4, 0))
+            tk.Label(warn,
+                     text="\u26a0  Not running as Administrator \u2014 service "
+                          "changes will silently fail. Relaunch AlienCore as admin "
+                          "(or use the Administrator Rights section above) to make "
+                          "changes here.",
+                     font=("Segoe UI", 8), bg="#2a1a1a", fg=WARN,
+                     wraplength=820, justify="left").pack(anchor="w")
+
+        # Action buttons
         br = tk.Frame(t, bg=BG_SECT); br.pack(fill="x", padx=16, pady=(4,8))
-        self._btn(br, "Apply All Safe Recommendations", self._apply_services, ACCENT2, bold=True).pack(side="left")
-        tk.Label(br, text="  Safe services only — skips Caution and Leave Alone",
-                 font=("Segoe UI",8), bg=BG_SECT, fg=FG_DIM).pack(side="left")
+        self._svc_apply_btn = self._btn(br, "Apply Pending Changes (0)",
+                                        self._apply_pending_services,
+                                        ACCENT2, bold=True)
+        self._svc_apply_btn.pack(side="left")
+        self._svc_apply_btn.config(state="disabled")
+        self._btn(br, "Apply All Safe Recommendations",
+                  self._apply_services, ACCENT).pack(side="left", padx=(8, 0))
+        self._btn(br, "Refresh",
+                  self._refresh_services, FG).pack(side="left", padx=(8, 0))
+
+        self._svc_status_var = tk.StringVar(value="")
+        # Bumped to 9pt + bold and stored as an attribute so Start/Stop
+        # callbacks can color-code it (green on success, red on failure).
+        self._svc_status_lbl = tk.Label(br, textvariable=self._svc_status_var,
+                                        font=("Segoe UI", 9, "bold"),
+                                        bg=BG_SECT, fg=FG_DIM)
+        self._svc_status_lbl.pack(side="left", padx=(12, 0))
+        self._svc_status_clear_id = None
 
         # Headers
         hdr = tk.Frame(t, bg=BG_PANEL, padx=16, pady=4)
         hdr.pack(fill="x", padx=16, pady=(0,2))
-        for col, w in [("Service",26),("State",10),("Current",16),("Recommended",16),("Safety",10)]:
+        for col, w in [("Service", 26), ("State", 10), ("Startup", 16),
+                       ("Recommended", 14), ("Safety", 10), ("Actions", 16)]:
             tk.Label(hdr, text=col, font=("Segoe UI",8,"bold"),
                      bg=BG_PANEL, fg=FG_DIM, width=w, anchor="w").pack(side="left")
 
@@ -2219,12 +2525,61 @@ class SettingsWindow:
         # ── Model ─────────────────────────────────────────────────────────────
         self._section(t, "Model")
         self._note(t,
-            "Required for OpenAI-compatible providers. Optional for Anthropic.\n"
-            "Anthropic defaults → chat: claude-sonnet-4-6 · watchdog: claude-haiku-4-5-20251001\n"
-            "OpenAI defaults    → chat: gpt-4o · watchdog: gpt-4o-mini"
+            "Pick from the preset list or type any model name your provider "
+            "supports. Chat is what you talk to; Watchdog is the cheaper model "
+            "used for automatic analysis."
         )
-        self._entry(t, "ai.model",         "Chat model")
-        self._entry(t, "ai.watchdog_model","Watchdog model  (blank = same as chat)")
+
+        _ANTHROPIC_MODELS = [
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ]
+        _OPENAI_MODELS = [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo",
+            "gpt-3.5-turbo",
+            "llama-3.3-70b-versatile",
+            "mixtral-8x7b-32768",
+            "mistral-large-latest",
+            "grok-2-latest",
+        ]
+
+        def _preset_list():
+            return (_ANTHROPIC_MODELS if pv.get() == "anthropic"
+                    else _OPENAI_MODELS)
+
+        def _combo_row(key: str, label: str, default_hint: str):
+            var = self._var(key, str)
+            row = tk.Frame(t, bg=BG_SECT)
+            row.pack(fill="x", padx=16, pady=(2, 4))
+            tk.Label(row, text=label, font=("Segoe UI", 9), bg=BG_SECT,
+                     fg=FG_DIM, width=24, anchor="w").pack(side="left")
+            cb = ttk.Combobox(row, textvariable=var,
+                              values=_preset_list(),
+                              font=("Consolas", 9), width=42)
+            cb.pack(side="left", ipady=2)
+            tk.Label(row, text=f"  {default_hint}",
+                     font=("Segoe UI", 8), bg=BG_SECT,
+                     fg=FG_DIM).pack(side="left")
+            return cb
+
+        chat_cb = _combo_row(
+            "ai.model", "Chat model",
+            "Default: claude-sonnet-4-6 (Anthropic) / gpt-4o (OpenAI)")
+        watch_cb = _combo_row(
+            "ai.watchdog_model", "Watchdog model",
+            "Blank = same as chat. Default: claude-haiku / gpt-4o-mini")
+
+        def _refresh_model_presets(*_a):
+            lst = _preset_list()
+            for cb in (chat_cb, watch_cb):
+                try:
+                    cb.configure(values=lst)
+                except Exception:
+                    pass
+        pv.trace_add("write", _refresh_model_presets)
 
         # ── Test ──────────────────────────────────────────────────────────────
         self._test_status = tk.StringVar(value="")
@@ -2440,18 +2795,53 @@ class SettingsWindow:
 
     # ── Drivers tab ───────────────────────────────────────────────────────────
 
+    # Vendor driver-download landing pages.  Keys are lowercase substrings
+    # matched against the provider string.  URLs deliberately point at the
+    # landing page rather than a specific driver SKU — vendors routinely
+    # reorganize their download CDNs and deep links rot fast.
     _VENDOR_LINKS = {
-        "nvidia":   ("NVIDIA",    "https://www.nvidia.com/drivers"),
+        "nvidia":   ("NVIDIA",    "https://www.nvidia.com/Download/index.aspx"),
         "intel":    ("Intel",     "https://www.intel.com/content/www/us/en/download-center/home.html"),
-        "amd":      ("AMD",       "https://www.amd.com/support"),
-        "advanced micro devices": ("AMD", "https://www.amd.com/support"),
-        "realtek":  ("Realtek",   "https://www.realtek.com/en/downloads"),
-        "killer":   ("Killer",    "https://www.killernetworking.com/driver-downloads/"),
-        "rivet":    ("Killer",    "https://www.killernetworking.com/driver-downloads/"),
-        "qualcomm": ("Qualcomm",  "https://www.qualcomm.com/support"),
+        "amd":      ("AMD",       "https://www.amd.com/en/support/download/drivers.html"),
+        "advanced micro devices": ("AMD", "https://www.amd.com/en/support/download/drivers.html"),
+        # Realtek's own portal currently 404s on every public path
+        # (verified 2026-04-24 — homepage renders empty templates, downloads
+        # subpath returns "this page does not exist").  Route to the
+        # Microsoft Update Catalog filtered for Realtek instead — this
+        # actually surfaces working driver packages for audio/LAN.
+        "realtek":  ("Realtek",   "https://www.catalog.update.microsoft.com/Search.aspx?q=realtek"),
+        # Killer Networking was acquired by Intel; drivers ship through the
+        # Intel download center now.  The legacy killernetworking.com URL
+        # redirects (unreliably).
+        "killer":   ("Killer / Intel", "https://www.intel.com/content/www/us/en/download-center/home.html"),
+        "rivet":    ("Killer / Intel", "https://www.intel.com/content/www/us/en/download-center/home.html"),
+        "qualcomm": ("Qualcomm",  "https://www.qualcomm.com/support/software"),
         "broadcom": ("Broadcom",  "https://www.broadcom.com/support/download-search"),
         "mediatek": ("MediaTek",  "https://www.mediatek.com/products"),
+        "dell":     ("Dell",      "https://www.dell.com/support/home/en-us?app=drivers"),
+        "alienware":("Dell",      "https://www.dell.com/support/home/en-us?app=drivers"),
+        "asus":     ("ASUS",      "https://www.asus.com/support/download-center/"),
+        "msi":      ("MSI",       "https://www.msi.com/support/download"),
+        "gigabyte": ("Gigabyte",  "https://www.gigabyte.com/Support"),
+        "lenovo":   ("Lenovo",    "https://pcsupport.lenovo.com/us/en/"),
+        "hp":       ("HP",        "https://support.hp.com/us-en/drivers"),
+        "acer":     ("Acer",      "https://www.acer.com/us-en/support"),
+        "razer":    ("Razer",     "https://www.razer.com/synapse-3"),
+        "logitech": ("Logitech",  "https://support.logi.com/hc/en-us/categories/360001430553-Downloads"),
+        "corsair":  ("Corsair",   "https://www.corsair.com/us/en/s/downloads"),
+        "steelseries":("SteelSeries","https://steelseries.com/gg"),
+        "samsung":  ("Samsung",   "https://www.samsung.com/semiconductor/minisite/ssd/download/tools/"),
+        "western digital":("WD",  "https://support.wdc.com/downloads.aspx"),
+        "seagate":  ("Seagate",   "https://www.seagate.com/support/downloads/"),
+        "crucial":  ("Crucial",   "https://www.crucial.com/support/downloads"),
+        "kingston": ("Kingston",  "https://www.kingston.com/en/support"),
+        "synaptics":("Synaptics", "https://www.synaptics.com/support/drivers"),
+        "elan":     ("ELAN",      "https://www.emicroelectronics.com/page/90"),
+        "microsoft":("Windows Update","https://www.catalog.update.microsoft.com/home.aspx"),
     }
+
+    # Fallback when the provider string doesn't match any known vendor.
+    _VENDOR_GENERIC_FALLBACK = "https://www.catalog.update.microsoft.com/home.aspx"
 
     def _tab_drivers(self):
         t = self._make_tab("Drivers")
@@ -2486,19 +2876,41 @@ class SettingsWindow:
         self._drv_rows_frame   = None
         self._drv_nvidia_latest = None   # cached latest version string per refresh
         self._drv_status_labels = {}     # installed_ver → tk.Label
+        # Generation counter — every refresh bumps this, and in-flight threads
+        # check it before touching the UI so a stale result can't leave an
+        # orphaned "Loading drivers..." label behind.
+        self._drv_gen = 0
+
+        # Process-lifetime driver cache (scaled by installed RAM).  The
+        # PowerShell WMI query takes 3-5 s on a cold run; reopening Settings
+        # within the TTL skips it entirely and renders instantly.
+        import time as _time
+        cache = SettingsWindow._drv_cache
+        if cache and (_time.time() - cache["t"]) < SettingsWindow._drv_cache_ttl():
+            self._drv_all = list(cache["data"])
+            self._drv_loader = None
+            self._drivers_render()
+            return
+
         self._drv_loader       = tk.Label(t, text="Loading drivers...",
                                           font=("Segoe UI", 9, "italic"),
                                           bg=BG_SECT, fg=FG_DIM)
         self._drv_loader.pack(anchor="w", padx=20, pady=8)
-        threading.Thread(target=self._load_drivers, daemon=True).start()
+        threading.Thread(target=self._load_drivers, args=(self._drv_gen,),
+                         daemon=True).start()
 
-    def _load_drivers(self):
+    def _load_drivers(self, gen):
         try:
             drivers = self._query_drivers()
-            self._drv_tab.after(0, lambda: self._populate_drivers(drivers))
+            self._drv_tab.after(0, lambda: self._populate_drivers(drivers, gen))
         except Exception as e:
-            self._drv_tab.after(0, lambda: self._drv_loader.config(
-                text=f"Failed to query drivers: {e}", fg=DANGER))
+            self._drv_tab.after(0, lambda: self._drivers_on_error(e, gen))
+
+    def _drivers_on_error(self, exc, gen):
+        if gen != self._drv_gen:
+            return
+        if hasattr(self, "_drv_loader") and self._drv_loader and self._drv_loader.winfo_exists():
+            self._drv_loader.config(text=f"Failed to query drivers: {exc}", fg=DANGER)
 
     def _query_drivers(self):
         import subprocess, json as _json
@@ -2522,10 +2934,17 @@ class SettingsWindow:
         data = _json.loads(raw)
         return [data] if isinstance(data, dict) else data
 
-    def _populate_drivers(self, drivers):
-        if hasattr(self, "_drv_loader") and self._drv_loader.winfo_exists():
+    def _populate_drivers(self, drivers, gen=None):
+        # Ignore stale results from a previous refresh generation.
+        if gen is not None and gen != self._drv_gen:
+            return
+        if hasattr(self, "_drv_loader") and self._drv_loader and self._drv_loader.winfo_exists():
             self._drv_loader.destroy()
+        self._drv_loader = None
         self._drv_all = drivers
+        # Cache for future Settings opens — tier-scaled TTL.
+        import time as _time
+        SettingsWindow._drv_cache = {"t": _time.time(), "data": list(drivers)}
         self._drivers_render()
 
     def _drivers_render(self):
@@ -2664,6 +3083,18 @@ class SettingsWindow:
         return None
 
     def _drivers_refresh(self):
+        # Invalidate the process-level cache so the user actually gets fresh
+        # data when they click Refresh.
+        SettingsWindow._drv_cache = None
+        # Bump generation so any in-flight load from the previous click is
+        # discarded when it returns — this prevents the old "Loading drivers..."
+        # label from being orphaned on screen.
+        self._drv_gen = getattr(self, "_drv_gen", 0) + 1
+        # Destroy any existing loader (may still be showing from a load that
+        # hadn't finished yet).
+        if getattr(self, "_drv_loader", None) and self._drv_loader.winfo_exists():
+            self._drv_loader.destroy()
+        self._drv_loader = None
         if self._drv_rows_frame and self._drv_rows_frame.winfo_exists():
             self._drv_rows_frame.destroy()
             self._drv_rows_frame = None
@@ -2674,14 +3105,27 @@ class SettingsWindow:
         ldr.pack(anchor="w", padx=20, pady=8)
         self._drv_loader = ldr
         self._drv_all = []
-        threading.Thread(target=self._load_drivers, daemon=True).start()
+        gen = self._drv_gen
+        threading.Thread(target=self._load_drivers, args=(gen,),
+                         daemon=True).start()
 
     def _driver_vendor_link(self, provider: str):
-        p = (provider or "").lower()
-        for key, (label, url) in self._VENDOR_LINKS.items():
-            if key in p:
-                return label, url
-        return None, None
+        """Resolve a provider string to (label, url).  Picks the longest
+        matching key so 'advanced micro devices' beats 'amd'.  Falls back to
+        the Microsoft Update Catalog when nothing matches so every row has a
+        clickable link."""
+        p = (provider or "").lower().strip()
+        if not p:
+            return "Search", self._VENDOR_GENERIC_FALLBACK
+        best_key = ""
+        best_val = None
+        for key, val in self._VENDOR_LINKS.items():
+            if key in p and len(key) > len(best_key):
+                best_key = key
+                best_val = val
+        if best_val:
+            return best_val
+        return "Search", self._VENDOR_GENERIC_FALLBACK
 
     # ─────────────────────────────────────────────────────────────────────────
     # Feature gate helper
@@ -2828,29 +3272,115 @@ class SettingsWindow:
         # ── Login status ──────────────────────────────────────────────────────
         self._section(t, "Account")
 
-        status_panel = tk.Frame(t, bg=BG_HW, padx=24, pady=18)
-        status_panel.pack(fill="x", padx=16, pady=(4, 8))
+        # Forward reference for the licenses re-render function. The
+        # function is defined further down; _refresh_display() pulls it
+        # out of this dict at call time so order-of-definition is moot.
+        _account_render_licenses = {"fn": None}
 
-        email_lbl   = tk.Label(status_panel, text="—",
-                                font=("Segoe UI", 13, "bold"),
-                                bg=BG_HW, fg=FG_HEAD)
-        email_lbl.pack(anchor="w")
-        tier_lbl    = tk.Label(status_panel, text="",
-                                font=("Segoe UI", 9),
-                                bg=BG_HW, fg=FG_DIM)
-        tier_lbl.pack(anchor="w", pady=(2, 10))
+        # Status card — outer frame with a thin accent strip on top, then
+        # an inner padded container for content.
+        status_panel = tk.Frame(t, bg=BG_HW)
+        status_panel.pack(fill="x", padx=16, pady=(4, 8))
+        tk.Frame(status_panel, bg=ACCENT, height=2).pack(fill="x")
+
+        inner = tk.Frame(status_panel, bg=BG_HW, padx=24, pady=20)
+        inner.pack(fill="x")
+
+        # Top row: avatar circle + identity column
+        top_row = tk.Frame(inner, bg=BG_HW)
+        top_row.pack(fill="x")
+
+        avatar_canvas = tk.Canvas(top_row, width=58, height=58, bg=BG_HW,
+                                  highlightthickness=0, bd=0)
+        avatar_canvas.pack(side="left", padx=(0, 18))
+
+        ident_col = tk.Frame(top_row, bg=BG_HW)
+        ident_col.pack(side="left", fill="x", expand=True, anchor="w")
+
+        email_lbl = tk.Label(ident_col, text="—",
+                             font=("Segoe UI", 14, "bold"),
+                             bg=BG_HW, fg=FG_HEAD, anchor="w")
+        email_lbl.pack(anchor="w", fill="x")
+
+        tier_lbl = tk.Label(ident_col, text="",
+                            font=("Segoe UI", 9),
+                            bg=BG_HW, fg=FG_DIM, anchor="w",
+                            wraplength=700, justify="left")
+        tier_lbl.pack(anchor="w", pady=(3, 0), fill="x")
+
+        # License badges row (colored chips)
+        badges_row = tk.Frame(inner, bg=BG_HW)
+        badges_row.pack(fill="x", pady=(14, 0))
+
+        # Status feedback line
         status_msg  = tk.StringVar(value="")
-        status_feed = tk.Label(status_panel, textvariable=status_msg,
-                                font=("Segoe UI", 8, "italic"),
-                                bg=BG_HW, fg=FG_DIM, anchor="w", wraplength=800)
-        status_feed.pack(anchor="w", pady=(0, 8))
+        status_feed = tk.Label(inner, textvariable=status_msg,
+                               font=("Segoe UI", 8, "italic"),
+                               bg=BG_HW, fg=FG_DIM, anchor="w",
+                               wraplength=820, justify="left")
+        status_feed.pack(anchor="w", pady=(12, 0), fill="x")
 
         # Action buttons row — rebuilt by _refresh_display() on state changes
-        act_row = tk.Frame(status_panel, bg=BG_HW)
-        act_row.pack(anchor="w")
+        act_row = tk.Frame(inner, bg=BG_HW)
+        act_row.pack(anchor="w", pady=(14, 0))
+
+        def _draw_avatar(email_text):
+            avatar_canvas.delete("all")
+            if not email_text or not auth.is_logged_in():
+                avatar_canvas.create_oval(3, 3, 55, 55,
+                                          outline=FG_DIM, width=2)
+                avatar_canvas.create_text(29, 30, text="?",
+                                          font=("Segoe UI", 18, "bold"),
+                                          fill=FG_DIM)
+                return
+            palette = [ACCENT, ACCENT2, "#cc44ff", "#ff7755", "#3da9fc"]
+            color = palette[sum(ord(c) for c in email_text) % len(palette)]
+            avatar_canvas.create_oval(0, 0, 58, 58, fill=color, outline="")
+            local = email_text.split("@", 1)[0]
+            parts = [p for p in local.replace(".", " ").replace("_", " ")
+                                      .replace("-", " ").split() if p]
+            if len(parts) >= 2:
+                initials = (parts[0][0] + parts[1][0]).upper()
+            elif parts:
+                initials = parts[0][:2].upper()
+            else:
+                initials = "?"
+            avatar_canvas.create_text(29, 30, text=initials,
+                                      font=("Segoe UI", 18, "bold"),
+                                      fill=FG_HEAD)
+
+        def _render_badges():
+            for w in badges_row.winfo_children():
+                w.destroy()
+            if not auth.is_logged_in():
+                lbl = tk.Label(badges_row, text="  Not signed in  ",
+                               font=("Segoe UI", 8, "bold"),
+                               bg=BG_SECT, fg=FG_DIM, padx=6, pady=4)
+                lbl.pack(side="left")
+                return
+            s = auth.get_session()
+            chips = []
+            if s.get("has_base"):
+                chips.append(("  Base License  ", ACCENT2, BG))
+            if s.get("has_pro"):
+                chips.append(("  Pro Add-on  ", "#cc44ff", FG_HEAD))
+            if not chips:
+                if auth.is_on_trial():
+                    d = auth.trial_days_left()
+                    chips.append(
+                        (f"  Trial · {d} day(s) left  ", WARN, BG))
+                else:
+                    chips.append(
+                        ("  No active license  ", WARN, BG))
+            for text, bg_color, fg_color in chips:
+                chip = tk.Label(badges_row, text=text,
+                                font=("Segoe UI", 8, "bold"),
+                                bg=bg_color, fg=fg_color,
+                                padx=6, pady=4)
+                chip.pack(side="left", padx=(0, 6))
 
         def _do_refresh():
-            status_msg.set("Refreshing license...")
+            status_msg.set("Refreshing license…")
             def _work():
                 ok, msg = auth.refresh_license()
                 status_panel.after(0, lambda: (
@@ -2867,27 +3397,37 @@ class SettingsWindow:
 
         def _refresh_display():
             if auth.is_logged_in():
-                email_lbl.config(text=auth.get_email(), fg=FG_HEAD)
+                email = auth.get_email() or "—"
+                email_lbl.config(text=email, fg=FG_HEAD)
                 s = auth.get_session()
-                parts = []
-                if s.get("has_base"): parts.append("Base License")
-                if s.get("has_pro"):  parts.append("Pro Add-on")
-                if parts:
-                    tier_lbl.config(text="Licensed: " + " · ".join(parts),
-                                    fg=ACCENT2)
+                if s.get("has_base") and s.get("has_pro"):
+                    tier_lbl.config(
+                        text="AlienCore Pro · all features unlocked",
+                        fg=ACCENT2)
+                elif s.get("has_base"):
+                    tier_lbl.config(
+                        text="AlienCore base license active",
+                        fg=ACCENT2)
                 elif auth.is_on_trial():
                     days = auth.trial_days_left()
                     tier_lbl.config(
-                        text=f"Free trial active — {days} day(s) remaining  "
-                             f"(base features only, Pro features grayed out)",
+                        text=(f"Free trial active · {days} day(s) remaining "
+                              f"— base features only, Pro features grayed out"),
                         fg=WARN)
                 else:
                     tier_lbl.config(
-                        text="No active license  —  trial expired or purchase below.",
+                        text="No active license — trial expired or purchase below",
                         fg=WARN)
+                _draw_avatar(email)
             else:
                 email_lbl.config(text="Not signed in", fg=FG_DIM)
-                tier_lbl.config(text="", fg=FG_DIM)
+                tier_lbl.config(
+                    text="Sign in to start your 30-day free trial or "
+                         "activate a license",
+                    fg=FG_DIM)
+                _draw_avatar(None)
+
+            _render_badges()
 
             for w in act_row.winfo_children():
                 w.destroy()
@@ -2901,28 +3441,14 @@ class SettingsWindow:
                           lambda: self._open_login(on_done=_refresh_display),
                           ACCENT, bold=True).pack(side="left")
 
-        _refresh_display()
-
-        # Background YubiKey dev-unlock may still be resolving when the tab is
-        # opened early after Settings launch. Poll until it lands so "Not
-        # signed in" flips to the real state without the user re-clicking.
-        def _wait_for_auth(attempts=0):
-            if auth.is_logged_in():
-                _refresh_display()
-                return
-            if attempts >= 20:   # ~10 s total — detection is done by then
-                return
-            status_panel.after(500, lambda: _wait_for_auth(attempts + 1))
-        if not auth.is_logged_in():
-            status_panel.after(500, _wait_for_auth)
-
-        # ── Purchase / upgrade ────────────────────────────────────────────────
-        self._section(t, "Licenses & Add-ons")
-        self._note(t,
-            "One-time payments. No subscriptions. Lifetime license includes "
-            "all future updates. Your license attaches to the email you signed "
-            "in with — no further action needed after PayPal checkout, the "
-            "status above will update automatically.")
+            # Re-evaluate ownership and rebuild the Licenses & Add-ons
+            # / "Your AlienCore Pro" panel below.
+            fn = _account_render_licenses.get("fn")
+            if fn is not None:
+                try:
+                    fn()
+                except tk.TclError:
+                    pass
 
         import time
 
@@ -3002,39 +3528,139 @@ class SettingsWindow:
                              args=(baseline, my_gen),
                              daemon=True, name="PurchasePoll").start()
 
-        products = tk.Frame(t, bg=BG_HW, padx=24, pady=18)
-        products.pack(fill="x", padx=16, pady=(4, 8))
+        # Stable container for the Licenses & Add-ons section. Contents are
+        # rebuilt by _render_licenses() whenever auth state changes — that's
+        # the only way to keep this section in sync with ownership when the
+        # tab gets built before YubiKey unlock or backend refresh lands.
+        licenses_container = tk.Frame(t, bg=BG_HW)
+        licenses_container.pack(fill="x")
 
-        for item_number, label, price, desc, color in [
-            ("AC_BASE",
-             "AlienCore  —  Lifetime License",
-             "$19.99",
-             "Full access to all core features. One payment, yours forever.",
-             ACCENT2),
-            ("AC_PRO",
-             "Pro Add-on  —  AI Integration",
-             "+$4.99",
-             "Unlocks AI Chat, AI Watchdog, and AI Config Advisor.",
-             "#cc44ff"),
-        ]:
-            row = tk.Frame(products, bg=BG_SECT, padx=16, pady=10)
-            row.pack(fill="x", pady=(0, 6))
-            info = tk.Frame(row, bg=BG_SECT)
-            info.pack(side="left", fill="x", expand=True)
-            hdr = tk.Frame(info, bg=BG_SECT)
-            hdr.pack(anchor="w")
-            tk.Label(hdr, text=label, font=("Segoe UI", 10, "bold"),
-                     bg=BG_SECT, fg=FG_HEAD).pack(side="left")
-            tk.Label(hdr, text=f"  {price}", font=("Segoe UI", 10, "bold"),
-                     bg=BG_SECT, fg=color).pack(side="left")
-            tk.Label(info, text=desc, font=("Segoe UI", 8),
-                     bg=BG_SECT, fg=FG_DIM, wraplength=600,
-                     justify="left").pack(anchor="w", pady=(2, 0))
-            _n, _p = item_number, price
-            self._btn(row, "Purchase  \u2192",
-                      lambda n=_n, l=label, p=_p: _paypal(
-                          n, l, p.replace("+", "").replace("$", "").strip()),
-                      color, bold=True).pack(side="right", padx=(12, 0))
+        def _render_licenses():
+            try:
+                for w in licenses_container.winfo_children():
+                    w.destroy()
+            except tk.TclError:
+                return
+
+            sess = auth.get_session() if auth.is_logged_in() else {}
+            has_base = bool(sess.get("has_base"))
+            has_pro  = bool(sess.get("has_pro"))
+
+            if has_base and has_pro:
+                # Owns everything — show a thank-you / unlocked-features card
+                # so the space below the status panel doesn't sit empty.
+                self._section(licenses_container, "Your AlienCore Pro Subscription")
+                card = tk.Frame(licenses_container, bg=BG_HW, padx=24, pady=20)
+                card.pack(fill="x", padx=16, pady=(4, 8))
+
+                head = tk.Frame(card, bg=BG_HW)
+                head.pack(anchor="w", fill="x")
+                tk.Label(head, text="✓", font=("Segoe UI", 16, "bold"),
+                         bg=BG_HW, fg=ACCENT2).pack(side="left", padx=(0, 8))
+                tk.Label(head, text="All features unlocked",
+                         font=("Segoe UI", 13, "bold"),
+                         bg=BG_HW, fg=FG_HEAD).pack(side="left")
+
+                tk.Label(card,
+                         text="Thank you for supporting AlienCore. "
+                              "Your lifetime license includes every future update.",
+                         font=("Segoe UI", 9, "italic"),
+                         bg=BG_HW, fg=FG_DIM, justify="left",
+                         wraplength=820).pack(anchor="w", pady=(4, 14))
+
+                features = [
+                    "Adaptive optimizer · 7 built-in profiles plus "
+                    "unlimited custom profiles",
+                    "Floating sensor bar · live CPU / GPU / RAM / NVMe "
+                    "telemetry with sparklines",
+                    "AI Chat, AI Watchdog, and AI Config Advisor with "
+                    "multi-provider support",
+                    "11 visual themes that retint Settings and the sensor bar",
+                    "Boost tracker, learning engine, drivers panel, and "
+                    "detailed insights",
+                    "Lifetime license · all future updates included",
+                ]
+                for feat in features:
+                    row = tk.Frame(card, bg=BG_HW)
+                    row.pack(anchor="w", fill="x", pady=2)
+                    tk.Label(row, text="•",
+                             font=("Segoe UI", 11, "bold"),
+                             bg=BG_HW, fg=ACCENT2,
+                             width=2, anchor="w").pack(side="left")
+                    tk.Label(row, text=feat,
+                             font=("Segoe UI", 9),
+                             bg=BG_HW, fg=FG, justify="left",
+                             wraplength=760, anchor="w").pack(
+                                 side="left", fill="x", expand=True)
+                return
+
+            self._section(licenses_container, "Licenses & Add-ons")
+            self._note(licenses_container,
+                "One-time payments. No subscriptions. Lifetime license includes "
+                "all future updates. Your license attaches to the email you signed "
+                "in with — no further action needed after PayPal checkout, the "
+                "status above will update automatically.")
+
+            product_catalog = [
+                ("AC_BASE",
+                 "AlienCore  —  Lifetime License",
+                 "$19.99",
+                 "Full access to all core features. One payment, yours forever.",
+                 ACCENT2,
+                 has_base),
+                ("AC_PRO",
+                 "Pro Add-on  —  AI Integration",
+                 "+$4.99",
+                 "Unlocks AI Chat, AI Watchdog, and AI Config Advisor.",
+                 "#cc44ff",
+                 has_pro),
+            ]
+            products_to_show = [p for p in product_catalog if not p[5]]
+            if not products_to_show:
+                return
+
+            products = tk.Frame(licenses_container, bg=BG_HW, padx=24, pady=18)
+            products.pack(fill="x", padx=16, pady=(4, 8))
+
+            for item_number, label, price, desc, color, _owned in products_to_show:
+                row = tk.Frame(products, bg=BG_SECT, padx=16, pady=10)
+                row.pack(fill="x", pady=(0, 6))
+                info = tk.Frame(row, bg=BG_SECT)
+                info.pack(side="left", fill="x", expand=True)
+                hdr = tk.Frame(info, bg=BG_SECT)
+                hdr.pack(anchor="w")
+                tk.Label(hdr, text=label, font=("Segoe UI", 10, "bold"),
+                         bg=BG_SECT, fg=FG_HEAD).pack(side="left")
+                tk.Label(hdr, text=f"  {price}", font=("Segoe UI", 10, "bold"),
+                         bg=BG_SECT, fg=color).pack(side="left")
+                tk.Label(info, text=desc, font=("Segoe UI", 8),
+                         bg=BG_SECT, fg=FG_DIM, wraplength=600,
+                         justify="left").pack(anchor="w", pady=(2, 0))
+                _n, _p = item_number, price
+                self._btn(row, "Purchase  →",
+                          lambda n=_n, l=label, p=_p: _paypal(
+                              n, l, p.replace("+", "").replace("$", "").strip()),
+                          color, bold=True).pack(side="right", padx=(12, 0))
+
+        # Wire the licenses section into the auth-state callback chain.
+        # _refresh_display() is invoked from initial render, sign-in/out,
+        # purchase completion, and the YubiKey-unlock poller below — all of
+        # which mean we should re-evaluate ownership.
+        _account_render_licenses["fn"] = _render_licenses
+        _refresh_display()
+
+        # Background YubiKey dev-unlock may still be resolving when the tab is
+        # opened early after Settings launch. Poll until it lands so "Not
+        # signed in" flips to the real state without the user re-clicking.
+        def _wait_for_auth(attempts=0):
+            if auth.is_logged_in():
+                _refresh_display()
+                return
+            if attempts >= 20:   # ~10 s total — detection is done by then
+                return
+            status_panel.after(500, lambda: _wait_for_auth(attempts + 1))
+        if not auth.is_logged_in():
+            status_panel.after(500, _wait_for_auth)
 
     # ─────────────────────────────────────────────────────────────────────────
     # About tab
@@ -3081,12 +3707,9 @@ class SettingsWindow:
         email_row.pack(anchor="w", pady=(4, 0))
         tk.Label(email_row, text="Email:",
                  font=("Segoe UI", 9), bg=BG_HW, fg=FG_DIM).pack(side="left")
-        email_lnk = tk.Label(email_row, text=f"  {SUPPORT_EMAIL}",
-                              font=("Segoe UI", 9, "underline"),
-                              bg=BG_HW, fg=ACCENT, cursor="hand2")
-        email_lnk.pack(side="left")
-        email_lnk.bind("<Button-1>",
-                       lambda e: webbrowser.open(f"mailto:{SUPPORT_EMAIL}"))
+        tk.Label(email_row, text=f"  {SUPPORT_EMAIL}",
+                 font=("Segoe UI", 9),
+                 bg=BG_HW, fg=FG).pack(side="left")
 
         gh_row = tk.Frame(info, bg=BG_HW)
         gh_row.pack(anchor="w", pady=(6, 0))
@@ -3104,14 +3727,11 @@ class SettingsWindow:
         self._btn(btn_row, "Send Feedback",
                   lambda: __import__("gui.feedback", fromlist=["feedback"]).open_feedback_thread(),
                   ACCENT2).pack(side="left", padx=(0, 8))
-        self._btn(btn_row, "Open GitHub",
-                  lambda: webbrowser.open(gh_url),
-                  FG_DIM).pack(side="left")
 
         # ── Build info ────────────────────────────────────────────────────────
         self._section(t, "Build")
-        build = tk.Frame(t, bg=BG_HW, padx=30, pady=14)
-        build.pack(fill="x", padx=16, pady=(4, 8))
+        panel = tk.Frame(t, bg=BG_HW, padx=30, pady=14)
+        panel.pack(fill="x", padx=16, pady=(4, 8))
 
         import sys, platform
         hw = self._hw
@@ -3119,16 +3739,48 @@ class SettingsWindow:
         gpu_list  = hw.get("gpu", [])
         gpu_name  = gpu_list[0].get("name", "Unknown GPU") if gpu_list else "Unknown GPU"
         ram_gb    = hw.get("ram", {}).get("total_gb", "?")
-        os_name   = hw.get("platform", {}).get("os_edition", platform.version())
+
+        # Build a full platform string.  The old code showed
+        # "Windows 10.0.26200" which looks like Windows 10 to users but is
+        # actually Windows 11's internal NT version.  Prefer the marketing
+        # release ("11") + edition ("Pro") + build number from the live OS.
+        os_info   = hw.get("os", {}) or {}
+        release   = os_info.get("release") or platform.release() or "?"
+        edition   = os_info.get("edition") or ""
+        ver_full  = os_info.get("version") or platform.version() or ""
+        build     = ""
+        # platform.version() returns something like "10.0.26200" — the last
+        # component is the build.  Also try the more detailed registry build
+        # (e.g. UBR = 8246) when available for the full "26200.8246".
+        if ver_full:
+            parts = ver_full.split(".")
+            if len(parts) >= 3:
+                build = parts[-1]
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as k:
+                try:
+                    ubr, _ = winreg.QueryValueEx(k, "UBR")
+                    if build:
+                        build = f"{build}.{ubr}"
+                except FileNotFoundError:
+                    pass
+        except Exception:
+            pass
+        platform_label = " ".join(x for x in
+                                  ["Windows", str(release), edition] if x)
+        if build:
+            platform_label += f"  (build {build})"
 
         for label, val in [
             ("Python",   sys.version.split()[0]),
-            ("Platform", f"Windows  {os_name}"),
+            ("Platform", platform_label),
             ("CPU",      cpu_name),
             ("GPU",      gpu_name),
             ("RAM",      f"{ram_gb} GB"),
         ]:
-            row = tk.Frame(build, bg=BG_HW)
+            row = tk.Frame(panel, bg=BG_HW)
             row.pack(anchor="w", pady=1)
             tk.Label(row, text=f"{label}:", font=("Segoe UI", 9),
                      bg=BG_HW, fg=FG_DIM, width=12, anchor="w").pack(side="left")
@@ -3178,9 +3830,12 @@ class SettingsWindow:
     def _svc_row(self, parent, svc):
         from core import services_manager as sm
         if not svc["exists"]: return
+        name   = svc["name"]
         cur    = svc["startup_type"]
         rec    = svc["recommended"]
         safety = svc["safety"]
+        self._svc_live[name] = dict(svc)
+
         if safety == sm.LEAVE:    row_bg, sfg = BG_PANEL, FG_DIM
         elif cur == rec:          row_bg, sfg = "#1a2a1a", ACCENT2
         elif safety == sm.CAUTION:row_bg, sfg = "#2a2510", WARN
@@ -3189,39 +3844,301 @@ class SettingsWindow:
         row = tk.Frame(parent, bg=row_bg, padx=16, pady=3)
         row.pack(fill="x", padx=16, pady=1)
 
-        nl = tk.Label(row, text=svc["friendly"], font=("Segoe UI",9),
+        nl = tk.Label(row, text=svc["friendly"], font=("Segoe UI", 9),
                       bg=row_bg, fg=FG, width=26, anchor="w")
         nl.pack(side="left")
         self._tooltip(nl, svc["description"])
 
-        sc = ACCENT2 if svc["state"]=="Running" else FG_DIM
-        tk.Label(row, text=svc["state"], font=("Segoe UI",8),
-                 bg=row_bg, fg=sc, width=10, anchor="w").pack(side="left")
+        state_fg = ACCENT2 if svc["state"] == "Running" else FG_DIM
+        state_lbl = tk.Label(row, text=svc["state"], font=("Segoe UI", 8),
+                             bg=row_bg, fg=state_fg, width=10, anchor="w")
+        state_lbl.pack(side="left")
 
         sv = tk.StringVar(value=cur)
         opts = [sm.AUTO, sm.AUTO_DEL, sm.MANUAL, sm.DISABLED]
-        dd = tk.OptionMenu(row, sv, *opts,
-                           command=lambda v, n=svc["name"]:
-                           threading.Thread(target=lambda: sm.set_startup_type(n,v), daemon=True).start())
-        dd.config(bg=BG_PANEL, fg=FG, activebackground=BTN_HOV, activeforeground=FG,
-                  font=("Segoe UI",8), relief="flat", width=14,
-                  state="disabled" if safety==sm.LEAVE else "normal")
-        dd["menu"].config(bg=BG_PANEL, fg=FG, font=("Segoe UI",8))
+
+        def on_dropdown(value, n=name, v=sv, baseline=cur):
+            if value == baseline:
+                self._svc_pending.pop(n, None)
+            else:
+                self._svc_pending[n] = value
+            self._refresh_pending_badge()
+
+        dd = tk.OptionMenu(row, sv, *opts, command=on_dropdown)
+        dd.config(bg=BG_PANEL, fg=FG, activebackground=BTN_HOV,
+                  activeforeground=FG, font=("Segoe UI", 8),
+                  relief="flat", width=14,
+                  state="disabled" if safety == sm.LEAVE else "normal")
+        dd["menu"].config(bg=BG_PANEL, fg=FG, font=("Segoe UI", 8))
         dd.pack(side="left")
 
-        tk.Label(row, text=rec, font=("Segoe UI",8),
-                 bg=row_bg, fg=sfg, width=16, anchor="w").pack(side="left")
+        tk.Label(row, text=rec, font=("Segoe UI", 8),
+                 bg=row_bg, fg=sfg, width=14, anchor="w").pack(side="left")
 
-        bdefs = {sm.SAFE:("#003300",ACCENT2,"Safe"),
-                 sm.CAUTION:("#332800",WARN,"Caution"),
-                 sm.LEAVE:("#220000",DANGER,"Leave alone")}
-        bbg,bfg,btxt = bdefs.get(safety,(BG_PANEL,FG_DIM,safety))
-        tk.Label(row, text=btxt, font=("Segoe UI",7,"bold"),
-                 bg=bbg, fg=bfg, padx=4, pady=1).pack(side="left", padx=4)
+        bdefs = {sm.SAFE:    ("#003300", ACCENT2, "Safe"),
+                 sm.CAUTION: ("#332800", WARN,    "Caution"),
+                 sm.LEAVE:   ("#220000", DANGER,  "Locked")}
+        bbg, bfg, btxt = bdefs.get(safety, (BG_PANEL, FG_DIM, safety))
+        tk.Label(row, text=btxt, font=("Segoe UI", 7, "bold"),
+                 bg=bbg, fg=bfg, padx=4, pady=1, width=8).pack(side="left", padx=(4, 6))
+
+        # Start / Stop per-row actions
+        act = tk.Frame(row, bg=row_bg)
+        act.pack(side="left")
+        running = (svc["state"] == "Running")
+        locked = (safety == sm.LEAVE)
+
+        start_btn = tk.Button(act, text="Start",
+                              font=("Segoe UI", 8),
+                              bg=BTN_BG, fg=ACCENT2,
+                              activebackground=BTN_HOV, activeforeground=ACCENT2,
+                              relief="flat", padx=8, pady=1, bd=0,
+                              highlightthickness=0, cursor="hand2",
+                              command=lambda n=name: self._svc_do("start", n))
+        start_btn.pack(side="left", padx=(0, 4))
+        if running or locked:
+            start_btn.config(state="disabled", fg=FG_DIM)
+
+        stop_btn = tk.Button(act, text="Stop",
+                             font=("Segoe UI", 8),
+                             bg=BTN_BG, fg=DANGER,
+                             activebackground=BTN_HOV, activeforeground=DANGER,
+                             relief="flat", padx=8, pady=1, bd=0,
+                             highlightthickness=0, cursor="hand2",
+                             command=lambda n=name: self._svc_do("stop", n))
+        stop_btn.pack(side="left")
+        if (not running) or locked:
+            stop_btn.config(state="disabled", fg=FG_DIM)
+
+        self._svc_rows_by_name[name] = {
+            "row": row, "state_lbl": state_lbl,
+            "start_btn": start_btn, "stop_btn": stop_btn,
+            "dropdown_var": sv, "baseline": cur,
+        }
+
+    def _refresh_pending_badge(self):
+        n = len(self._svc_pending)
+        try:
+            self._svc_apply_btn.config(
+                text=f"Apply Pending Changes ({n})",
+                state="normal" if n else "disabled")
+        except Exception:
+            pass
+
+    def _set_svc_status(self, text, kind="info", auto_clear_ms=None):
+        """Color-coded Service-tab status banner with optional auto-clear.
+
+        kind: "info" / "ok" (green) / "err" (red) / "busy" (green, no clear).
+        """
+        color = {"ok": ACCENT2, "err": DANGER, "busy": ACCENT2}.get(kind, FG_DIM)
+        try:
+            self._svc_status_var.set(text)
+            self._svc_status_lbl.config(fg=color)
+        except Exception:
+            pass
+        prev_id = getattr(self, "_svc_status_clear_id", None)
+        if prev_id is not None:
+            try: self.root.after_cancel(prev_id)
+            except Exception: pass
+            self._svc_status_clear_id = None
+        if auto_clear_ms:
+            try:
+                self._svc_status_clear_id = self.root.after(
+                    auto_clear_ms,
+                    lambda: (self._svc_status_var.set(""),
+                             self._svc_status_lbl.config(fg=FG_DIM)))
+            except Exception:
+                pass
+
+    def _flash_svc_row(self, info, repeats=3):
+        """Briefly highlight a service row so the State change draws the eye."""
+        row = info.get("row")
+        if not row:
+            return
+        try:
+            original_bg = row.cget("bg")
+        except Exception:
+            return
+        accent_bg = BTN_HOV
+
+        def restore(remaining):
+            try:
+                row.configure(bg=original_bg)
+                for child in row.winfo_children():
+                    try:
+                        if child.cget("bg") == accent_bg:
+                            child.configure(bg=original_bg)
+                    except Exception:
+                        pass
+            except Exception:
+                return
+            if remaining > 0:
+                self.root.after(140, lambda: highlight(remaining))
+
+        def highlight(remaining):
+            try:
+                row.configure(bg=accent_bg)
+                for child in row.winfo_children():
+                    try:
+                        if child.cget("bg") == original_bg:
+                            child.configure(bg=accent_bg)
+                    except Exception:
+                        pass
+            except Exception:
+                return
+            self.root.after(140, lambda: restore(remaining - 1))
+
+        highlight(repeats)
+
+    def _svc_do(self, action: str, name: str):
+        """Run start/stop in a background thread so the UI stays responsive."""
+        from core import services_manager as sm
+
+        def worker():
+            if action == "start":
+                ok, msg = sm.start_service(name)
+            else:
+                ok, msg = sm.stop_service(name)
+            self._svc_tab.after(0, lambda: self._svc_after_action(action, name, ok, msg))
+
+        self._set_svc_status(f"{action.capitalize()}ing {name}\u2026", kind="busy")
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _svc_after_action(self, action: str, name: str, ok: bool, msg: str):
+        from core import services_manager as sm
+        if not ok:
+            self._set_svc_status(f"\u2717 {name}: {msg[:80]}", kind="err",
+                                 auto_clear_ms=8000)
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONHAND)
+            except Exception:
+                pass
+            try:
+                messagebox.showerror("Service action failed",
+                                     f"{name}:\n\n{msg}\n\n"
+                                     "Most common cause: AlienCore is not running "
+                                     "as Administrator.")
+            except Exception:
+                pass
+            return
+
+        verb = "Started" if action == "start" else "Stopped"
+        self._set_svc_status(f"\u2713 {verb} {name}", kind="ok",
+                             auto_clear_ms=4000)
+        live = sm.get_service_state(name)
+        info = self._svc_rows_by_name.get(name)
+        if info:
+            info["state_lbl"].config(
+                text=live["state"],
+                fg=ACCENT2 if live["state"] == "Running" else FG_DIM)
+            self._flash_svc_row(info)
+            running = (live["state"] == "Running")
+            info["start_btn"].config(state="disabled" if running else "normal",
+                                     fg=FG_DIM if running else ACCENT2)
+            info["stop_btn"].config(state="normal" if running else "disabled",
+                                    fg=DANGER if running else FG_DIM)
+
+    def _apply_pending_services(self):
+        """Apply queued startup-type changes from the dropdowns."""
+        from core import services_manager as sm
+        if not self._svc_pending:
+            return
+        pending = dict(self._svc_pending)
+
+        def worker():
+            results = []
+            for n, v in pending.items():
+                ok, msg = sm.set_startup_type(n, v, cascade_state=False)
+                results.append((n, v, ok, msg))
+            self._svc_tab.after(0, lambda: self._svc_after_bulk(results))
+
+        self._set_svc_status(f"Applying {len(pending)} change(s)\u2026", kind="busy")
+        self._svc_apply_btn.config(state="disabled")
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _svc_after_bulk(self, results: list):
+        ok_count = sum(1 for _n, _v, ok, _m in results if ok)
+        failed = [(n, m) for n, _v, ok, m in results if not ok]
+        for n, v, ok, _m in results:
+            if ok:
+                self._svc_pending.pop(n, None)
+                info = self._svc_rows_by_name.get(n)
+                if info:
+                    info["baseline"] = v
+        self._refresh_pending_badge()
+        if failed:
+            details = "\n".join(f"\u2022 {n}: {m}" for n, m in failed[:6])
+            try:
+                messagebox.showerror(
+                    "Some services failed to update",
+                    f"{ok_count} succeeded, {len(failed)} failed:\n\n{details}\n\n"
+                    "The most common cause is missing Administrator rights.")
+            except Exception:
+                pass
+            self._set_svc_status(
+                f"{ok_count} applied, {len(failed)} failed.",
+                kind="err", auto_clear_ms=8000)
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONHAND)
+            except Exception:
+                pass
+        else:
+            self._set_svc_status(
+                f"{ok_count} change(s) applied.",
+                kind="ok", auto_clear_ms=4000)
+        self.root.after(400, self._refresh_services)
+
+    def _refresh_services(self):
+        """Tear down and rebuild the service list with fresh live state."""
+        t = getattr(self, "_svc_tab", None)
+        if t is None:
+            return
+        # Find and destroy prior service section widgets below the header row.
+        # Simplest path: clear pending + rebuild everything that _load_services
+        # draws. We re-show the loader and spawn the load thread.
+        for child in list(t.winfo_children()):
+            txt = ""
+            try:
+                txt = child.cget("text") if hasattr(child, "cget") else ""
+            except Exception:
+                pass
+            if isinstance(child, tk.Frame):
+                # Heuristic: service rows share a small padx layout; remove
+                # any frame that contains a widget registered in _svc_rows_by_name
+                has_svc = False
+                for info in self._svc_rows_by_name.values():
+                    if info["row"] is child:
+                        has_svc = True; break
+                if has_svc:
+                    child.destroy()
+            elif isinstance(child, tk.Label) and txt and txt.strip().startswith(
+                    ("Managed by AlienCore", "Safe to adjust",
+                     "Adjust with caution", "Leave alone")):
+                child.destroy()
+        self._svc_rows_by_name.clear()
+        self._svc_pending.clear()
+        self._refresh_pending_badge()
+        self._svc_loader = tk.Label(t, text="Refreshing\u2026",
+                                    font=("Segoe UI", 9, "italic"),
+                                    bg=BG_SECT, fg=FG_DIM)
+        self._svc_loader.pack(anchor="w", padx=20, pady=8)
+        threading.Thread(target=self._load_services, daemon=True).start()
 
     def _apply_services(self):
+        """Apply the baked-in safe recommendations to every eligible service."""
         from core import services_manager as sm
-        threading.Thread(target=lambda: sm.apply_all_recommended(), daemon=True).start()
+        self._set_svc_status("Applying safe recommendations\u2026", kind="busy")
+
+        def worker():
+            changed = sm.apply_all_recommended()
+            self._svc_tab.after(0, lambda: self._set_svc_status(
+                f"\u2713 Applied recommendations: {changed} service(s) updated.",
+                kind="ok", auto_clear_ms=5000))
+            self._svc_tab.after(600, self._refresh_services)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _rerun_first_run(self):
         """Launch the welcome/first-run scan in a separate subprocess so the

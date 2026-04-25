@@ -158,7 +158,9 @@ class FeedbackWindow:
         foot.pack(fill="x")
 
         if SUPPORT_EMAIL:
-            hint = f"Email opens your mail client pre-filled  |  GitHub Issues requires a free account"
+            hint = ("Send via Email delivers your message straight to Kyle. "
+                    "Copy Report lets you paste it anywhere. GitHub Issues "
+                    "requires a free account.")
         else:
             hint = "Open GitHub Issues, then paste your copied report."
         tk.Label(foot, text=hint, font=("Segoe UI", 8, "italic"),
@@ -190,42 +192,129 @@ class FeedbackWindow:
     # ── System info collection ─────────────────────────────────────────────────
 
     def _collect_sysinfo(self):
-        import json, platform
+        import json, platform, sys, datetime
         lines = [
-            f"AlienCore: v{VERSION}",
-            f"OS: Windows {platform.release()} (build {platform.version()})",
+            f"AlienCore:  v{VERSION}",
+            f"Report time:  {datetime.datetime.now().isoformat(timespec='seconds')}",
+            f"Python:  {sys.version.split()[0]}  ({platform.python_implementation()})",
         ]
+
+        # Windows edition + UBR build
+        try:
+            import winreg
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as k:
+                def _q(name, default=""):
+                    try:
+                        v, _ = winreg.QueryValueEx(k, name)
+                        return v
+                    except Exception:
+                        return default
+                edition   = _q("EditionID", "")
+                prod_name = _q("ProductName", "")
+                build     = _q("CurrentBuild", "")
+                ubr       = _q("UBR", "")
+            release = platform.release()
+            full_build = f"{build}.{ubr}" if ubr else build
+            os_line = f"OS:  Windows {release}"
+            if edition:
+                os_line += f" {edition}"
+            if full_build:
+                os_line += f"  (build {full_build})"
+            if prod_name and prod_name not in os_line:
+                os_line += f"  [{prod_name}]"
+            lines.append(os_line)
+        except Exception:
+            lines.append(f"OS:  Windows {platform.release()} ({platform.version()})")
+
+        # Admin / elevation
+        try:
+            from core.elevation import is_admin
+            lines.append(f"Admin:  {'Yes' if is_admin() else 'No'}")
+        except Exception:
+            pass
+
+        # Hardware cache snapshot
+        hw = {}
         try:
             if os.path.exists(HARDWARE_CACHE):
                 with open(HARDWARE_CACHE, "r", encoding="utf-8") as f:
                     hw = json.load(f)
                 cpu = hw.get("cpu", {})
                 lines.append(
-                    f"CPU: {cpu.get('name', '?')} — "
-                    f"{cpu.get('physical_cores', '?')}P / {cpu.get('logical_cores', '?')}L cores"
+                    f"CPU:  {cpu.get('name', '?')}  "
+                    f"({cpu.get('physical_cores', '?')}P / {cpu.get('logical_cores', '?')}L)"
                 )
+                freq = cpu.get("max_frequency_mhz") or cpu.get("max_freq_mhz")
+                if freq:
+                    lines.append(f"CPU max freq:  {freq} MHz")
                 for gpu in hw.get("gpu", []):
                     if not gpu.get("is_integrated"):
                         lines.append(
-                            f"GPU: {gpu.get('name', '?')}  "
-                            f"VRAM: {gpu.get('vram_mb', 0):,} MB"
+                            f"GPU:  {gpu.get('name', '?')}  "
+                            f"VRAM: {gpu.get('vram_mb', 0):,} MB  "
+                            f"driver: {gpu.get('driver_version', '?')}"
                         )
                 ram = hw.get("ram", {})
-                lines.append(f"RAM: {ram.get('total_gb', '?')} GB")
+                lines.append(
+                    f"RAM:  {ram.get('total_gb', '?')} GB  "
+                    f"{ram.get('speed_mhz', '?')} MHz  "
+                    f"{ram.get('type', '?')}"
+                )
+                plat = hw.get("platform", {})
+                if plat:
+                    lines.append(
+                        f"Platform:  AWCC={plat.get('has_awcc', False)}  "
+                        f"LHM={plat.get('has_lhm', False)}  "
+                        f"model={plat.get('model', '?')}"
+                    )
         except Exception as e:
-            lines.append(f"Hardware info unavailable: {e}")
+            lines.append(f"Hardware info unavailable:  {e}")
 
-        # Last 40 lines of log
+        # License + account state
+        try:
+            from core import auth
+            sess = auth.get_session() or {}
+            if sess.get("email"):
+                lines.append(
+                    f"Account:  {sess.get('email')}  "
+                    f"base={bool(sess.get('has_base'))}  "
+                    f"pro={bool(sess.get('has_pro'))}"
+                )
+            else:
+                lines.append("Account:  (not signed in)")
+        except Exception:
+            pass
+
+        # Active config snapshot (essential bits only)
+        try:
+            c = cfg.load()
+            snap = {
+                "service.log_enabled":     c.get("service", {}).get("log_enabled"),
+                "ai.provider":             c.get("ai", {}).get("provider"),
+                "ai.model":                c.get("ai", {}).get("model"),
+                "profiles.enabled":        c.get("profiles", {}).get("enabled"),
+                "cpu.power_mode":          c.get("cpu", {}).get("power_mode"),
+                "gpu.transparent_when":    c.get("gpu", {}).get("transparent_when"),
+            }
+            lines.append("Config (key flags):")
+            for k, v in snap.items():
+                lines.append(f"  {k} = {v}")
+        except Exception:
+            pass
+
+        # Last 60 lines of log (extended from 40)
         try:
             if os.path.exists(LOG_PATH):
                 with open(LOG_PATH, "r", encoding="utf-8", errors="replace") as f:
                     log_lines = f.readlines()
-                lines.append("\n--- Recent log (last 40 lines) ---")
-                lines.append("".join(log_lines[-40:]).strip())
+                lines.append("\n--- Recent log (last 60 lines) ---")
+                lines.append("".join(log_lines[-60:]).strip())
             else:
                 lines.append("\n--- Log file not found ---")
         except Exception as e:
-            lines.append(f"\nLog unavailable: {e}")
+            lines.append(f"\nLog unavailable:  {e}")
 
         self._sysinfo = "\n".join(lines)
         self._sysinfo_ready = True
@@ -273,15 +362,152 @@ class FeedbackWindow:
         webbrowser.open(GITHUB_ISSUES_URL)
 
     def _send_email(self):
-        import urllib.parse, webbrowser
-        ftype   = self._type_var.get()
-        subject = urllib.parse.quote(f"AlienCore {ftype}")
-        # mailto body has a length limit in some clients — truncate log if needed
-        report  = self._build_report()
-        if len(report) > 1800:
-            report = report[:1800] + "\n...(truncated — attach full report if needed)"
-        body = urllib.parse.quote(report)
-        webbrowser.open(f"mailto:{SUPPORT_EMAIL}?subject={subject}&body={body}")
+        """Send feedback via the backend relay (Brevo).
+        Falls back to a mailto link if the backend is unreachable."""
+        ftype = self._type_var.get()
+        desc  = self.desc.get("1.0", "end").strip()
+        if not desc:
+            messagebox.showwarning(
+                "Nothing to send",
+                "Please enter a description before sending.",
+                parent=self.root)
+            return
+
+        # Determine the sender email (signed-in user preferred)
+        from_email = ""
+        try:
+            from core import auth
+            from_email = (auth.get_email() or "").strip()
+        except Exception:
+            pass
+        if not from_email:
+            from_email = self._prompt_email()
+            if not from_email:
+                return
+
+        sysinfo = self._sysinfo if (self._show_info.get() and self._sysinfo) else ""
+
+        # Disable the button while sending; re-enable afterwards
+        self._set_buttons_state("disabled")
+        self._info_status.config(text="sending…", fg=ACCENT)
+
+        def worker():
+            ok, err = self._post_feedback(from_email, ftype, desc, sysinfo)
+            self.root.after(0, lambda: self._after_send(ok, err, from_email,
+                                                        ftype, desc, sysinfo))
+
+        threading.Thread(target=worker, daemon=True,
+                         name="FeedbackSend").start()
+
+    def _post_feedback(self, from_email: str, ftype: str,
+                       description: str, sysinfo: str):
+        import json, urllib.request, urllib.error
+        from core.constants import BACKEND_URL
+        url = BACKEND_URL.rstrip("/") + "/support/submit"
+        payload = json.dumps({
+            "email":       from_email,
+            "type":        ftype,
+            "description": description,
+            "sysinfo":     sysinfo,
+        }).encode("utf-8")
+        try:
+            req = urllib.request.Request(
+                url, data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST")
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                data = json.loads(body) if body else {}
+                if data.get("ok"):
+                    return True, ""
+                return False, data.get("error") or f"HTTP {resp.status}"
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", errors="replace")
+                data = json.loads(body) if body else {}
+                return False, data.get("error") or f"HTTP {e.code}"
+            except Exception:
+                return False, f"HTTP {e.code}"
+        except Exception as e:
+            return False, str(e)
+
+    def _after_send(self, ok: bool, err: str, from_email: str,
+                    ftype: str, description: str, sysinfo: str):
+        self._set_buttons_state("normal")
+        if ok:
+            self._info_status.config(text="sent", fg=ACCENT2)
+            messagebox.showinfo(
+                "Feedback sent",
+                f"Thanks! Your {ftype.lower()} has been delivered to "
+                f"{SUPPORT_EMAIL}.\n\nReplies will come back to "
+                f"{from_email}.",
+                parent=self.root)
+            self.root.after(200, self._on_close)
+            return
+        self._info_status.config(text="failed", fg="#ff4444")
+        # Offer fallback — mailto with current clipboard fill
+        if messagebox.askyesno(
+                "Couldn’t send feedback",
+                f"The feedback server could not be reached:\n\n{err}\n\n"
+                "Would you like to open your default mail client with the "
+                "message pre-filled instead?",
+                parent=self.root):
+            import urllib.parse, webbrowser
+            subject = urllib.parse.quote(f"AlienCore {ftype}")
+            report = f"[{ftype}]\n\n{description}"
+            if sysinfo:
+                report += f"\n\n---\nSystem Info:\n{sysinfo}"
+            if len(report) > 1800:
+                report = report[:1800] + "\n...(truncated)"
+            body = urllib.parse.quote(report)
+            webbrowser.open(f"mailto:{SUPPORT_EMAIL}?subject={subject}&body={body}")
+
+    def _prompt_email(self) -> str:
+        """Small modal prompt for the user’s return email address."""
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Your email")
+        dlg.configure(bg=BG)
+        dlg.geometry("380x170")
+        dlg.transient(self.root)
+        dlg.grab_set()
+        tk.Label(dlg, text="What email should we reply to?",
+                 font=("Segoe UI", 10, "bold"),
+                 bg=BG, fg=ACCENT).pack(anchor="w", padx=18, pady=(16, 4))
+        tk.Label(dlg,
+                 text="Used only so Kyle can answer your message.",
+                 font=("Segoe UI", 8),
+                 bg=BG, fg=FG_DIM).pack(anchor="w", padx=18, pady=(0, 8))
+        var = tk.StringVar()
+        tk.Entry(dlg, textvariable=var, font=("Consolas", 10),
+                 bg=BG_INPUT, fg=FG, insertbackground=FG,
+                 relief="flat").pack(fill="x", padx=18, ipady=4)
+        result = {"email": ""}
+        def ok():
+            v = var.get().strip()
+            if "@" not in v or "." not in v.split("@")[-1]:
+                return
+            result["email"] = v
+            dlg.destroy()
+        foot = tk.Frame(dlg, bg=BG); foot.pack(fill="x", padx=18, pady=14, side="bottom")
+        tk.Button(foot, text="Cancel", command=dlg.destroy,
+                  bg="#2a2d38", fg=FG_DIM, relief="flat",
+                  padx=14, pady=4, bd=0).pack(side="right", padx=(6, 0))
+        tk.Button(foot, text="OK", command=ok,
+                  bg="#1a2e1a", fg=ACCENT2, relief="flat",
+                  padx=14, pady=4, bd=0,
+                  font=("Segoe UI", 9, "bold")).pack(side="right")
+        self.root.wait_window(dlg)
+        return result["email"]
+
+    def _set_buttons_state(self, state: str):
+        """Enable/disable all footer action buttons during a send."""
+        def walk(w):
+            for ch in w.winfo_children():
+                if isinstance(ch, tk.Button):
+                    try: ch.config(state=state)
+                    except Exception: pass
+                walk(ch)
+        walk(self.root)
 
     def _on_close(self):
         global _instance

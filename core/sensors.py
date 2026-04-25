@@ -53,8 +53,11 @@ _awcc_cache: dict = {"awcc_available": False, "awcc_fans": [], "awcc_profile": N
 # sensor bar would otherwise flip to "---" in the exact moment the user most
 # needs the reading.  Keep the last good parsed LHM values for up to
 # _LHM_CACHE_MAX_AGE seconds and serve them with a staleness age so the bar
-# can render them dimmed instead of blanking out.
-_LHM_CACHE_MAX_AGE = 30.0
+# can render them dimmed instead of blanking out.  On RAM-rich systems we can
+# afford to hold these readings much longer, which also hides longer bridge
+# hiccups under extreme load.
+from core import mem_tier as _mt
+_LHM_CACHE_MAX_AGE = _mt.stale_seconds(30.0)
 _lhm_cached_values: dict = {}
 _lhm_last_success: float = 0.0
 

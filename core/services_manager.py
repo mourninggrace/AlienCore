@@ -238,11 +238,15 @@ def get_service_state(service_name: str) -> dict:
         return {"exists": False, "state": "Unknown", "startup_type": "Unknown"}
 
 
-def set_startup_type(service_name: str, startup_type: str) -> bool:
+def set_startup_type(service_name: str, startup_type: str,
+                     cascade_state: bool = True) -> tuple[bool, str]:
     """
     Set service startup type.
-    startup_type: 'Automatic' | 'Manual' | 'Disabled'
-    Returns True on success.
+    startup_type:  'Automatic' | 'Automatic (Delayed)' | 'Manual' | 'Disabled'
+    cascade_state: if True, also stop (on Disabled) / start (on Automatic).
+                   GUI pending-changes flow passes False and controls state
+                   via explicit Start/Stop buttons.
+    Returns (ok, message).
     """
     type_map = {
         AUTO:     "auto",
@@ -252,31 +256,71 @@ def set_startup_type(service_name: str, startup_type: str) -> bool:
     }
     sc_type = type_map.get(startup_type, "demand")
     try:
+        # sc.exe requires "start=" and the value as two separate argv tokens —
+        # passing them as one "start= auto" string causes Windows to quote the
+        # whole thing, which sc parses as a single field and rejects with
+        # "Invalid start= field". Keep each as its own list element.
         result = subprocess.run(
-            ["sc", "config", service_name, f"start= {sc_type}"],
+            ["sc", "config", service_name, "start=", sc_type],
             capture_output=True, text=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         if result.returncode == 0:
             logger.info("Service %s startup set to %s", service_name, startup_type)
-            # Stop the service if disabling
-            if startup_type == DISABLED:
-                subprocess.run(["sc", "stop", service_name],
-                               capture_output=True, timeout=10,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
-            # Start if setting to auto
-            elif startup_type == AUTO:
-                subprocess.run(["sc", "start", service_name],
-                               capture_output=True, timeout=10,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
-            return True
-        else:
-            logger.warning("Failed to set %s startup: %s",
-                           service_name, result.stderr.strip())
-            return False
+            if cascade_state:
+                if startup_type == DISABLED:
+                    subprocess.run(["sc", "stop", service_name],
+                                   capture_output=True, timeout=10,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+                elif startup_type == AUTO:
+                    subprocess.run(["sc", "start", service_name],
+                                   capture_output=True, timeout=10,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+            return True, "Updated."
+        msg = (result.stderr or result.stdout or "Unknown error").strip()
+        logger.warning("Failed to set %s startup: %s", service_name, msg)
+        return False, msg
     except Exception as e:
         logger.error("set_startup_type error (%s): %s", service_name, e)
-        return False
+        return False, str(e)
+
+
+def start_service(service_name: str) -> tuple[bool, str]:
+    """Start a service by name. Returns (ok, message)."""
+    try:
+        result = subprocess.run(
+            ["sc", "start", service_name],
+            capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if result.returncode == 0:
+            logger.info("Started service %s", service_name)
+            return True, "Started."
+        msg = (result.stderr or result.stdout or "Unknown error").strip()
+        logger.warning("Failed to start %s: %s", service_name, msg)
+        return False, msg
+    except Exception as e:
+        logger.error("start_service error (%s): %s", service_name, e)
+        return False, str(e)
+
+
+def stop_service(service_name: str) -> tuple[bool, str]:
+    """Stop a service by name. Returns (ok, message)."""
+    try:
+        result = subprocess.run(
+            ["sc", "stop", service_name],
+            capture_output=True, text=True, timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if result.returncode == 0:
+            logger.info("Stopped service %s", service_name)
+            return True, "Stopped."
+        msg = (result.stderr or result.stdout or "Unknown error").strip()
+        logger.warning("Failed to stop %s: %s", service_name, msg)
+        return False, msg
+    except Exception as e:
+        logger.error("stop_service error (%s): %s", service_name, e)
+        return False, str(e)
 
 
 def get_all_curated_states() -> list:
@@ -320,9 +364,10 @@ def apply_all_recommended(dry_run: bool = False) -> int:
         if live["startup_type"] == recommended:
             continue
         if dry_run:
-            logger.info("[DRY RUN] Would set %s → %s", name, recommended)
+            logger.info("[DRY RUN] Would set %s -> %s", name, recommended)
         else:
-            if set_startup_type(name, recommended):
+            ok, _msg = set_startup_type(name, recommended)
+            if ok:
                 changed += 1
     return changed
 

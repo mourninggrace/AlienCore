@@ -31,7 +31,13 @@ logger = logging.getLogger("aliencore.bar")
 # so the line flows smoothly leftward between polls.
 CHART_WINDOW_SECONDS   = 20    # time span shown inside each cell
 CHART_DRAW_INTERVAL_MS = 33    # ~30 fps
-_SAMPLE_LOG_MAXLEN     = 120   # per-sensor (t, v) ring buffer — enough for fast polling
+# Per-sensor ring buffers.  Defaults are sized for 8 GB hosts; systems with
+# more installed RAM keep proportionally more history (see core.mem_tier) so
+# pop-out sparklines and the inline chart can show a longer timeline without
+# any perceptible memory cost.
+from core import mem_tier as _mt
+_SAMPLE_LOG_MAXLEN     = _mt.scaled(120, cap=960)   # (t, v) samples per sensor
+_SPARK_HISTORY_MAXLEN  = _mt.scaled(90,  cap=720)   # value-only ring for sparkline popup
 
 # Cells whose values come from the lhm_bridge daemon (CPU/GPU/NVMe/DIMM temps
 # + CPU package watts).  When sensors.py is serving cached data because the
@@ -83,12 +89,87 @@ def _scaled_preset(scale: float) -> dict:
     }
 
 # ── Color palette ─────────────────────────────────────────────────────────────
+# Overwritten by apply_theme() once the Settings theme is known.  These values
+# are the historical "Void" defaults — safe to display if the config read
+# happens to fail.
 BG           = "#0b0b12"
 CELL_BG      = "#13131e"
 CELL_OUTLINE = "#232334"
 BORDER       = "#1a1f2e"
 FG_LABEL     = "#6e6e88"
 FG_DIM       = "#44445a"
+
+
+def _hex_to_rgb(h: str):
+    h = h.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def _rgb_to_hex(r: int, g: int, b: int) -> str:
+    r = max(0, min(255, int(r))); g = max(0, min(255, int(g))); b = max(0, min(255, int(b)))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _scale_color(hex_color: str, factor: float) -> str:
+    """factor < 1 darkens, > 1 lightens.  Clamped."""
+    try:
+        r, g, b = _hex_to_rgb(hex_color)
+        return _rgb_to_hex(r * factor, g * factor, b * factor)
+    except Exception:
+        return hex_color
+
+
+def _derive_bar_palette(theme_name: str) -> dict:
+    """Map a Settings theme entry to the bar's 6-slot palette.
+
+    The Settings palette has more slots than the bar needs, but the roles
+    line up cleanly:
+      bar BG           ← theme BG_HW       (darkest surface, inside ring)
+      bar CELL_BG      ← theme BG_PANEL    (one step up — cell faces)
+      bar CELL_OUTLINE ← theme BG_SECT     (quiet cell borders)
+      bar BORDER       ← theme SEP         (outer ring the comet rides on)
+      bar FG_LABEL     ← theme FG_DIM      (cell labels)
+      bar FG_DIM       ← darken(FG_DIM)    (tick/guide marks — must be dim)
+    """
+    try:
+        # Lazy import to avoid a circular edge during early startup — the
+        # Settings module is heavy, and the bar builds before Settings
+        # is ever opened.
+        from gui.settings_gui import THEMES
+    except Exception:
+        THEMES = {}
+    t = THEMES.get(theme_name) or THEMES.get("Void") or {}
+    return {
+        "BG":           t.get("BG_HW",    "#0b0b12"),
+        "CELL_BG":      t.get("BG_PANEL", "#13131e"),
+        "CELL_OUTLINE": t.get("BG_SECT",  "#232334"),
+        "BORDER":       t.get("SEP",      "#1a1f2e"),
+        "FG_LABEL":     t.get("FG_DIM",   "#6e6e88"),
+        "FG_DIM":       _scale_color(t.get("FG_DIM", "#6e6e88"), 0.55),
+    }
+
+
+def apply_theme(name: str):
+    """Rewrite the bar's module-level palette from a Settings theme name.
+
+    Safe to call at any time.  If the sensor bar window is alive, schedules
+    a rebuild on the Tk main thread so new colors take effect immediately.
+    """
+    global BG, CELL_BG, CELL_OUTLINE, BORDER, FG_LABEL, FG_DIM
+    p = _derive_bar_palette(name)
+    BG           = p["BG"]
+    CELL_BG      = p["CELL_BG"]
+    CELL_OUTLINE = p["CELL_OUTLINE"]
+    BORDER       = p["BORDER"]
+    FG_LABEL     = p["FG_LABEL"]
+    FG_DIM       = p["FG_DIM"]
+
+    inst = _instance
+    if inst is not None:
+        try:
+            inst.root.after(0, inst._reapply_theme)
+        except Exception:
+            pass
 
 # Per-sensor maximum sample values (used once at build to size each cell)
 _SAMPLE_VALUES = {
@@ -912,6 +993,16 @@ class SensorBar:
     }
 
     def __init__(self):
+        # Read the currently-selected Settings theme and map it into the
+        # bar's palette before any widget is built.
+        theme_name = "Void"
+        try:
+            theme_name = cfg.get_value("display", "settings_theme", default="Void")
+            apply_theme(theme_name)
+        except Exception:
+            pass
+        self._last_theme = theme_name
+
         self.root = tk.Tk()
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
@@ -1083,7 +1174,7 @@ class SensorBar:
             grip.bind(ev, cb)
 
         target_h = self._cell_height(s)
-        self.profile_badge = _ProfileBadge(self.inner, s, target_h)
+        self.profile_badge = _ProfileBadge(self.inner, s, target_h, bg=BG)
         pad_kw = self._cell_pad_kw(s["gap"])
         self.profile_badge.pack(side=self._pack_side(), **pad_kw)
         for ev, cb in [("<ButtonPress-1>",   self._drag_start),
@@ -1173,7 +1264,7 @@ class SensorBar:
                 continue
             label, getter, unit = sensor_map[config_key]
 
-            hud = _HudCell(self.inner, config_key, label, unit, s)
+            hud = _HudCell(self.inner, config_key, label, unit, s, bg=BG)
             hud.pack(side=self._pack_side(), **pad_kw)
             self._cell_widgets.append(hud.canvas)
 
@@ -1546,7 +1637,7 @@ class SensorBar:
         now = time.monotonic()
         for key in self._cells:
             if key not in self._history:
-                self._history[key] = collections.deque(maxlen=90)
+                self._history[key] = collections.deque(maxlen=_SPARK_HISTORY_MAXLEN)
             if key not in self._sample_log:
                 self._sample_log[key] = collections.deque(maxlen=_SAMPLE_LOG_MAXLEN)
             val = self._extract_numeric(key, readings)
@@ -1557,7 +1648,7 @@ class SensorBar:
         # and the user can open a standalone upload sparkline window.
         if "net_io" in self._cells:
             if "net_io_up" not in self._history:
-                self._history["net_io_up"] = collections.deque(maxlen=90)
+                self._history["net_io_up"] = collections.deque(maxlen=_SPARK_HISTORY_MAXLEN)
             up_val = self._extract_numeric("net_io_up", readings)
             self._history["net_io_up"].append(up_val)
 
@@ -1636,6 +1727,7 @@ class SensorBar:
         try:
             self._check_config_changed()
             self._apply_alpha_if_changed()
+            self._apply_theme_if_changed()
             c        = cfg.get()
             readings = sensors.get_readings()
             thresh   = c.get("thresholds", {})
@@ -1849,6 +1941,23 @@ class SensorBar:
         except Exception:
             pass
 
+    def _apply_theme_if_changed(self):
+        """Live-retint the bar when Settings (a separate subprocess) writes
+        a new display.settings_theme into config.  Called from _update right
+        after _check_config_changed reloads the file."""
+        try:
+            new_theme = cfg.get_value("display", "settings_theme", default="Void")
+        except Exception:
+            return
+        if new_theme == getattr(self, "_last_theme", None):
+            return
+        self._last_theme = new_theme
+        try:
+            apply_theme(new_theme)        # rewrites module palette
+            self._reapply_theme()         # re-tints live widgets + rebuilds cells
+        except Exception as e:
+            logger.debug("bar theme apply failed: %s", e)
+
     def _get_interval_ms(self) -> int:
         c    = cfg.get()
         unit = c.get("display", {}).get("update_interval_unit", "seconds")
@@ -1999,6 +2108,35 @@ class SensorBar:
         except Exception:
             pass
         self._sync_outer_size()
+
+    def _reapply_theme(self):
+        """Reskin the live bar after apply_theme() rewrote the module palette.
+
+        Re-tints the root + outer ring + inner frame, then rebuilds the cells
+        so every HUD canvas picks up the new CELL_BG / CELL_OUTLINE / FG_*.
+        """
+        try:
+            self.root.configure(bg=BG)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "_outer_canvas", None):
+                self._outer_canvas.configure(bg=BORDER)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "inner", None):
+                self.inner.configure(bg=BG)
+        except Exception:
+            pass
+        # Recolor the pre-allocated comet segments — they persist across
+        # rebuilds and keep a fill reference from the old palette otherwise.
+        for seg_id in getattr(self, "_perimeter_segments", []):
+            try:
+                self._outer_canvas.itemconfigure(seg_id, fill=BORDER)
+            except Exception:
+                pass
+        self._rebuild_bar_widgets()
 
     # ── Context menu ──────────────────────────────────────────────────────────
 

@@ -32,7 +32,10 @@ _lock          = threading.Lock()
 # list of (timestamp, freq_ghz, temp_c, cores_list_or_None)
 _samples       = []
 _WINDOW_SECS   = 60
-_MAX_STORED    = 500
+# Keep 500 samples (~60s at 8 Hz) on 8 GB boxes; scale up on systems with
+# spare RAM so boost analytics see further back without re-querying LHM.
+from core import mem_tier as _mt
+_MAX_STORED    = _mt.scaled(500, cap=4000)
 
 # Populated once from hardware profile
 _max_freq_mhz  = 0

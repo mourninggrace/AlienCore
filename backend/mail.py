@@ -102,3 +102,68 @@ If you didn't request this, you can safely ignore this email.
 </html>"""
 
     _send(to_email, subject, text, html)
+
+
+def send_feedback_email(from_email: str, feedback_type: str,
+                        description: str, sysinfo: str):
+    """Deliver a feedback/bug-report message from the app to the support inbox.
+
+    The From address stays our verified sender; `from_email` is surfaced in
+    the subject line and set as Reply-To so replies go straight back to the
+    user. Brevo's reply-to field is honored in the HTTP API.
+    """
+    from backend.config import FROM_EMAIL as _FROM
+    support_inbox = _FROM  # feedback goes to the verified sender inbox
+    subject = f"[AlienCore {feedback_type}] from {from_email}"
+
+    text = (f"Feedback type: {feedback_type}\n"
+            f"From: {from_email}\n\n"
+            f"--- Description ---\n{description}\n\n"
+            f"--- System Info ---\n{sysinfo}\n")
+
+    # HTML version — keep simple; preserve whitespace so log blocks render
+    def _esc(s: str) -> str:
+        return (s.replace("&", "&amp;").replace("<", "&lt;")
+                 .replace(">", "&gt;"))
+    html = f"""<html><body style="font-family:'Segoe UI',Arial,sans-serif;
+                                  background:#111;color:#ddd;padding:24px;">
+<h2 style="color:#00aaff;margin:0 0 8px 0;">AlienCore {_esc(feedback_type)}</h2>
+<p style="color:#888;margin:0 0 18px 0;">From: <strong>{_esc(from_email)}</strong></p>
+<h3 style="color:#00cc66;margin:0 0 4px 0;">Description</h3>
+<pre style="background:#0d0d0d;border:1px solid #222;padding:12px;
+            white-space:pre-wrap;font-family:'Segoe UI',Arial,sans-serif;
+            color:#ddd;border-radius:6px;">{_esc(description)}</pre>
+<h3 style="color:#00cc66;margin:18px 0 4px 0;">System Info</h3>
+<pre style="background:#0a0a0a;border:1px solid #222;padding:12px;
+            white-space:pre;font-family:Consolas,monospace;font-size:12px;
+            color:#aaa;border-radius:6px;">{_esc(sysinfo)}</pre>
+</body></html>"""
+
+    # Call _send but with reply_to override so Kyle can reply directly.
+    if not BREVO_API_KEY:
+        raise RuntimeError("AC_BREVO_API_KEY not set — cannot send email.")
+    payload = {
+        "sender":      {"name": FROM_NAME, "email": FROM_EMAIL},
+        "to":          [{"email": support_inbox}],
+        "replyTo":     {"email": from_email},
+        "subject":     subject,
+        "htmlContent": html,
+        "textContent": text,
+    }
+    req = urllib.request.Request(
+        _BREVO_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "api-key":      BREVO_API_KEY,
+            "content-type": "application/json",
+            "accept":       "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status >= 300:
+                raise RuntimeError(f"Brevo returned HTTP {resp.status}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"Brevo {e.code}: {body}") from None

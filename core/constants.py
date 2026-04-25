@@ -332,7 +332,7 @@ DEFAULT_CONFIG = {
         "watchdog_model":        "",            # blank = falls back to model, then cheapest default
         "watchdog_enabled":      False,         # periodically analyze system health via AI
         "watchdog_interval_sec": 300,           # seconds between watchdog checks (min 60)
-        "chat_history_max":      20,            # messages kept in rolling chat window
+        "chat_history_max":      60,            # messages kept in rolling chat window
     },
 
     # ── Service behavior ──
@@ -340,6 +340,6 @@ DEFAULT_CONFIG = {
         "log_enabled": True,
         "start_with_windows": True,
         "notify_on_profile_switch": False,    # toast notification on switch
-        "hardware_refresh_on_startup": True,
+        "hardware_refresh_on_startup": False,
     },
 }

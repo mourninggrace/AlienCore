@@ -4,6 +4,7 @@
 
 ### One app. Every tweak. Always adapting.
 
+[![Status](https://img.shields.io/badge/Status-Coming%20Soon-ff6b35?style=flat-square)](#coming-soon)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-blue?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 [![CPU](https://img.shields.io/badge/CPU-Intel%20%7C%20AMD-0071C5?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 [![GPU](https://img.shields.io/badge/GPU-NVIDIA-76B900?style=flat-square)](https://github.com/mourninggrace/AlienCore)
@@ -13,6 +14,20 @@
 *Your PC has dozens of power, thermal, and priority settings. AlienCore adjusts them automatically based on what you're actually doing — gaming, streaming, working, or idle.*
 
 </div>
+
+---
+
+<a id="coming-soon"></a>
+
+> ### 🚀 Coming Soon — Launch Imminent
+>
+> AlienCore is in final pre-release polish and ships **very soon**. The public v1.0.0 build will be available to download and buy here the moment it lands.
+>
+> **Join the launch waitlist** — get an email the day AlienCore goes live (plus a one-time launch-week discount code):
+>
+> 👉 **[mourning.grace.2014@gmail.com](mailto:mourning.grace.2014@gmail.com?subject=AlienCore%20waitlist)** — send any message with the subject **"AlienCore waitlist"** and you're in. No spam, no list-sharing, one email at launch.
+>
+> Want to follow progress instead? Watch this repo (top-right ⭐ / 👁️) — release notes post here the moment builds ship.
 
 ---
 
