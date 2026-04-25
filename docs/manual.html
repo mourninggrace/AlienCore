@@ -270,7 +270,6 @@
     <li><a href="#tab-storage">Storage</a></li>
     <li><a href="#tab-privacy">Privacy</a></li>
     <li><a href="#tab-profiles">Profiles</a></li>
-    <li><a href="#tab-custom">Custom Profiles</a></li>
     <li><a href="#tab-service">Service</a></li>
     <li><a href="#tab-thresholds">Thresholds</a></li>
     <li><a href="#tab-ai">AI</a></li>
@@ -427,6 +426,11 @@
 
   <h3>Offline Use</h3>
   <p>If the AlienCore servers are temporarily unreachable (no internet, server maintenance), you can continue using AlienCore for up to <strong>72 hours</strong> from your last successful verification. After that, a reconnection is required to continue.</p>
+
+  <h3>The Account Tab Layout</h3>
+  <p><strong>Settings → Account</strong> shows your status as a card: a colored avatar circle (initials drawn from your email), your email address, a tier subtitle, and a row of license badges — green for <strong>Base License</strong>, purple for <strong>Pro Add-on</strong>, orange for <strong>Trial</strong> (with days remaining), or gray for <em>Not signed in</em>. Action buttons (<strong>Refresh License</strong>, <strong>Sign Out</strong>, or <strong>Sign In</strong>) sit at the bottom of the card.</p>
+
+  <p>Once you own both the base license and the Pro add-on, the purchase advertising is replaced with a <strong>"Your AlienCore Pro Subscription"</strong> panel listing what's unlocked. Until then, the Licenses &amp; Add-ons cards described below appear in that space.</p>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════════
@@ -573,7 +577,7 @@
     <tr><td class="setting">Bar Orientation</td><td class="default">Horizontal</td><td>Arrange the sensor bar horizontally (top/bottom edge) or vertically (side edge).</td></tr>
     <tr><td class="setting">Bar Size</td><td class="default">1.0×</td><td>Continuous — drag the bottom edge of a horizontal bar or the right edge of a vertical bar to resize. No fixed presets; scale range is roughly 0.65× to 2.2×.</td></tr>
     <tr><td class="setting">Auto-hide Fullscreen</td><td class="default">On</td><td>Automatically hides the sensor bar when a full-screen app is detected (e.g., a game).</td></tr>
-    <tr><td class="setting">Theme</td><td class="default">Venom</td><td>Color theme for the Settings window. 12 distinct themes (Void, Hex, Purple, Glacier, Venom, Abyss, Aurora, Ember, Ash, Dusk, Ice, Noir).</td></tr>
+    <tr><td class="setting">Theme</td><td class="default">Void</td><td>Color theme for the Settings window <em>and</em> the floating sensor bar. Picking a theme retints both surfaces immediately. 11 distinct themes: Void, Nebula, Ember, Aurora, Spectre, Crimson, Phantom, Solaris, Hex, Glacier, Venom.</td></tr>
     <tr><td class="setting">Network Units</td><td class="default">MB/s</td><td>Unit used by the Network I/O cell and its history chart. Choose <strong>MB/s</strong> (default — megabytes per second), <strong>Mbps</strong> (megabits, matches ISP advertised speeds), or <strong>kbps</strong> (kilobits, useful on slow or metered links).</td></tr>
     <tr><td class="setting">Sensors to Display</td><td class="default">CPU, GPU, NVM1, NVM2, Fan, RAM, Battery</td><td>Toggle individual sensors on or off. Changes take effect immediately. NVM2 auto-hides when no second NVMe / SSD is present.</td></tr>
   </table>
@@ -720,10 +724,17 @@
 </section>
 
 <section id="tab-custom">
-  <h2>Custom Profiles Tab <span class="badge badge-base">BASE</span></h2>
-  <p>Create your own profiles that trigger based on specific applications. Each custom profile maps to one of the three built-in behavior modes (Idle, Gaming, or Streaming) but activates on your chosen process list.</p>
+  <h3>Custom Profiles <span class="badge badge-base">BASE</span></h3>
+  <p>The bottom of the Profiles tab — under the heading <strong>App-Based Profile Switching</strong> — lets you create your own profiles that trigger based on specific applications. Each custom profile maps to one of the three built-in behavior modes (Idle, Gaming, or Streaming) but activates on your chosen process list.</p>
 
   <p>Examples: a "Video Editing" profile that triggers on <code>premiere.exe</code> and uses Streaming behavior; or a "Compile" profile that triggers on <code>cl.exe</code> and runs at full Gaming power.</p>
+
+  <h4>Adding a Custom Profile</h4>
+  <ul style="padding-left:24px; line-height:2">
+    <li><strong>Profile name:</strong> the friendly label you'll see in the tray menu.</li>
+    <li><strong>Tray color:</strong> a real color swatch + color picker (no need to remember hex codes). The internal slug name and priority moved to an Advanced collapsible — you can usually ignore them.</li>
+    <li><strong>Process list:</strong> hand-type EXE names, or click <strong>Pick…</strong> / <strong>Pick running app…</strong> to choose from a filterable, checkbox list of currently running EXEs. Faster and avoids typos.</li>
+  </ul>
 
   <div class="box box-tip">
     <strong>Priority:</strong> Custom profiles are evaluated in priority order. Lower priority number = checked first. If multiple profiles match simultaneously, the one with the lowest priority number wins.
@@ -738,7 +749,7 @@
     <tr><td class="setting">Logging Enabled</td><td class="default">On</td><td>Writes a log to <code>logs/aliencore.log</code>. Useful for troubleshooting. Safe to leave on — log size is managed automatically.</td></tr>
     <tr><td class="setting">Start with Windows</td><td class="default">On</td><td>Adds AlienCore to the startup registry so it launches automatically when you log in.</td></tr>
     <tr><td class="setting">Notify on Profile Switch</td><td class="default">Off</td><td>Shows a Windows toast notification every time the active profile changes (idle → gaming, etc.).</td></tr>
-    <tr><td class="setting">Hardware Refresh on Startup</td><td class="default">On</td><td>Re-scans your hardware on every launch. Disable to speed up startup if your hardware never changes.</td></tr>
+    <tr><td class="setting">Hardware Refresh on Startup</td><td class="default">Off</td><td>Re-scans your hardware on every launch. Off by default so first-boot is faster; enable if you swap hardware regularly.</td></tr>
   </table>
 
   <h3>Running as a Windows Service</h3>
@@ -748,6 +759,15 @@ python aliencore.py --uninstall # remove the service</code></pre>
   <div class="box box-warn">
     <strong>Note:</strong> The GUI (sensor bar, settings window) requires a logged-in desktop session and will not appear when running as a headless service.
   </div>
+
+  <h3>Windows Services Manager</h3>
+  <p>The Service tab also lists curated Windows services that affect performance, grouped by safety: <em>Managed by AlienCore</em>, <em>Safe to adjust</em>, <em>Adjust with caution</em>, and <em>Leave alone — system critical</em>. Each row shows the service's current state and lets you change its startup type or run/stop it directly.</p>
+  <ul style="padding-left:24px; line-height:2">
+    <li><strong>Per-row Start / Stop:</strong> immediate run-state change. The buttons disable themselves based on current state (no Stop button on a stopped service). Clicks surface a colored status banner — green ✓ on success, red ✗ on failure with a beep — and the affected row briefly flashes.</li>
+    <li><strong>Pending changes queue:</strong> dropdown changes (Automatic / Manual / Disabled) buffer up rather than committing immediately. A counter button at the top reads <strong>Apply Pending Changes (N)</strong> — review your edits first, then commit them in one go. Click the dropdown back to its original value to clear that pending change.</li>
+    <li><strong>Apply All Safe Recommendations:</strong> one-click button that queues AlienCore's recommended startup types for every service marked <em>Safe</em>, then applies them.</li>
+    <li><strong>Admin required:</strong> changing service startup types or run state needs administrator privileges. If AlienCore wasn't launched elevated, an inline banner warns you and the action buttons no-op.</li>
+  </ul>
 </section>
 
 <section id="tab-thresholds">
@@ -777,7 +797,7 @@ python aliencore.py --uninstall # remove the service</code></pre>
     <tr><td class="setting">Model</td><td class="default">Automatic</td><td>Leave blank to use the provider's recommended default. Or specify a model name (e.g., <code>claude-haiku-4-5</code>).</td></tr>
     <tr><td class="setting">Watchdog Enabled</td><td class="default">Off</td><td>Automatically analyzes system health at a set interval and alerts you to anomalies.</td></tr>
     <tr><td class="setting">Watchdog Interval</td><td class="default">300 sec</td><td>How often the AI watchdog checks your system. Minimum 60 seconds.</td></tr>
-    <tr><td class="setting">Chat History Max</td><td class="default">20 messages</td><td>How many messages to keep in the rolling chat window.</td></tr>
+    <tr><td class="setting">Chat History Max</td><td class="default">60 messages</td><td>How many messages to keep in the rolling chat window.</td></tr>
   </table>
 </section>
 
