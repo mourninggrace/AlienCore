@@ -54,6 +54,7 @@ PROFILE_NAMES = {
 # AlienCore profile → AWCC USTT profile mapping
 ALIENCORE_TO_AWCC = {
     "idle":      PROFILE_BALANCED,
+    "working":   PROFILE_BALANCED,    # productivity has minimal GPU/thermal load
     "gaming":    PROFILE_PERFORMANCE,
     "streaming": PROFILE_BALANCED_HP,
     "manual":    None,   # don't change AWCC profile on manual override

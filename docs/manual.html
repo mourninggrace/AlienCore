@@ -360,7 +360,7 @@
     <tr><td>Per-core temp + load</td><td class="optimal">Yes (P/E split)</td></tr>
     <tr><td>Boost tracker / Boost Score</td><td class="optimal">Yes</td></tr>
     <tr><td>Core parking / unparking</td><td class="optimal">Yes</td></tr>
-    <tr><td>Profile engine (idle / gaming / streaming)</td><td class="optimal">Yes</td></tr>
+    <tr><td>Profile engine (idle / working / gaming / streaming)</td><td class="optimal">Yes</td></tr>
     <tr><td>Thread Director / hetero-scheduling</td><td class="optimal">Yes</td></tr>
     <tr><td>TVB Optimizer</td><td class="optimal">Yes (i9 Raptor Lake+)</td></tr>
     <tr><td>Voltage offset (AI tool)</td><td class="optimal">Intel OC Mailbox (MSR 0x150)</td></tr>
@@ -452,7 +452,7 @@
       <div class="price-label">AlienCore — Lifetime License</div>
       <ul>
         <li>All CPU, GPU, RAM, Network, Storage, Privacy &amp; Visual optimizations</li>
-        <li>Automatic profile switching (Idle / Gaming / Streaming)</li>
+        <li>Automatic profile switching (Idle / Working / Gaming / Streaming)</li>
         <li>TVB Optimizer, Boost Score, CPU Topology, Interrupt Steering</li>
         <li>Dynamic Boost Monitor, VRAM Clock Lock, Throttle Log, Efficiency Curve, Driver Flags</li>
         <li>Working Set Trimmer, Leak Watchdog, DIMM Protection, Pagefile Advisor</li>
@@ -522,7 +522,7 @@
   </div>
 
   <h3>Profile Badge &amp; System Clock</h3>
-  <p>The left-most cell on the bar stacks the current profile name (<code>IDLE</code>, <code>GAMING</code>, <code>STREAMING</code>, or any user profile) above a 12-hour system clock with seconds and AM/PM suffix. The clock updates every second at zero cost — a 30 fps animation frame simply skips the repaint until the wall-clock second rolls over. When <strong>Turbo Cool</strong> is active, the badge swaps to a cyan <code>COOL M:SS</code> readout showing how long the boost has been running.</p>
+  <p>The left-most cell on the bar stacks the current profile name (<code>IDLE</code>, <code>WORKING</code>, <code>GAMING</code>, <code>STREAMING</code>, or any user profile) above a 12-hour system clock with seconds and AM/PM suffix. The clock updates every second at zero cost — a 30 fps animation frame simply skips the repaint until the wall-clock second rolls over. When <strong>Turbo Cool</strong> is active, the badge swaps to a cyan <code>COOL M:SS</code> readout showing how long the boost has been running.</p>
 
   <h3>Resize &amp; Position</h3>
   <p>Drag the body of the bar with the left mouse button to move it. The bar auto-snaps to screen edges. To resize, hover the <strong>bottom edge</strong> of a horizontal bar (or the <strong>right edge</strong> of a vertical bar) until the cursor changes to a double-arrow, then drag — the entire bar scales smoothly between roughly 65 % and 220 % of the default size. All cell fonts, paddings, and chart heights scale together, and the new size persists across restarts. The fixed size presets from earlier builds have been replaced by this continuous drag-to-resize.</p>
@@ -705,27 +705,34 @@
 
   <table>
     <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
-    <tr><td class="setting">Detect by Process</td><td class="default">On</td><td>Watches the process list for known game launchers and streaming apps. Switches profiles the moment a matching process is detected.</td></tr>
-    <tr><td class="setting">Detect by Load</td><td class="default">On</td><td>Switches to Gaming profile if GPU load exceeds the GPU threshold, even if no known game process is found.</td></tr>
+    <tr><td class="setting">Detect by Process</td><td class="default">On</td><td>Watches the process list for known game launchers, streaming apps, and productivity-class apps (browsers, Office, Teams, IDEs, Adobe). Switches profiles the moment a matching process is detected (gaming/streaming) or biases the Working threshold (productivity).</td></tr>
+    <tr><td class="setting">Detect by Load</td><td class="default">On</td><td>Switches to Gaming profile if GPU load exceeds the GPU threshold, or to Working profile if CPU load is sustained without gaming-class GPU heat.</td></tr>
     <tr><td class="setting">Gaming GPU Threshold</td><td class="default">40%</td><td>GPU utilization % above which AlienCore assumes a game is running.</td></tr>
     <tr><td class="setting">Gaming CPU Threshold</td><td class="default">30%</td><td>CPU utilization % (used in combination with GPU threshold).</td></tr>
+    <tr><td class="setting">Working CPU Threshold</td><td class="default">25%</td><td>CPU utilization % above which AlienCore assumes productivity load (provided GPU is cool). Auto-scaled by RAM tier: weaker hardware promotes sooner. Productivity-class processes lower this threshold by 5pp.</td></tr>
     <tr><td class="setting">Custom Streaming Processes</td><td class="default">Empty</td><td>Add EXE names here to have them trigger the Streaming profile.</td></tr>
     <tr><td class="setting">Custom Gaming Processes</td><td class="default">Empty</td><td>Add EXE names here to have them trigger the Gaming profile.</td></tr>
+    <tr><td class="setting">Custom Working Processes</td><td class="default">Empty</td><td>Add EXE names here to have them lower the Working CPU threshold (process bias). Useful for niche productivity apps not in AlienCore's built-in list.</td></tr>
   </table>
 
   <h3>Automatic Profiles</h3>
-  <p>AlienCore switches between three built-in profiles automatically:</p>
+  <p>AlienCore switches between four built-in profiles automatically. Priority on conflicts: <strong>Streaming &gt; Gaming &gt; Working &gt; Idle</strong>.</p>
   <table>
     <tr><th>Profile</th><th>Triggered by</th><th>Effect</th></tr>
     <tr><td><strong>Idle</strong></td><td>No game or streaming app detected, low load</td><td>CPU throttled to idle ceiling; GPU at reduced power; animations on; background tweaks active.</td></tr>
+    <tr><td><strong>Working</strong></td><td>Sustained CPU load (no GPU heat) — many tabs, many apps, productivity bursts. Browsers, Office, Teams/Slack/Zoom, IDEs, and Adobe apps lower the threshold so promotion happens sooner.</td><td>Full CPU ceiling on demand (100%) but tuned for <em>responsiveness</em>: perf-increase threshold raised to 30%, half the cores held online so context switches don't stall, AWCC stays Balanced (no GPU spin-up).</td></tr>
     <tr><td><strong>Gaming</strong></td><td>Game process detected or high GPU load</td><td>Full CPU power; full GPU power; core parking off; EcoQoS on background apps; animations off.</td></tr>
     <tr><td><strong>Streaming</strong></td><td>OBS / Streamlabs / XSplit detected</td><td>Full CPU power; GPU at ~85%; balanced between encode and render.</td></tr>
   </table>
+
+  <div class="box box-tip">
+    <strong>Hardware-tier scaling:</strong> the Working CPU threshold (default 25%) auto-scales by installed RAM tier. On systems with ≤ 8 GB RAM, AlienCore promotes to Working at ~17% CPU; on 32 GB+ machines it holds Idle longer until ~29%. The idea is that weaker hardware feels sluggish under less load, so it should respond sooner.
+  </div>
 </section>
 
 <section id="tab-custom">
   <h3>Custom Profiles <span class="badge badge-base">BASE</span></h3>
-  <p>The bottom of the Profiles tab — under the heading <strong>App-Based Profile Switching</strong> — lets you create your own profiles that trigger based on specific applications. Each custom profile maps to one of the three built-in behavior modes (Idle, Gaming, or Streaming) but activates on your chosen process list.</p>
+  <p>The bottom of the Profiles tab — under the heading <strong>App-Based Profile Switching</strong> — lets you create your own profiles that trigger based on specific applications. Each custom profile maps to one of the four built-in behavior modes (Idle, Working, Gaming, or Streaming) but activates on your chosen process list.</p>
 
   <p>Examples: a "Video Editing" profile that triggers on <code>premiere.exe</code> and uses Streaming behavior; or a "Compile" profile that triggers on <code>cl.exe</code> and runs at full Gaming power.</p>
 
@@ -794,7 +801,7 @@ python aliencore.py --uninstall # remove the service</code></pre>
     <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
     <tr><td class="setting">Provider</td><td class="default">Anthropic</td><td>Choose between Anthropic (Claude) or any OpenAI-compatible API (OpenAI, Groq, local Ollama, etc.).</td></tr>
     <tr><td class="setting">API Key</td><td class="default">Empty</td><td>Your API key. Stored locally in <code>config.json</code> — never sent to AlienCore servers.</td></tr>
-    <tr><td class="setting">Model</td><td class="default">Automatic</td><td>Leave blank to use the provider's recommended default. Or specify a model name (e.g., <code>claude-haiku-4-5</code>).</td></tr>
+    <tr><td class="setting">Model</td><td class="default">Automatic</td><td>Leave blank to use the provider's recommended default, or pick from the dropdown — which is fetched live from the provider's <code>/v1/models</code> endpoint as soon as your API key is set, so new model releases (e.g. a future Claude Opus 4.8) appear automatically without an AlienCore update. Click <strong>↻ Refresh</strong> next to the row to re-fetch on demand. Falls back to a built-in list if the network or the key isn't reachable.</td></tr>
     <tr><td class="setting">Watchdog Enabled</td><td class="default">Off</td><td>Automatically analyzes system health at a set interval and alerts you to anomalies.</td></tr>
     <tr><td class="setting">Watchdog Interval</td><td class="default">300 sec</td><td>How often the AI watchdog checks your system. Minimum 60 seconds.</td></tr>
     <tr><td class="setting">Chat History Max</td><td class="default">60 messages</td><td>How many messages to keep in the rolling chat window.</td></tr>

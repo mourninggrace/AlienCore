@@ -7,8 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security / Legal
+
+- Added a prominent **trademark disclaimer** to the README (top callout +
+  footer notice) clarifying that AlienCore is an independent third-party
+  utility and is **not affiliated with, endorsed by, sponsored by, or
+  connected to Dell Technologies Inc. or Alienware**. Covers both the
+  "Alien" naming and the AWCC WMI integration. This is now the most
+  visible piece of legal text in the repo, sitting directly under the
+  pre-launch waitlist callout.
+- **Pro license can no longer be purchased without an active Base
+  license.** Three-layer enforcement:
+  1. Settings → Account: the Pro card now shows a disabled "Locked ✕"
+     button and an inline note explaining Base must be purchased first.
+  2. The PayPal launcher (`_paypal()` in `gui/settings_gui.py`)
+     short-circuits with a warning before opening the checkout URL if
+     `auth.is_licensed()` is false and the requested product is AC_PRO.
+  3. Backend `/paypal/ipn` handler refuses to grant Pro to users without
+     `has_base=1` — the purchase row is recorded with status
+     `rejected_no_base` and a WARNING is logged for manual refund. This
+     blocks bypass attempts via hand-crafted PayPal links that skip the
+     client UI entirely.
+
 ### Added
 
+- Settings → AI → Model dropdowns now **fetch the live model list directly
+  from the configured provider** instead of showing a hardcoded list. New
+  Anthropic flagships (Opus 4.8, future Claude tiers) and new OpenAI / Groq
+  / Together / Mistral models surface in the dropdown automatically the
+  moment the provider lists them at `/v1/models` — no AlienCore update
+  required. Implementation: new `core/ai_models.py` calls each provider's
+  `/v1/models` endpoint with a 1-hour cache, falls back silently to the
+  built-in list whenever the key is missing, the network is unreachable,
+  or the response is malformed. Anthropic results are tier-bucketed
+  (opus → sonnet → haiku, newest version first within each tier); OpenAI
+  native is filtered to chat-class IDs (gpt-*, o1/o3/o4-*) so the dropdown
+  isn't polluted with embedding/whisper/dall-e/tts model names; third-party
+  OpenAI-compat endpoints (Groq, Together, Ollama, etc.) show whatever the
+  provider returns. A small **↻ Refresh** button next to the Model row
+  forces a re-fetch — useful right after entering an API key, since the
+  tab-open fetch happens before the key field is filled.
+- New **Working** profile — a fourth default tier sitting between Idle and
+  Gaming for productivity / multi-tasking workloads (many browser tabs, IDE
+  + Slack + video call, Photoshop, etc.). Behavior is *responsiveness-tuned*,
+  not throughput-capped: CPU ceiling stays at 100% so bursts get full power
+  on demand, but the perf-increase threshold is raised to 30% (vs Gaming's
+  15%, Idle's 50%) and core parking holds half the cores online so context
+  switches don't pay the wake penalty. AWCC thermal profile stays Balanced
+  (no GPU heat). Triggered primarily by *load* — sustained CPU% without
+  gaming-class GPU heat — with a **process bias**: detecting browsers,
+  Office, Teams/Slack/Zoom, IDEs, or Adobe apps lowers the CPU threshold by
+  5pp so promotion happens sooner. The default 25% CPU threshold also
+  **scales by hardware tier** via `mem_tier`: weaker hardware (≤ 8 GB RAM)
+  promotes to Working at ~17% CPU, powerful hardware (> 32 GB) holds idle
+  longer until ~29%. Hysteresis is longer than Gaming's (~50-60s vs ~30s)
+  because productivity load is noisier (background indexing, AV scans, JS
+  GC). Working appears in the tray override menu, the sensor bar's
+  right-click menu, and as a base behavior option for Custom Profiles. New
+  `profiles.working_cpu_threshold` and `profiles.custom_working_processes`
+  config knobs surface in Settings → Profiles.
 - The Settings theme now also retints the floating sensor bar.  Picking
   Crimson / Aurora / Hex / Glacier / etc. immediately reskins the bar's
   background, cell faces, outline, and label colors to match — both
@@ -53,6 +110,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Settings → Services: clicking Start on an already-running service or
+  Stop on an already-stopped service is now a silent no-op instead of
+  surfacing an `sc.exe` error dialog. The handler checks live state
+  before invoking sc, so stale button states (e.g., after the service
+  was changed externally) no longer pop an error.
 - Settings → Profiles and Custom Profiles are now a single tab. Custom
   Profiles lives at the bottom under "App-Based Profile Switching".
 - Settings → AI → Model section replaces the bare text entries with

@@ -325,12 +325,34 @@ def paypal_ipn():
         ).fetchone():
             return "", 200   # duplicate — already processed
 
+        conn.execute("INSERT OR IGNORE INTO users (email) VALUES (?)", (email,))
+
+        # Pro requires base. If a Pro payment arrives for a user who doesn't
+        # own base (client gate bypassed, or someone hand-crafted a PayPal
+        # request), record the purchase as needing manual refund and skip
+        # the grant.
+        if item_number == "AC_PRO":
+            row = conn.execute(
+                "SELECT has_base FROM users WHERE email=?", (email,)
+            ).fetchone()
+            if not row or not row["has_base"]:
+                conn.execute(
+                    "INSERT INTO purchases (txn_id, email, product, amount, status)"
+                    " VALUES (?,?,?,?,?)",
+                    (txn_id, email, item_number, mc_gross, "rejected_no_base"),
+                )
+                logger.warning(
+                    "REJECTED PRO grant: %s paid for AC_PRO without owning "
+                    "AC_BASE. Txn %s recorded for manual refund.",
+                    email, txn_id,
+                )
+                return "", 200
+
         conn.execute(
             "INSERT INTO purchases (txn_id, email, product, amount, status)"
             " VALUES (?,?,?,?,?)",
             (txn_id, email, item_number, mc_gross, "completed"),
         )
-        conn.execute("INSERT OR IGNORE INTO users (email) VALUES (?)", (email,))
 
         if item_number == "AC_BASE":
             conn.execute("UPDATE users SET has_base=1 WHERE email=?", (email,))

@@ -161,8 +161,9 @@ def get_insights_summary() -> dict:
     thermal_events   = [e for e in events if e["type"] == "thermal_event"]
     ceiling_changes  = [e for e in events if e["type"] == "cpu_ceiling"]
 
-    gaming_sessions   = [e for e in profile_switches if e["profile"] == "gaming"]
+    gaming_sessions    = [e for e in profile_switches if e["profile"] == "gaming"]
     streaming_sessions = [e for e in profile_switches if e["profile"] == "streaming"]
+    working_sessions   = [e for e in profile_switches if e["profile"] == "working"]
 
     summary = {
         "status":            "active",
@@ -170,6 +171,7 @@ def get_insights_summary() -> dict:
         "total_events":      len(events),
         "gaming_sessions":   len(gaming_sessions),
         "streaming_sessions": len(streaming_sessions),
+        "working_sessions":  len(working_sessions),
         "thermal_warnings":  len([e for e in thermal_events if e["severity"] == "warn"]),
         "thermal_criticals": len([e for e in thermal_events if e["severity"] == "crit"]),
         "ceiling_changes":   len(ceiling_changes),

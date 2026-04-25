@@ -538,6 +538,8 @@ def _build_override_items():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Idle",
                          lambda item: profiles.set_manual_override("idle")),
+        pystray.MenuItem("Working",
+                         lambda item: profiles.set_manual_override("working")),
         pystray.MenuItem("Gaming",
                          lambda item: profiles.set_manual_override("gaming")),
         pystray.MenuItem("Streaming",

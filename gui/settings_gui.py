@@ -1905,28 +1905,34 @@ class SettingsWindow:
     def _tab_profiles(self):
         t = self._make_tab("Profiles")
         self._section(t, "App-Based Profile Switching")
-        self._opt(t, "profiles.enabled",          "Enable profile switching",          "Auto idle/gaming/streaming")
-        self._opt(t, "profiles.detect_by_process","Detect by process names",           "OBS, game EXEs, etc.")
+        self._opt(t, "profiles.enabled",          "Enable profile switching",          "Auto idle/working/gaming/streaming")
+        self._opt(t, "profiles.detect_by_process","Detect by process names",           "OBS, game EXEs, productivity apps, etc.")
         self._opt(t, "profiles.detect_by_load",   "Detect by load signals",            "GPU% and CPU% thresholds")
         self._slider(t, "profiles.gaming_gpu_threshold", "Gaming GPU% threshold", 10, 90, 5, fmt=lambda v: f"{int(v)}%")
         self._slider(t, "profiles.gaming_cpu_threshold", "Gaming CPU% threshold", 10, 90, 5, fmt=lambda v: f"{int(v)}%")
+        self._slider(t, "profiles.working_cpu_threshold", "Working CPU% threshold", 10, 60, 5,
+                     fmt=lambda v: f"{int(v)}%",
+                     note="Productivity load (no GPU heat). Auto-scaled by RAM tier — "
+                          "weaker hardware promotes sooner.")
 
         self._section(t, "Custom process lists")
         self._note(t,
-            "Tell AlienCore which apps count as Streaming or Gaming. "
-            "One app per line — for example, obs64.exe or eldenring.exe. "
+            "Tell AlienCore which apps count as Streaming, Gaming, or Working. "
+            "One app per line — for example, obs64.exe, eldenring.exe, or figma.exe. "
             "Use \u201cPick running app\u201d to add whatever you have open right now.")
         self._process_list_with_picker(t, "profiles.custom_streaming_processes",
                                        "Additional streaming apps")
         self._process_list_with_picker(t, "profiles.custom_gaming_processes",
                                        "Additional gaming apps")
+        self._process_list_with_picker(t, "profiles.custom_working_processes",
+                                       "Additional working apps")
 
         # ── Custom Profiles (moved here from its own tab) ─────────────────────
         self._section(t, "Custom Profiles")
         self._note(t,
             "Create your own named profiles that switch on automatically "
             "when certain apps are running. Each profile starts from a base "
-            "behavior (Idle, Gaming, or Streaming) and shows up in the tray "
+            "behavior (Idle, Working, Gaming, or Streaming) and shows up in the tray "
             "Override menu with a color you choose.")
 
         # Profile list
@@ -2255,6 +2261,7 @@ class SettingsWindow:
         beh_var = tk.StringVar(value=existing.get("behavior", "idle") if existing else "idle")
         beh_row = tk.Frame(body, bg=BG); beh_row.pack(anchor="w", pady=(2, 0))
         for val, lbl in [("idle", "Idle / Everyday"),
+                         ("working", "Working / Productivity"),
                          ("gaming", "Gaming"),
                          ("streaming", "Streaming / Recording")]:
             tk.Radiobutton(beh_row, text=lbl, variable=beh_var, value=val,
@@ -2530,25 +2537,10 @@ class SettingsWindow:
             "used for automatic analysis."
         )
 
-        _ANTHROPIC_MODELS = [
-            "claude-opus-4-7",
-            "claude-sonnet-4-6",
-            "claude-haiku-4-5-20251001",
-        ]
-        _OPENAI_MODELS = [
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4-turbo",
-            "gpt-3.5-turbo",
-            "llama-3.3-70b-versatile",
-            "mixtral-8x7b-32768",
-            "mistral-large-latest",
-            "grok-2-latest",
-        ]
+        from core import ai_models
 
         def _preset_list():
-            return (_ANTHROPIC_MODELS if pv.get() == "anthropic"
-                    else _OPENAI_MODELS)
+            return ai_models.fallback(pv.get())
 
         def _combo_row(key: str, label: str, default_hint: str):
             var = self._var(key, str)
@@ -2572,6 +2564,87 @@ class SettingsWindow:
             "ai.watchdog_model", "Watchdog model",
             "Blank = same as chat. Default: claude-haiku / gpt-4o-mini")
 
+        # ── Live model-list refresh ───────────────────────────────────────────
+        # Initial render uses the hardcoded fallback (instant, no network).
+        # We then fire a background fetch against the provider's /v1/models
+        # endpoint and swap the combobox values when it returns. Falls back
+        # silently if the key is empty, the network is offline, or the
+        # endpoint misbehaves — the user just keeps the preset list.
+        refresh_row = tk.Frame(t, bg=BG_SECT)
+        refresh_row.pack(fill="x", padx=16, pady=(0, 6))
+        refresh_status = tk.Label(refresh_row, text="",
+                                  font=("Segoe UI", 8, "italic"),
+                                  bg=BG_SECT, fg=FG_DIM)
+        refresh_status.pack(side="left", padx=(176, 6))
+        refresh_gen = {"n": 0}
+
+        def _populate_live(force: bool = False):
+            refresh_gen["n"] += 1
+            my_gen = refresh_gen["n"]
+            provider = pv.get()
+            api_key  = (self._cfg_get("ai.api_key") or "").strip()
+            base_url = (self._cfg_get("ai.base_url") or "").strip()
+
+            if not api_key:
+                try:
+                    refresh_status.config(
+                        text="Set an API key to fetch the live model list",
+                        fg=FG_DIM)
+                except tk.TclError:
+                    pass
+                return
+
+            try:
+                refresh_status.config(text="Fetching live model list…",
+                                      fg=FG_DIM)
+            except tk.TclError:
+                return
+
+            def worker():
+                ids = ai_models.fetch_models(provider, api_key, base_url,
+                                             force_refresh=force)
+                # Detect fallback: if the API call failed, fetch_models
+                # returns the same list as fallback(). Compare by content
+                # so we can show the user whether the dropdown is live or stale.
+                is_fallback = (ids == ai_models.fallback(provider))
+
+                def apply():
+                    if my_gen != refresh_gen["n"]:
+                        return  # superseded by a newer call
+                    try:
+                        for cb in (chat_cb, watch_cb):
+                            cb.configure(values=ids)
+                        if is_fallback:
+                            refresh_status.config(
+                                text="Using built-in list "
+                                     "(network unreachable or key invalid)",
+                                fg=WARN)
+                        else:
+                            refresh_status.config(
+                                text=f"Live list  ·  {len(ids)} model(s) available",
+                                fg=ACCENT2)
+                    except tk.TclError:
+                        pass
+
+                try:
+                    self.root.after(0, apply)
+                except Exception:
+                    pass
+
+            threading.Thread(target=worker, daemon=True,
+                             name="AIModelsFetch").start()
+
+        # Manual refresh button — useful right after entering an API key
+        # (the tab-open fetch happened before the key was set).
+        def _force_refresh():
+            ai_models.clear_cache()
+            _populate_live(force=True)
+
+        self._btn(refresh_row, "↻ Refresh", _force_refresh, ACCENT
+                  ).pack(side="right")
+
+        # Re-fetch when the user toggles provider — different namespace,
+        # different cache entry, often a different API key requirement.
         def _refresh_model_presets(*_a):
             lst = _preset_list()
             for cb in (chat_cb, watch_cb):
@@ -2579,7 +2652,11 @@ class SettingsWindow:
                     cb.configure(values=lst)
                 except Exception:
                     pass
+            _populate_live()
         pv.trace_add("write", _refresh_model_presets)
+
+        # Initial best-effort fetch on tab open
+        self.root.after(50, _populate_live)
 
         # ── Test ──────────────────────────────────────────────────────────────
         self._test_status = tk.StringVar(value="")
@@ -2689,6 +2766,7 @@ class SettingsWindow:
             stat("Total events logged", summary.get("total_events", 0))
             stat("Gaming sessions",     summary.get("gaming_sessions", 0))
             stat("Streaming sessions",  summary.get("streaming_sessions", 0))
+            stat("Working sessions",    summary.get("working_sessions", 0))
             stat("Thermal warnings",    summary.get("thermal_warnings", 0),
                  color=WARN if summary.get("thermal_warnings", 0) > 0 else ACCENT2)
             stat("Critical temp events",summary.get("thermal_criticals", 0),
@@ -3505,6 +3583,15 @@ class SettingsWindow:
                 status_msg.set("Sign in first before purchasing.")
                 status_feed.config(fg=WARN)
                 return
+            # Pro add-on requires the base license. Guard the network call
+            # too — UI button gating could be bypassed by stale state.
+            if item_number == "AC_PRO" and not auth.is_licensed():
+                status_msg.set(
+                    "The Pro add-on requires the AlienCore base license. "
+                    "Purchase AlienCore ($19.99) first, then return to "
+                    "add Pro for +$4.99.")
+                status_feed.config(fg=WARN)
+                return
             params = urllib.parse.urlencode({
                 "cmd":           "_xclick",
                 "business":      PAYPAL_BUSINESS_EMAIL,
@@ -3636,11 +3723,29 @@ class SettingsWindow:
                 tk.Label(info, text=desc, font=("Segoe UI", 8),
                          bg=BG_SECT, fg=FG_DIM, wraplength=600,
                          justify="left").pack(anchor="w", pady=(2, 0))
-                _n, _p = item_number, price
-                self._btn(row, "Purchase  →",
-                          lambda n=_n, l=label, p=_p: _paypal(
-                              n, l, p.replace("+", "").replace("$", "").strip()),
-                          color, bold=True).pack(side="right", padx=(12, 0))
+
+                # Pro add-on requires the base license. When base isn't owned,
+                # show the Pro card with a disabled button + clear note so the
+                # user understands the upgrade path without being able to skip it.
+                pro_locked = (item_number == "AC_PRO" and not has_base)
+                if pro_locked:
+                    tk.Label(info,
+                             text="Requires AlienCore base license — "
+                                  "purchase that first, then return here to "
+                                  "add Pro.",
+                             font=("Segoe UI", 8, "italic"),
+                             bg=BG_SECT, fg=WARN, wraplength=600,
+                             justify="left").pack(anchor="w", pady=(4, 0))
+                    btn = self._btn(row, "Locked  ✕",
+                                    lambda: None, FG_DIM, bold=True)
+                    btn.config(state="disabled")
+                    btn.pack(side="right", padx=(12, 0))
+                else:
+                    _n, _p = item_number, price
+                    self._btn(row, "Purchase  →",
+                              lambda n=_n, l=label, p=_p: _paypal(
+                                  n, l, p.replace("+", "").replace("$", "").strip()),
+                              color, bold=True).pack(side="right", padx=(12, 0))
 
         # Wire the licenses section into the auth-state callback chain.
         # _refresh_display() is invoked from initial render, sign-in/out,
@@ -3993,6 +4098,13 @@ class SettingsWindow:
     def _svc_do(self, action: str, name: str):
         """Run start/stop in a background thread so the UI stays responsive."""
         from core import services_manager as sm
+
+        live = sm.get_service_state(name)
+        state = live.get("state")
+        if action == "start" and state == "Running":
+            return
+        if action == "stop" and state == "Stopped":
+            return
 
         def worker():
             if action == "start":

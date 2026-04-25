@@ -196,6 +196,7 @@ _SAMPLE_VALUES = {
 
 _PROFILE_COLORS = {
     "idle":      "#2a6b98",
+    "working":   "#3aa15e",
     "gaming":    "#e63300",
     "streaming": "#0088e0",
     "manual":    "#b88800",
@@ -2186,6 +2187,8 @@ class SensorBar:
                          command=lambda: profiles.set_manual_override(None))
         menu.add_command(label="Profile: Idle",
                          command=lambda: profiles.set_manual_override("idle"))
+        menu.add_command(label="Profile: Working",
+                         command=lambda: profiles.set_manual_override("working"))
         menu.add_command(label="Profile: Gaming",
                          command=lambda: profiles.set_manual_override("gaming"))
         menu.add_command(label="Profile: Streaming",

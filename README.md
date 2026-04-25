@@ -31,6 +31,16 @@
 
 ---
 
+> ### ⚠️ Trademark Disclaimer — Not Affiliated With Dell or Alienware
+>
+> **AlienCore is an independent, unofficial third-party utility.** It is **not** developed by, endorsed by, sponsored by, licensed by, or affiliated with **Dell Technologies Inc.**, **Alienware**, or any of their subsidiaries or affiliates in any way.
+>
+> "Alienware" is a registered trademark of Dell Inc. The "Alien" prefix in "AlienCore" refers to the project's design aesthetic and has no commercial connection to Alienware-brand hardware or software. While AlienCore can interface with the Alienware Command Center (AWCC) WMI provider on systems where it is present, this integration is read/write through a **public WMI interface** and does not imply any partnership, certification, or endorsement.
+>
+> All product names, logos, and brands referenced in this project are the property of their respective owners. Use of these names does not imply endorsement.
+
+---
+
 ## What Is AlienCore?
 
 AlienCore is an **adaptive Windows system optimizer** that watches your workload in real time and applies the right CPU, GPU, RAM, network, and privacy settings automatically — without you touching anything.
@@ -358,6 +368,12 @@ or resell it. Use requires a purchased license (or the 30-day free trial).
 
 Copyright © 2026 George Kyle Yeroshefsky. All Rights Reserved.  
 See [LICENSE](./LICENSE) for full terms.
+
+---
+
+## Trademark Notice
+
+AlienCore is an independent project. It is **not** affiliated with, endorsed by, sponsored by, or in any way officially connected to **Dell Technologies Inc.**, **Alienware**, or any of their subsidiaries. "Alienware" is a registered trademark of Dell Inc. All other product names, logos, and brands referenced in this software are the property of their respective owners and are used for identification purposes only.
 
 ---
 

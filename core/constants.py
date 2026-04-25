@@ -95,6 +95,7 @@ CPU_CORE_PARKING_MAX_GUID     = "ea062031-0e34-4ff1-9b6d-eb1059334028"  # max un
 # ── Win32PrioritySeparation (scheduler quanta + foreground boost) ─────────────
 # Bits 0-1: FG boost (2=high), Bit 2: quantum type (1=fixed), Bit 3: length (0=short)
 WIN32_PRIORITY_SEP_IDLE      = 38   # 0x26: short variable quanta, high FG boost (Windows default)
+WIN32_PRIORITY_SEP_WORKING   = 38   # productivity is bursty — variable quanta is correct
 WIN32_PRIORITY_SEP_GAMING    = 42   # 0x2A: short fixed quanta, high FG boost (pure gaming)
 WIN32_PRIORITY_SEP_STREAMING = 41   # 0x29: short fixed quanta, medium FG boost (gaming + stream)
 
@@ -118,6 +119,33 @@ GAMING_PROCESSES = [
 
 BROWSER_PROCESSES = [
     "chrome.exe", "firefox.exe", "msedge.exe", "brave.exe",
+]
+
+# Productivity / multi-tasking processes — used as a *bias* for working-profile
+# detection (lowers the CPU% threshold when present). Not a standalone trigger:
+# Chrome being open ≠ working, but Chrome + sustained CPU = working.
+WORKING_PROCESSES = [
+    # Browsers
+    "chrome.exe", "firefox.exe", "msedge.exe", "brave.exe", "opera.exe",
+    "vivaldi.exe", "arc.exe",
+    # Microsoft Office
+    "winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe", "onenote.exe",
+    "msaccess.exe", "mspub.exe", "visio.exe",
+    # Communication / video calls
+    "teams.exe", "ms-teams.exe", "slack.exe", "discord.exe", "zoom.exe",
+    "skype.exe", "webex.exe", "webexmta.exe",
+    # IDEs and code editors
+    "code.exe", "code - insiders.exe", "devenv.exe", "rider64.exe",
+    "pycharm64.exe", "idea64.exe", "webstorm64.exe", "phpstorm64.exe",
+    "clion64.exe", "goland64.exe", "rubymine64.exe", "datagrip64.exe",
+    "sublime_text.exe", "atom.exe", "notepad++.exe",
+    "windowsterminal.exe", "wt.exe", "powershell.exe", "pwsh.exe",
+    # Adobe creative suite (productivity, not gaming)
+    "photoshop.exe", "illustrator.exe", "indesign.exe", "lightroom.exe",
+    "acrobat.exe", "acrord32.exe", "acrocef.exe",
+    # Other knowledge-worker tools
+    "figma.exe", "notion.exe", "obsidian.exe", "1password.exe",
+    "trello.exe", "evernote.exe",
 ]
 
 # Background processes to route to E-cores via EcoQoS during gaming
@@ -305,8 +333,10 @@ DEFAULT_CONFIG = {
         "detect_by_load": True,
         "gaming_gpu_threshold": 40,           # GPU% above this = likely gaming
         "gaming_cpu_threshold": 30,
+        "working_cpu_threshold": 25,          # CPU% above this (no GPU heat) = productivity load
         "custom_streaming_processes": [],
         "custom_gaming_processes": [],
+        "custom_working_processes": [],
         # User-created profiles. Each entry:
         # { "name": "video_editing",  "label": "Video Editing",
         #   "processes": ["premiere.exe", "resolve.exe"],

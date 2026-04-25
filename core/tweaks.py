@@ -19,7 +19,8 @@ from core.constants import (
     CPU_SCHED_POLICY_GUID, CPU_SCHED_SHORT_GUID, CPU_HETERO_POLICY_GUID,
     CPU_PERF_AUTONOMOUS_GUID, CPU_PERF_INCREASE_THRESH_GUID,
     CPU_CORE_PARKING_MIN_GUID, CPU_CORE_PARKING_MAX_GUID,
-    WIN32_PRIORITY_SEP_IDLE, WIN32_PRIORITY_SEP_GAMING, WIN32_PRIORITY_SEP_STREAMING,
+    WIN32_PRIORITY_SEP_IDLE, WIN32_PRIORITY_SEP_WORKING,
+    WIN32_PRIORITY_SEP_GAMING, WIN32_PRIORITY_SEP_STREAMING,
     BACKGROUND_PROCESSES_ECOQOS,
 )
 
@@ -59,9 +60,10 @@ def apply_baseline(hardware: dict, dry_run: bool = False):
 
 def apply_profile(profile_name: str, hardware: dict, dry_run: bool = False):
     """
-    Apply tweaks for the given profile: idle | gaming | streaming | manual | <user-defined>
-    User-defined profiles resolve to a base behavior (idle/gaming/streaming) for tweaks.
-    Called every time the profile switches.
+    Apply tweaks for the given profile:
+        idle | working | gaming | streaming | manual | <user-defined>
+    User-defined profiles resolve to a base behavior (idle/working/gaming/streaming)
+    for tweaks. Called every time the profile switches.
     """
     mode = "[DRY RUN] " if dry_run else ""
     logger.info("%sSwitching to profile: %s", mode, profile_name)
@@ -162,6 +164,18 @@ def _apply_cpu_profile(profile: str, c: dict, hardware: dict, dry_run: bool):
         # Allow the CPU to drop as low as possible at idle.
         # Without this, Ultimate Performance-based plans keep min=100%, which
         # pins the CPU at the ceiling even when fully idle — it can never sleep lower.
+        _set_min_processor_state(5, "AC", dry_run)
+        _set_min_processor_state(5, "DC", dry_run)
+
+    elif profile == "working":
+        # Productivity tier: full ceiling for fast ramp, low floor so the CPU
+        # can still drop between bursts. Responsiveness is tuned via perf
+        # thresholds + half-unparked cores below — not by capping the ceiling.
+        _ensure_aliencore_power_plan(dry_run)
+        logger.info("CPU working: full ceiling (100%%) with low floor — "
+                    "responsiveness tuned via perf thresholds")
+        _set_max_processor_state(100, "AC", dry_run)
+        _set_max_processor_state(100, "DC", dry_run)
         _set_min_processor_state(5, "AC", dry_run)
         _set_min_processor_state(5, "DC", dry_run)
 
@@ -354,6 +368,8 @@ def _set_core_parking(profile: str, dry_run: bool):
     """
     Core parking: how many logical processors Windows keeps unparked.
     - Gaming/streaming: 100% min/max = all 32 LPs always active (eliminates wake-up stutter).
+    - Working: 50% min = half the cores guaranteed online so multi-app burst
+      load doesn't pay the wake penalty on every context switch.
     - Idle: 5% min = allow aggressive parking for power savings.
     """
     scheme = _get_active_scheme()
@@ -362,6 +378,8 @@ def _set_core_parking(profile: str, dry_run: bool):
 
     if profile in ("gaming", "streaming"):
         min_pct, label = 100, "all cores unparked"
+    elif profile == "working":
+        min_pct, label = 50, "half cores guaranteed online"
     else:
         min_pct, label = 5, "parking enabled"
 
@@ -377,14 +395,21 @@ def _set_core_parking(profile: str, dry_run: bool):
 def _set_perf_thresholds(profile: str, dry_run: bool):
     """
     Performance increase threshold: CPU utilization % that triggers a P-state step-up.
-    - Gaming: 15% — respond instantly to any load spike.
+    - Gaming/streaming: 15% — respond instantly to any load spike.
+    - Working: 30% — fast ramp on burst load (multi-app productivity) but not
+      so eager that single-tab background work pegs the CPU.
     - Idle: 50% — require sustained load before stepping up (saves power).
     """
     scheme = _get_active_scheme()
     if not scheme:
         return
 
-    thresh = 15 if profile in ("gaming", "streaming") else 50
+    if profile in ("gaming", "streaming"):
+        thresh = 15
+    elif profile == "working":
+        thresh = 30
+    else:
+        thresh = 50
     _run(
         ["powercfg", "/setacvalueindex", scheme, CPU_SUBGROUP_GUID,
          CPU_PERF_INCREASE_THRESH_GUID, str(thresh)],
@@ -555,10 +580,13 @@ def _apply_scheduler_profile(profile_name: str, c: dict, dry_run: bool):
         # Win32PrioritySeparation controls scheduler quantum length and type,
         # plus foreground thread boost relative to background threads.
         # Fixed-length quanta (gaming/streaming) eliminate micro-stutters caused
-        # by the scheduler stretching time slices under load.
+        # by the scheduler stretching time slices under load.  Working uses
+        # variable quanta — productivity is bursty, fast FG response without
+        # starving background tasks.
         sep_map = {
             "gaming":    WIN32_PRIORITY_SEP_GAMING,    # 42: fixed quanta, high FG boost
             "streaming": WIN32_PRIORITY_SEP_STREAMING, # 41: fixed quanta, medium FG boost
+            "working":   WIN32_PRIORITY_SEP_WORKING,   # 38: variable quanta, high FG boost
             "idle":      WIN32_PRIORITY_SEP_IDLE,      # 38: variable quanta (Windows default)
             "manual":    WIN32_PRIORITY_SEP_IDLE,
         }

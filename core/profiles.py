@@ -5,16 +5,19 @@ Detection uses both process names AND load signals together.
 
 Profiles:
   idle       — nothing demanding running, CPU cool
+  working    — productivity load: many tabs, many apps, sustained CPU without GPU heat
   gaming     — game process detected OR high GPU load
   streaming  — OBS/XSplit detected
   manual     — user locked a profile via tray icon
+
+Priority on conflicts: streaming > gaming > working > idle.
 """
 
 import logging
 import time
 import psutil
 from core import config_manager as cfg
-from core.constants import STREAMING_PROCESSES, GAMING_PROCESSES
+from core.constants import STREAMING_PROCESSES, GAMING_PROCESSES, WORKING_PROCESSES
 
 logger = logging.getLogger("aliencore.profiles")
 
@@ -27,6 +30,12 @@ _manual_override  = None   # None = auto, string = locked profile name
 # momentary GPU/CPU spikes (browser rendering, antivirus, Windows updates, etc.).
 _load_hit_count   = 0        # consecutive evaluations where load looked like gaming
 _LOAD_HIT_NEEDED  = 3        # must be true this many times in a row (~30 s at 10 s/eval)
+
+# Working-profile hysteresis — productivity load is noisier than gaming
+# (background indexing, AV scans, single-tab JS GC), so we require a longer
+# hold window before committing.  ~50-60 s at the default 10 s/eval cadence.
+_work_hit_count   = 0
+_WORK_HIT_NEEDED  = 5
 
 # Process-list cache.  psutil.process_iter iterates ~300 PIDs and opens each
 # for the Name attribute — measurable CPU.  Cache for a few seconds so that
@@ -69,12 +78,14 @@ def evaluate(sensor_readings: dict) -> str:
 
     Hysteresis rules:
       - Process-based detection (game/streaming exe found): switches immediately.
-      - Load-based detection: requires _LOAD_HIT_NEEDED consecutive evaluations
-        before committing to gaming, preventing false triggers from momentary spikes.
-      - Switching back to idle from a load-based gaming session is also gated: the
-        load must be gone for _LOAD_HIT_NEEDED consecutive evaluations.
+      - Load-based gaming: requires _LOAD_HIT_NEEDED consecutive evaluations
+        before committing, preventing false triggers from momentary spikes.
+      - Load-based working: requires _WORK_HIT_NEEDED consecutive evaluations
+        (longer hold — productivity signals are noisier than gaming).
+      - Descending: counters tick down before falling all the way to idle, so
+        a brief lull in CPU/GPU doesn't drop the profile mid-session.
     """
-    global _current_profile, _load_hit_count
+    global _current_profile, _load_hit_count, _work_hit_count
 
     if _manual_override:
         return _manual_override
@@ -92,37 +103,68 @@ def evaluate(sensor_readings: dict) -> str:
     user_match = _check_user_profiles(running, c) if by_process else None
     if by_process and _is_streaming(running, c):
         _load_hit_count = 0
+        _work_hit_count = 0
         new = "streaming"
     elif user_match:
         _load_hit_count = 0
+        _work_hit_count = 0
         new = user_match
     elif by_process and _is_gaming_by_process(running, c):
         _load_hit_count = 0
+        _work_hit_count = 0
         new = "gaming"
-
-    # ── Load-based detection — hysteresis required ──
-    elif by_load and _is_gaming_by_load(sensor_readings, c):
-        # Cap at _LOAD_HIT_NEEDED so the count-down on signal loss can never
-        # exceed the count-up window (otherwise long gaming sessions would
-        # require minutes of cool-down before switching back to idle).
-        if _load_hit_count < _LOAD_HIT_NEEDED:
-            _load_hit_count += 1
-        if _load_hit_count >= _LOAD_HIT_NEEDED:
-            new = "gaming"
-        else:
-            logger.debug("Load gaming signal: hit %d/%d (holding %s)",
-                         _load_hit_count, _LOAD_HIT_NEEDED, _current_profile)
-            new = _current_profile
     else:
-        # Load dropped — apply same hysteresis before returning to idle
-        if _current_profile == "gaming" and _load_hit_count > 0:
-            _load_hit_count -= 1
-            logger.debug("Load gaming signal gone: count down to %d (holding gaming)",
-                         _load_hit_count)
-            new = _current_profile
+        # ── Load-based detection — gaming first (highest load priority) ──
+        has_work_proc = by_process and _is_working_by_process(running, c)
+        wants_gaming  = by_load and _is_gaming_by_load(sensor_readings, c)
+        wants_working = by_load and _is_working_by_load(
+            sensor_readings, c, has_work_proc)
+
+        if wants_gaming:
+            if _load_hit_count < _LOAD_HIT_NEEDED:
+                _load_hit_count += 1
+            if _load_hit_count >= _LOAD_HIT_NEEDED:
+                # Already past the working bar — pre-fill so descending into
+                # working from gaming doesn't have to count up from zero.
+                _work_hit_count = _WORK_HIT_NEEDED
+                new = "gaming"
+            else:
+                logger.debug("Load gaming signal: hit %d/%d (holding %s)",
+                             _load_hit_count, _LOAD_HIT_NEEDED, _current_profile)
+                new = _current_profile
+        elif wants_working:
+            # Tick gaming counter down (signal dropped from gaming-level load)
+            if _current_profile == "gaming" and _load_hit_count > 0:
+                _load_hit_count -= 1
+                logger.debug("Gaming signal gone but working active: load count → %d",
+                             _load_hit_count)
+                new = _current_profile
+            else:
+                if _work_hit_count < _WORK_HIT_NEEDED:
+                    _work_hit_count += 1
+                if _work_hit_count >= _WORK_HIT_NEEDED:
+                    _load_hit_count = 0
+                    new = "working"
+                else:
+                    logger.debug("Working signal: hit %d/%d (holding %s)",
+                                 _work_hit_count, _WORK_HIT_NEEDED, _current_profile)
+                    new = _current_profile
         else:
-            _load_hit_count = 0
-            new = "idle"
+            # Quiet — descend through the counters before settling on idle
+            if _current_profile == "gaming" and _load_hit_count > 0:
+                _load_hit_count -= 1
+                logger.debug("Quiet — gaming load count → %d (holding gaming)",
+                             _load_hit_count)
+                new = _current_profile
+            elif _current_profile == "working" and _work_hit_count > 0:
+                _work_hit_count -= 1
+                logger.debug("Quiet — working count → %d (holding working)",
+                             _work_hit_count)
+                new = _current_profile
+            else:
+                _load_hit_count = 0
+                _work_hit_count = 0
+                new = "idle"
 
     if new != _current_profile:
         logger.info("Profile change: %s → %s", _current_profile, new)
@@ -214,3 +256,51 @@ def _is_gaming_by_load(sensors: dict, c: dict) -> bool:
             and gpu_load >= (gpu_thresh * 0.6)):
         return True
     return False
+
+
+def _is_working_by_process(running: set, c: dict) -> bool:
+    """True if any productivity-class process is running (used as load bias)."""
+    from core.constants import WORKING_PROCESSES
+    known    = {p.lower() for p in WORKING_PROCESSES}
+    custom   = {p.lower() for p in c["profiles"].get("custom_working_processes", [])}
+    return bool(running & (known | custom))
+
+
+def _working_threshold(c: dict) -> float:
+    """
+    CPU% threshold for working detection, scaled by hardware tier.
+    Weaker hardware promotes to working sooner; powerful hardware stays idle longer.
+      tier 0 (low,  <= 8 GB)  → 0.70x base
+      tier 1 (norm, <=16 GB)  → 0.85x base
+      tier 2 (high, <=32 GB)  → 1.00x base
+      tier 3 (xl,   > 32 GB)  → 1.15x base
+    """
+    from core import mem_tier
+    base = c["profiles"].get("working_cpu_threshold", 25)
+    tier_mult = (0.70, 0.85, 1.00, 1.15)[mem_tier.tier_idx()]
+    return base * tier_mult
+
+
+def _is_working_by_load(sensors: dict, c: dict, has_working_proc: bool) -> bool:
+    """
+    True when CPU shows productivity-class load *without* gaming-class GPU heat.
+    A productivity-class process running biases the threshold down by 5 pp,
+    so e.g. Chrome + Slack + IDE promote to working sooner than the same CPU
+    load with no productivity processes detected.
+    """
+    cpu_load = sensors.get("cpu_load_pct")
+    if cpu_load is None:
+        return False
+    gpu_load = sensors.get("gpu_load")
+
+    threshold = _working_threshold(c)
+    if has_working_proc:
+        threshold = max(8.0, threshold - 5.0)
+
+    if cpu_load < threshold:
+        return False
+    # Don't claim "working" if GPU is hot — that's the gaming detector's territory.
+    gpu_thresh = c["profiles"].get("gaming_gpu_threshold", 40)
+    if gpu_load is not None and gpu_load >= gpu_thresh:
+        return False
+    return True
