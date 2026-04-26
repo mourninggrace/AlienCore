@@ -120,7 +120,7 @@ def main():
         # Start sensor thread so live panels (GPU boost, DIMM temps) have real data
         sensors.start()
         from gui.settings_gui import open_settings
-        open_settings(is_first_run=False)
+        open_settings(is_first_run=False, prewarm=args.prewarm)
         sensors.stop()
         from core import lhm_manager
         lhm_manager.stop()
@@ -304,31 +304,97 @@ def _start_bar():
 
 def _start_tray(hw: dict):
     from gui import tray
+    import subprocess, threading
 
-    _settings_proc = None
+    # Pre-warmed settings subprocess: built hidden, waits on a named event for
+    # the tray to signal "show". Eliminates per-click cold-start cost (process
+    # spawn + interpreter init + AlienCore imports + Tk window construction).
+    # Auto-reset event so a single SetEvent releases exactly one waiter (the
+    # prewarmed window). Created here up-front so the subprocess can OpenEventW
+    # by name immediately.
+    # restype=c_void_p so the 64-bit HANDLE isn't truncated to 32 bits.
+    _kernel32 = ctypes.windll.kernel32
+    _kernel32.CreateEventW.restype = ctypes.c_void_p
+    _kernel32.SetEvent.argtypes    = [ctypes.c_void_p]
+    _show_event = _kernel32.CreateEventW(
+        None, False, False, "AlienCore_Settings_Show_v1")
 
-    def on_settings_open():
-        """Launch settings GUI as a separate subprocess — always gets clean environment."""
+    _settings_proc      = None     # currently-prewarmed subprocess
+    _shown_proc         = None     # subprocess currently showing the window
+    _spawn_lock         = threading.Lock()
+
+    def _spawn_prewarm():
+        """Spawn a hidden settings subprocess that waits for show signal."""
         nonlocal _settings_proc
-        import subprocess
-        # Don't open a second window if one is already running
-        if _settings_proc is not None and _settings_proc.poll() is None:
-            return
-        _settings_proc = subprocess.Popen(
-            [sys.executable,
-             os.path.join(BASE_DIR, "aliencore.py"),
-             "--settings"],
-            cwd=BASE_DIR,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-
-    def on_quit():
-        nonlocal _settings_proc
-        if _settings_proc is not None and _settings_proc.poll() is None:
+        with _spawn_lock:
+            if _settings_proc is not None and _settings_proc.poll() is None:
+                return  # already have one
             try:
-                _settings_proc.terminate()
+                _settings_proc = subprocess.Popen(
+                    [sys.executable,
+                     os.path.join(BASE_DIR, "aliencore.py"),
+                     "--settings", "--prewarm"],
+                    cwd=BASE_DIR,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                logging.getLogger("aliencore").warning(
+                    "Settings prewarm spawn failed: %s", e)
+                _settings_proc = None
+
+    def _watch_for_close_and_respawn(proc):
+        """Wait for the shown subprocess to exit, then prewarm a fresh one."""
+        def _wait():
+            try:
+                proc.wait()
             except Exception:
                 pass
+            _spawn_prewarm()
+        threading.Thread(target=_wait, daemon=True,
+                         name="SettingsRespawnWatcher").start()
+
+    def on_settings_open():
+        """Signal the prewarmed subprocess to show. Falls back to a cold spawn
+        if no prewarm exists (e.g. it crashed) — in that case the user pays the
+        usual cold cost once, and we prewarm a replacement after they close."""
+        nonlocal _settings_proc, _shown_proc
+        # If a previous click is still showing settings, don't open a second
+        if _shown_proc is not None and _shown_proc.poll() is None:
+            return
+        if _settings_proc is not None and _settings_proc.poll() is None:
+            # Hand the prewarm off to "shown" and fire the show event
+            _shown_proc     = _settings_proc
+            _settings_proc  = None
+            _kernel32.SetEvent(_show_event)
+        else:
+            # Prewarm missing — cold spawn (no --prewarm; opens immediately)
+            try:
+                _shown_proc = subprocess.Popen(
+                    [sys.executable,
+                     os.path.join(BASE_DIR, "aliencore.py"),
+                     "--settings"],
+                    cwd=BASE_DIR,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception as e:
+                logging.getLogger("aliencore").warning(
+                    "Settings cold spawn failed: %s", e)
+                return
+        _watch_for_close_and_respawn(_shown_proc)
+
+    # Spawn the first prewarm shortly after tray init so we don't compete with
+    # the rest of startup for CPU. The user is unlikely to click Settings in
+    # the first few seconds anyway.
+    threading.Timer(2.0, _spawn_prewarm).start()
+
+    def on_quit():
+        nonlocal _settings_proc, _shown_proc
+        for p in (_settings_proc, _shown_proc):
+            if p is not None and p.poll() is None:
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
         # Sensor bar lives on its own thread with its own Tk mainloop — if we
         # don't tear it down explicitly its mainloop keeps the interpreter
         # alive after the tray exits and the whole process hangs.
@@ -424,6 +490,8 @@ def _parse_args():
     )
     p.add_argument("--firstrun",  action="store_true", help="Force first-run settings GUI")
     p.add_argument("--settings",  action="store_true", help="Open settings GUI only")
+    p.add_argument("--prewarm",   action="store_true",
+                   help="Build settings window hidden; deiconify when tray signals show event")
     p.add_argument("--login",     action="store_true", help="Open login dialog only (subprocess)")
     p.add_argument("--ai-chat",   action="store_true", help="Open AI chat window only (subprocess)")
     p.add_argument("--dryrun",    action="store_true", help="Show tweaks without applying")

@@ -171,6 +171,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Settings → About Platform now shows the full Windows 11 edition + build
   (e.g. "Windows 11 Professional (build 26200.8246)") instead of the bare
   "Windows 10.0.26200" string.
+- **Settings window now opens instantly, every time.** The tray pre-warms
+  a hidden settings subprocess shortly after boot — full Python interpreter,
+  AlienCore imports, Tk root, notebook, and first tab are all built in
+  advance. Clicking "Open Settings" sends a Windows named-event signal
+  (`AlienCore_Settings_Show_v1`) that the prewarmed process unblocks on,
+  then deiconifies — sub-millisecond from click to visible. After the user
+  closes settings the tray spawns a fresh prewarm in the background for the
+  next click. Cold-spawn fallback kicks in if the prewarm crashed or the
+  user clicks during the 2 s startup grace period. Cost: ~40-60 MB resident
+  for the idle prewarm subprocess; the prior per-click cost (process spawn
+  + interpreter init + module imports + Tk construction, ~1-2 s on cold
+  launches) is now paid once at startup. Also fixed: `CreateEventW` /
+  `OpenEventW` `HANDLE` returns now use `restype=c_void_p` so the 64-bit
+  handle isn't truncated to 32 bits before reaching `SetEvent` /
+  `WaitForSingleObject`.
 - Settings window hides itself during construction and reveals once fully
   built — removes the half-drawn flicker on cold launches.
 - Default `service.hardware_refresh_on_startup` is now False (was True) so

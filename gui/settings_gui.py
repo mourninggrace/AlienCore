@@ -153,14 +153,15 @@ SEP      = "#333333"
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def open_settings(on_save_callback=None, is_first_run=False):
+def open_settings(on_save_callback=None, is_first_run=False, prewarm=False):
     # Bootstrap — ensure sys.path includes aliencore root
     import sys, os, ctypes
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if base not in sys.path:
         sys.path.insert(0, base)
 
-    # Single-instance mutex — exit silently if settings is already open
+    # Single-instance mutex — exit silently if settings is already open.
+    # In prewarm mode the tray ensures only one prewarm exists at a time.
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "AlienCore_Settings_v1")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
         ctypes.windll.kernel32.CloseHandle(_mutex)
@@ -173,7 +174,7 @@ def open_settings(on_save_callback=None, is_first_run=False):
 
     root = tk.Tk()
     SettingsWindow(root, on_save_callback=on_save_callback,
-                   is_first_run=is_first_run)
+                   is_first_run=is_first_run, prewarm=prewarm)
     root.mainloop()
 
     ctypes.windll.kernel32.CloseHandle(_mutex)
@@ -207,10 +208,11 @@ class SettingsWindow:
         except Exception:
             return 120.0
 
-    def __init__(self, root, on_save_callback=None, is_first_run=False):
+    def __init__(self, root, on_save_callback=None, is_first_run=False, prewarm=False):
         self.root             = root
         self.on_save_callback = on_save_callback
         self.is_first_run     = is_first_run
+        self.prewarm          = prewarm
 
         # Hide the window while we build it — eliminates the flicker /
         # half-drawn frame visible during cold-boot imports.
@@ -234,7 +236,16 @@ class SettingsWindow:
         self._saved_state = {k: v.get() for k, v in self.vars.items()}
         self._saved_theme = self._cfg_get("display.settings_theme") or "Void"
 
-        # Reveal fully-constructed window and bring it to front.
+        if self.prewarm:
+            # Hidden, fully-built. Wait for the tray to signal show via a named
+            # Windows event — the dominant cost (process spawn + imports + Tk
+            # construction) is paid in the background before the user clicks.
+            self._start_show_event_watcher()
+        else:
+            # Reveal fully-constructed window and bring it to front.
+            self._reveal()
+
+    def _reveal(self):
         try:
             self.root.deiconify()
         except Exception:
@@ -243,6 +254,65 @@ class SettingsWindow:
         self.root.focus_force()
         self.root.attributes("-topmost", True)
         self.root.after(200, lambda: self.root.attributes("-topmost", False))
+
+    # ── Prewarm: wait for tray to signal show ─────────────────────────────────
+
+    _SHOW_EVENT_NAME = "AlienCore_Settings_Show_v1"
+
+    def _start_show_event_watcher(self):
+        """
+        Block on a named Windows event in a background thread; when the tray
+        signals it, marshal back onto the Tk thread and reveal the window.
+        Polling on the Tk thread would add up to 50 ms of latency per click;
+        a blocking wait + after(0) is effectively zero latency.
+        """
+        import ctypes, threading
+        EVENT_MODIFY_STATE = 0x0002
+        SYNCHRONIZE        = 0x00100000
+        WAIT_OBJECT_0      = 0x00000000
+
+        # Tray creates the event before spawning us; OpenEventW finds it.
+        # If somehow tray hasn't created it yet (shouldn't happen — Popen is
+        # synchronous after CreateEvent), fall back to creating it ourselves.
+        # restype=c_void_p so the 64-bit HANDLE isn't truncated to 32 bits.
+        kernel32 = ctypes.windll.kernel32
+        kernel32.OpenEventW.restype          = ctypes.c_void_p
+        kernel32.CreateEventW.restype        = ctypes.c_void_p
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        h = kernel32.OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, False,
+                                self._SHOW_EVENT_NAME)
+        if not h:
+            # Manual-reset=False, initial state=False
+            h = kernel32.CreateEventW(None, False, False, self._SHOW_EVENT_NAME)
+        if not h:
+            # IPC unavailable — show immediately rather than stay invisible.
+            logger.warning("Settings prewarm: failed to open/create show event; "
+                           "revealing window directly.")
+            self._reveal()
+            return
+
+        self._show_event_handle = h
+        revealed = {"done": False}
+
+        def _on_signal():
+            if revealed["done"]:
+                return
+            revealed["done"] = True
+            self._reveal()
+
+        def _wait():
+            # INFINITE wait — the thread is daemon, so it dies with the process
+            # if the user never clicks and the tray terminates us.
+            INFINITE = 0xFFFFFFFF
+            rc = kernel32.WaitForSingleObject(h, INFINITE)
+            if rc == WAIT_OBJECT_0:
+                try:
+                    self.root.after(0, _on_signal)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_wait, name="SettingsShowEventWaiter",
+                         daemon=True).start()
 
     # ── Setup ─────────────────────────────────────────────────────────────────
 
