@@ -213,7 +213,7 @@ def _lhm_readings_with_cache(flat: list) -> dict:
     parsed: dict = {}
     parsed.update(_parse_cpu_temp(flat))
     parsed.update(_parse_gpu_temp(flat))
-    parsed.update(_parse_nvme_temp(flat))
+    parsed.update(_parse_storage_temps(flat))
     parsed.update(_parse_ram_temp(flat))
     parsed.update(_parse_fan_rpm(flat))
     parsed.update(_parse_cpu_watts(flat))
@@ -270,19 +270,20 @@ def _parse_cpu_temp(flat: list) -> dict:
             result["cpu_temp_avg"] = avg["value"]
 
     # AMD SMU fallback — when HVCI blocks WinRing0, LHM returns 0 for AMD CPU
-    # temp.  Only attempt after 3 consecutive zero-temp polls so LHM gets time
-    # to warm up on startup (first 1-2 polls often return empty on AMD hardware).
+    # temp.  Try immediately on the first zero-temp poll: lhm_manager.prewarm()
+    # already triggers a full LHM .Update() cycle before SensorThread's first
+    # real read, so a zero here means LHM genuinely can't read the sensor and
+    # waiting more polls just delays a "---" cell on the sensor bar.
     if result["cpu_temp_avg"] is None:
         _cpu_zero_polls += 1
-        if _cpu_zero_polls >= 3:
-            try:
-                from core import amd_smu
-                smu_temp = amd_smu.get_cpu_temp()
-                if smu_temp is not None:
-                    result["cpu_temp_package"] = smu_temp
-                    result["cpu_temp_avg"]     = smu_temp
-            except Exception:
-                pass
+        try:
+            from core import amd_smu
+            smu_temp = amd_smu.get_cpu_temp()
+            if smu_temp is not None:
+                result["cpu_temp_package"] = smu_temp
+                result["cpu_temp_avg"]     = smu_temp
+        except Exception:
+            pass
     else:
         _cpu_zero_polls = 0
 
@@ -324,16 +325,58 @@ def _parse_gpu_temp(flat: list) -> dict:
     return result
 
 
-def _parse_nvme_temp(flat: list) -> dict:
-    result = {"nvme_temps": []}
-    temps = [s for s in flat if s["type"] == "Temperature"]
-    composites = [s for s in temps if s["name"] == "Composite Temperature"]
-    for i, s in enumerate(composites):
-        if 0 < s["value"] < 100:
-            result["nvme_temps"].append({
-                "name":   f"NVMe {i+1}",
-                "temp_c": round(s["value"], 1),
-            })
+def _parse_storage_temps(flat: list) -> dict:
+    """Enumerate every storage drive LHM exposes and bucket by drive type.
+
+    Drive type comes from Windows (storage_info.get_drive_kind), which reads
+    Get-PhysicalDisk.  When that lookup fails (returns "unknown"), we fall
+    back to a heuristic: presence of "Composite Temperature" → NVMe, else SSD
+    (safer default than HDD because SSD thresholds are higher).
+
+    Output: three lists keyed by drive class.  Within each list, drives are
+    sorted alphabetically by model name so slot ordering is stable across
+    reboots even when LHM enumeration order shifts.
+    """
+    result = {"nvme_temps": [], "ssd_temps": [], "hdd_temps": []}
+
+    # Group all Storage temperature sensors by drive (hw.Name).
+    by_drive: dict = {}   # hw_name → {"composite": float|None, "temp": float|None}
+    for s in flat:
+        if s.get("hardwareType") != "Storage":
+            continue
+        if s.get("type") != "Temperature":
+            continue
+        hw_name = s.get("hardware") or ""
+        if not hw_name:
+            continue
+        val = s.get("value")
+        if val is None or not (0 < val < 100):
+            continue
+        bucket = by_drive.setdefault(hw_name, {"composite": None, "temp": None})
+        if s.get("name") == "Composite Temperature":
+            bucket["composite"] = val
+        elif s.get("name") == "Temperature":
+            bucket["temp"] = val
+
+    if not by_drive:
+        return result
+
+    from core import storage_info
+
+    typed: dict = {"nvme": [], "ssd": [], "hdd": []}
+    for hw_name, vals in by_drive.items():
+        # Prefer Composite (NVMe-style, more accurate) over plain Temperature.
+        temp = vals["composite"] if vals["composite"] is not None else vals["temp"]
+        if temp is None:
+            continue
+        kind = storage_info.get_drive_kind(hw_name)
+        if kind == "unknown":
+            kind = "nvme" if vals["composite"] is not None else "ssd"
+        typed[kind].append({"name": hw_name, "temp_c": round(temp, 1)})
+
+    for kind in ("nvme", "ssd", "hdd"):
+        typed[kind].sort(key=lambda d: d["name"].lower())
+        result[f"{kind}_temps"] = typed[kind]
     return result
 
 

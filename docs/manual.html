@@ -501,8 +501,9 @@
     <tr><td>GPU Temperature</td><td>GPU core temperature via LibreHardwareMonitor</td><td>On</td></tr>
     <tr><td>GPU Hot Spot</td><td>Junction temperature (~15–20° hotter than core)</td><td>Off</td></tr>
     <tr><td>GPU VRAM Temp</td><td>VRAM junction temperature</td><td>Off</td></tr>
-    <tr><td>NVM1 (Primary NVMe)</td><td>Primary NVMe / SSD temperature</td><td>On</td></tr>
-    <tr><td>NVM2 (Second NVMe)</td><td>Second NVMe / SSD temperature — auto-hidden if no second drive is installed</td><td>On</td></tr>
+    <tr><td>NVM1–NVM4 (NVMe drives)</td><td>NVMe drive temperatures (up to four). Slots above your installed NVMe count auto-hide.</td><td>On</td></tr>
+    <tr><td>SSD1–SSD4 (SATA SSDs)</td><td>SATA SSD temperatures (up to four). Auto-hidden if no SATA SSD is present.</td><td>On</td></tr>
+    <tr><td>HDD1–HDD2 (HDDs)</td><td>Spinning-disk temperatures (up to two). Auto-hidden if no HDD is present. Threshold defaults: warn 45 °C / crit 55 °C.</td><td>On</td></tr>
     <tr><td>Fan RPM</td><td>System fan speed</td><td>On</td></tr>
     <tr><td>RAM Usage</td><td>Used / Total GB</td><td>On</td></tr>
     <tr><td>CPU Load</td><td>Overall CPU utilization %</td><td>Off</td></tr>
@@ -580,7 +581,7 @@
     <tr><td class="setting">Auto-hide Fullscreen</td><td class="default">On</td><td>Automatically hides the sensor bar when a full-screen app is detected (e.g., a game).</td></tr>
     <tr><td class="setting">Theme</td><td class="default">Void</td><td>Color theme for the Settings window <em>and</em> the floating sensor bar. Picking a theme retints both surfaces immediately. 11 distinct themes: Void, Nebula, Ember, Aurora, Spectre, Crimson, Phantom, Solaris, Hex, Glacier, Venom.</td></tr>
     <tr><td class="setting">Network Units</td><td class="default">MB/s</td><td>Unit used by the Network I/O cell and its history chart. Choose <strong>MB/s</strong> (default — megabytes per second), <strong>Mbps</strong> (megabits, matches ISP advertised speeds), or <strong>kbps</strong> (kilobits, useful on slow or metered links).</td></tr>
-    <tr><td class="setting">Sensors to Display</td><td class="default">CPU, GPU, NVM1, NVM2, Fan, RAM, Battery</td><td>Toggle individual sensors on or off. Changes take effect immediately. NVM2 auto-hides when no second NVMe / SSD is present.</td></tr>
+    <tr><td class="setting">Sensors to Display</td><td class="default">CPU, GPU, NVM1–NVM4, SSD1–SSD4, HDD1–HDD2, Fan, RAM, Battery</td><td>Toggle individual sensors on or off. Changes take effect immediately. Storage slots auto-hide when no drive of that type / index is present, so cells materialize only for drives you actually own.</td></tr>
   </table>
 
   <div class="box box-tip">
@@ -787,6 +788,8 @@ python aliencore.py --uninstall # remove the service</code></pre>
     <tr><td>CPU</td><td class="default">80°C</td><td class="default">95°C</td></tr>
     <tr><td>GPU</td><td class="default">80°C</td><td class="default">90°C</td></tr>
     <tr><td>NVMe</td><td class="default">60°C</td><td class="default">70°C</td></tr>
+    <tr><td>SATA SSD</td><td class="default">60°C</td><td class="default">70°C</td></tr>
+    <tr><td>HDD</td><td class="default">45°C</td><td class="default">55°C</td></tr>
   </table>
 
   <div class="box box-info">

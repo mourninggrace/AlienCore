@@ -54,6 +54,10 @@ TEMP_GPU_WARN     = 80
 TEMP_GPU_CRIT     = 90
 TEMP_NVME_WARN    = 60
 TEMP_NVME_CRIT    = 70
+TEMP_SSD_WARN     = 60   # SATA SSDs share the NVMe envelope
+TEMP_SSD_CRIT     = 70
+TEMP_HDD_WARN     = 45   # spinning drives run cooler; trouble starts ~50 °C
+TEMP_HDD_CRIT     = 55
 
 # Overlay color codes (used in tray/overlay rendering)
 COLOR_COOL   = "#00CC66"   # green
@@ -195,6 +199,14 @@ DEFAULT_CONFIG = {
         "gpu_mem_temp":   False,              # VRAM junction temp
         "nvme_temp":      True,               # primary NVMe drive temp
         "nvme_temp2":     True,               # second NVMe drive (auto-hidden if absent)
+        "nvme_temp3":     True,               # third NVMe drive (auto-hidden if absent)
+        "nvme_temp4":     True,               # fourth NVMe drive (auto-hidden if absent)
+        "ssd_temp":       True,               # primary SATA SSD (auto-hidden if absent)
+        "ssd_temp2":      True,               # second SATA SSD (auto-hidden if absent)
+        "ssd_temp3":      True,               # third SATA SSD (auto-hidden if absent)
+        "ssd_temp4":      True,               # fourth SATA SSD (auto-hidden if absent)
+        "hdd_temp":       True,               # primary HDD (auto-hidden if absent)
+        "hdd_temp2":      True,               # second HDD (auto-hidden if absent)
         "fan_rpm":        True,
         "ram_usage":      True,
         "cpu_load":       False,
@@ -218,6 +230,10 @@ DEFAULT_CONFIG = {
         "gpu_crit": TEMP_GPU_CRIT,
         "nvme_warn": TEMP_NVME_WARN,
         "nvme_crit": TEMP_NVME_CRIT,
+        "ssd_warn":  TEMP_SSD_WARN,
+        "ssd_crit":  TEMP_SSD_CRIT,
+        "hdd_warn":  TEMP_HDD_WARN,
+        "hdd_crit":  TEMP_HDD_CRIT,
     },
 
     # ── CPU management ──

@@ -113,6 +113,34 @@ def get_sensors() -> list:
             return []
 
 
+def prewarm() -> None:
+    """Start the bridge daemon on a background thread so its cold-start cost
+    (subprocess spawn + .NET CLR init + LibreHardwareMonitor computer.Open)
+    runs in parallel with the rest of AlienCore startup.  Without this, the
+    SensorThread's first poll absorbs the full 2-3 s warmup and the sensor bar
+    shows "---" cells for several seconds after launch.
+
+    Idempotent and non-blocking: returns immediately, swallows all errors.
+    Safe to call before sensors.start(); both paths share _lock so the first
+    real poll just sees the proc already running."""
+    def _worker():
+        try:
+            # Multiple discarded polls drive several LHM .Update() cycles so
+            # sensors that report zero on the first read (AMD CPU Tdie, NVMe
+            # Composite — LHM's NVMe driver issues async SMART queries whose
+            # results only land on a subsequent .Update — DIMM temps) already
+            # have valid values when the SensorThread makes its real first
+            # poll.  6 cycles is required because the bridge strides Storage
+            # hardware updates 1-in-3 (Program.cs: pollCount % 3 == 0), so
+            # 6 polls = 2 Storage updates, which lets the NVMe driver's async
+            # SMART read land on the second update.
+            for _ in range(6):
+                get_sensors()
+        except Exception as e:
+            logger.debug("lhm_bridge prewarm failed: %s", e)
+    threading.Thread(target=_worker, daemon=True, name="LhmPrewarm").start()
+
+
 def stop():
     """Gracefully close the bridge daemon by closing its stdin."""
     global _proc
@@ -161,9 +189,13 @@ def _ensure_running(exe: str):
             env=env,
         )
         logger.info("lhm_bridge daemon started (pid %d, above-normal priority)", _proc.pid)
-        # Give the .NET CLR + LibreHardwareMonitor computer.Open() time to initialize.
-        # 2 s is the minimum; hardware with many sensors can take up to ~5 s.
-        time.sleep(2.0)
+        # Give the .NET CLR + LibreHardwareMonitor computer.Open() time to
+        # finish hardware enumeration before the first poll request.  3 s
+        # reliably covers systems with multiple NVMe controllers + DIMM SPD;
+        # 2 s sometimes left the second NVMe drive un-enumerated on the first
+        # poll.  This sleep is fully absorbed by prewarm() running in parallel
+        # with hardware fingerprint and tweak application during startup.
+        time.sleep(3.0)
         return _proc
     except FileNotFoundError:
         _log_failure(f"bridge exe missing: {exe}")

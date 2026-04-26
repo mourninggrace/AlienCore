@@ -70,6 +70,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Sensor bar now shows every storage drive with per-type labels.** Old:
+  hardcoded `NVM1` / `NVM2` slots only — SATA SSDs and HDDs were silently
+  dropped because the parser filtered on the NVMe-only `Composite Temperature`
+  sensor name. New: parser enumerates all drives LHM exposes under
+  `hardwareType=="Storage"` and classifies each one via Windows
+  `Get-PhysicalDisk` (`MediaType` + `BusType`), returning three lists —
+  `nvme_temps`, `ssd_temps`, `hdd_temps`. The bar renders the appropriate
+  cells (`NVM1`–`NVM4`, `SSD1`–`SSD4`, `HDD1`–`HDD2`) with one toggle per
+  slot in Settings → Display, and auto-hides slots above the detected count
+  using the Windows-reported drive set so cells appear on the bar's first
+  paint instead of materializing 4–5 s later when the first valid LHM
+  Storage update arrives. Per-type thresholds: NVMe & SATA SSD warn 60 / crit
+  70 °C; HDD warn 45 / crit 55 °C. New module `core/storage_info.py` caches
+  the Windows drive map for the process lifetime.
+- **Inline cell mini-charts and 90-second history popups now populate for
+  every storage cell** (extra NVMe slots, SSDs, HDDs). The numeric extractor
+  was hardcoded to slots 0/1 of `nvme_temps`; replaced with a slot table that
+  maps every storage key to its `(list_key, index)` pair so per-cell history
+  feeds are populated end-to-end.
+- 90-second sample popup window now inherits the sensor bar's transparency
+  setting. The popup is a separate Tk Toplevel that previously rendered
+  fully opaque regardless of `display.overlay_opacity`; it now reads the
+  same value at open and re-applies it on each draw tick so the Settings
+  slider adjusts both surfaces live.
 - Settings → AI → Model dropdowns now **fetch the live model list directly
   from the configured provider** instead of showing a hardcoded list. New
   Anthropic flagships (Opus 4.8, future Claude tiers) and new OpenAI / Groq
@@ -211,6 +235,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Sensor bar now populates near-instantly at startup** instead of showing
+  `---` for several seconds. Two changes work together: (1) `lhm_manager`
+  now spawns the `lhm_bridge.exe` .NET subprocess on a background prewarm
+  thread very early in startup (right after auth, before hardware
+  fingerprint), and runs six discarded warmup polls so the bridge's 1-in-3
+  Storage update stride lands two `.Update()` cycles — long enough for
+  NVMe SMART async reads to populate before the SensorThread's first real
+  poll. (2) `sensors.start()` was moved earlier in the startup sequence
+  (right after boost-tracker config, before tweak application) so the
+  SensorThread's first poll runs in parallel with `tweaks.apply_baseline` /
+  `apply_profile` instead of after them. (3) The `time.sleep(2.0)` after
+  bridge spawn was bumped to 3.0 s so `computer.Open()` reliably finishes
+  enumerating multiple NVMe controllers + DIMM SPD on systems with many
+  sensors. (4) The AMD-SMU CPU temp fallback no longer waits for three
+  zero-temp polls before firing — with the new prewarm there's no need to
+  give LHM nine extra seconds to "warm up".
+- **Inline mini-charts and 90-second sparklines no longer collapse stable
+  readings into a flat line glued to the bottom of the chart.** Both
+  charts used `span = max(mx - mn, 0.5)`, which mapped every sample of a
+  near-constant value to `y = y1` (the chart's bottom edge). Storage
+  temps and idle RAM% looked completely dead. New behavior: when
+  `mx - mn < 1.0`, force a 2-unit span centered on the current value
+  range so stable readings draw down the middle of the chart and small
+  fluctuations are visible above and below center.
 - **Refresh License showed "Cannot reach server" for any non-200
   response.** `urllib.error.HTTPError` is a subclass of
   `urllib.error.URLError`, so the existing `except URLError` block in

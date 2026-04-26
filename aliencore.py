@@ -204,6 +204,14 @@ def _run(firstrun: bool = False):
     # Refresh license from server in the background (non-blocking)
     _auth.refresh_session_async()
 
+    # 0b. Prewarm the lhm_bridge .NET subprocess on a background thread so its
+    # 2-3 s cold-start (CLR init + computer.Open) overlaps with hardware
+    # fingerprint and tweak application below.  By the time the SensorThread
+    # makes its first poll, the bridge is already responding instantly and the
+    # sensor bar paints with real values instead of "---".
+    from core import lhm_manager as _lhm
+    _lhm.prewarm()
+
     # 1. First-run GUI (blocks until user saves or closes)
     if firstrun:
         _show_first_run_gui()
@@ -235,36 +243,39 @@ def _run(firstrun: bool = False):
     from core import boost_tracker as _bt
     _bt.configure(max_freq_mhz=hw.get("cpu", {}).get("max_freq_mhz", 0))
 
+    # 3c. Start sensor polling now (ahead of tweaks) so the SensorThread's
+    # first poll runs in parallel with baseline / profile tweak application.
+    # Combined with the lhm_bridge prewarm at step 0b, this means readings are
+    # populated before the bar window even paints.
+    sensors.start()
+
     # 4. Apply baseline tweaks
     tweaks.apply_baseline(hw, dry_run=False)
 
     # 5. Apply initial profile tweaks (start at idle)
     tweaks.apply_profile("idle", hw, dry_run=False)
 
-    # 6. Start sensor polling
-    sensors.start()
-
-    # 7. Start AI watchdog (no-op if no API key configured)
+    # 6. Start AI watchdog (no-op if no API key configured)
     from core import ai_manager
     if c.get("ai", {}).get("api_key", "").strip():
         ai_manager.start_watchdog()
 
-    # 8. Start learning engine
+    # 7. Start learning engine
     from core import learning
     learning.start()
 
-    # 9. Start monitor loop
+    # 8. Start monitor loop
     monitor.start(hw)
 
-    # 10. Start sensor bar (always-on-top floating display)
+    # 9. Start sensor bar (always-on-top floating display)
     import threading as _threading
     _threading.Thread(target=_start_bar, daemon=True, name="SensorBar").start()
 
-    # 10b. Start background update checker (non-blocking, 30s delayed first check)
+    # 9b. Start background update checker (non-blocking, 30s delayed first check)
     from core import updater as _updater
     _updater.start_background_check()
 
-    # 11. Start tray icon (blocks until Exit is chosen)
+    # 10. Start tray icon (blocks until Exit is chosen)
     _start_tray(hw)
 
     # ── Shutdown ──

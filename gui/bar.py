@@ -46,7 +46,10 @@ _SPARK_HISTORY_MAXLEN  = _mt.scaled(90,  cap=720)   # value-only ring for sparkl
 # independently and stay at full brightness.
 _LHM_SENSOR_KEYS = frozenset({
     "cpu_temp", "gpu_temp", "gpu_hotspot", "gpu_mem_temp",
-    "nvme_temp", "nvme_temp2", "cpu_watts",
+    "nvme_temp", "nvme_temp2", "nvme_temp3", "nvme_temp4",
+    "ssd_temp", "ssd_temp2", "ssd_temp3", "ssd_temp4",
+    "hdd_temp", "hdd_temp2",
+    "cpu_watts",
 })
 
 # ── Polish animation tunables ────────────────────────────────────────────────
@@ -98,6 +101,16 @@ CELL_OUTLINE = "#232334"
 BORDER       = "#1a1f2e"
 FG_LABEL     = "#6e6e88"
 FG_DIM       = "#44445a"
+
+
+def _read_overlay_alpha() -> float:
+    """Resolve the bar/sample-window alpha from the Display → Overlay opacity
+    slider (display.overlay_opacity), clamped to the Tk-supported range."""
+    try:
+        raw = float(cfg.get_value("display", "overlay_opacity", default=0.94))
+    except (TypeError, ValueError):
+        raw = 0.94
+    return max(0.15, min(1.0, raw))
 
 
 def _hex_to_rgb(h: str):
@@ -179,6 +192,14 @@ _SAMPLE_VALUES = {
     "gpu_mem_temp": "100°",
     "nvme_temp":    "100°",
     "nvme_temp2":   "100°",
+    "nvme_temp3":   "100°",
+    "nvme_temp4":   "100°",
+    "ssd_temp":     "100°",
+    "ssd_temp2":    "100°",
+    "ssd_temp3":    "100°",
+    "ssd_temp4":    "100°",
+    "hdd_temp":     "100°",
+    "hdd_temp2":    "100°",
     "fan_rpm":      "9.9K",
     "ram_usage":    "100%",
     "cpu_load":     "100%",
@@ -277,6 +298,7 @@ class _Sparkline:
         win.withdraw()
         win.title(f"{label}  —  90-second history")
         win.attributes("-topmost", True)
+        win.attributes("-alpha", _read_overlay_alpha())
         win.configure(bg=BG_W)
         win.resizable(True, True)
         win.minsize(500, 340)
@@ -321,6 +343,10 @@ class _Sparkline:
         def _draw():
             if config_key not in cls._open:
                 return
+            try:
+                win.attributes("-alpha", _read_overlay_alpha())
+            except Exception:
+                pass
             W = canvas.winfo_width()
             H = canvas.winfo_height()
             if W <= 1:
@@ -356,7 +382,15 @@ class _Sparkline:
 
             mn       = min(vals)
             mx       = max(vals)
-            span     = max(mx - mn, 0.5)
+            # Low-variance fix: force a 2-unit centered span when the readings
+            # barely change so flat data draws through the middle of the chart
+            # instead of glued to the bottom.
+            if mx - mn < 1.0:
+                mid  = (mn + mx) / 2.0
+                mn   = mid - 1.0
+                span = 2.0
+            else:
+                span = mx - mn
             avg_val  = sum(vals) / len(vals)
             cur      = vals[-1]
             n        = len(vals)
@@ -775,7 +809,17 @@ class _HudCell:
         vals = [v for _, v in pts_raw]
         mn = min(vals)
         mx = max(vals)
-        span = max(mx - mn, 0.5)
+        # Low-variance fix: when the value barely changes (storage temps, idle
+        # RAM%) the previous max(mx-mn, 0.5) clamp left every sample at y1,
+        # producing a flat line glued to the bottom that looked like a dead
+        # chart.  Force a 2-unit span centered on the current value range so
+        # stable readings draw down the middle of the cell instead.
+        if mx - mn < 1.0:
+            mid  = (mn + mx) / 2.0
+            mn   = mid - 1.0
+            span = 2.0
+        else:
+            span = mx - mn
 
         pts = []
         for t, v in pts_raw:
@@ -971,7 +1015,10 @@ class SensorBar:
     # All sensor config keys in default display order
     _SENSOR_DEFS = [
         "cpu_temp", "gpu_temp", "gpu_hotspot", "gpu_mem_temp",
-        "nvme_temp", "nvme_temp2", "fan_rpm",
+        "nvme_temp", "nvme_temp2", "nvme_temp3", "nvme_temp4",
+        "ssd_temp", "ssd_temp2", "ssd_temp3", "ssd_temp4",
+        "hdd_temp", "hdd_temp2",
+        "fan_rpm",
         "ram_usage", "cpu_load", "gpu_load", "gpu_vram",
         "cpu_watts", "gpu_watts",
         "gpu_fan", "cpu_freq", "gpu_clock",
@@ -1241,6 +1288,14 @@ class SensorBar:
             "gpu_mem_temp":("GMEM", self._get_gpu_mem_temp, "°"),
             "nvme_temp":   ("NVM1", self._get_nvme,         "°"),
             "nvme_temp2":  ("NVM2", self._get_nvme2,        "°"),
+            "nvme_temp3":  ("NVM3", self._get_nvme3,        "°"),
+            "nvme_temp4":  ("NVM4", self._get_nvme4,        "°"),
+            "ssd_temp":    ("SSD1", self._get_ssd,          "°"),
+            "ssd_temp2":   ("SSD2", self._get_ssd2,         "°"),
+            "ssd_temp3":   ("SSD3", self._get_ssd3,         "°"),
+            "ssd_temp4":   ("SSD4", self._get_ssd4,         "°"),
+            "hdd_temp":    ("HDD1", self._get_hdd,          "°"),
+            "hdd_temp2":   ("HDD2", self._get_hdd2,         "°"),
             "fan_rpm":     ("FAN",  self._get_fan_or_dimm,  "rpm"),
             "ram_usage":   ("RAM",  self._get_ram,          "%"),
             "cpu_load":    ("CPU%", self._get_cpu_load,     "%"),
@@ -1416,23 +1471,39 @@ class SensorBar:
             return "---", COLOR_COOL
         return sensors.fmt_temp(val), self._temp_color(val, 90, 105)
 
-    def _get_nvme(self, readings, thresh):
-        nvmes = readings.get("nvme_temps", [])
-        if not nvmes:
+    def _get_drive_at(self, readings, thresh, list_key, idx, warn_key, crit_key,
+                      warn_default, crit_default):
+        """Shared body for every per-slot drive getter (NVMe / SSD / HDD).
+        list_key picks the readings list; idx is the 0-based slot; warn/crit
+        keys pull thresholds with sensible defaults if they're missing."""
+        drives = readings.get(list_key, [])
+        if len(drives) <= idx:
             return "---", COLOR_COOL
-        t = nvmes[0]["temp_c"]
-        warn = thresh.get("nvme_warn", 60)
-        crit = thresh.get("nvme_crit", 70)
+        t = drives[idx]["temp_c"]
+        warn = thresh.get(warn_key, warn_default)
+        crit = thresh.get(crit_key, crit_default)
         return sensors.fmt_temp(t), self._temp_color(t, warn, crit)
 
+    def _get_nvme(self,  readings, thresh):
+        return self._get_drive_at(readings, thresh, "nvme_temps", 0, "nvme_warn", "nvme_crit", 60, 70)
     def _get_nvme2(self, readings, thresh):
-        nvmes = readings.get("nvme_temps", [])
-        if len(nvmes) < 2:
-            return "---", COLOR_COOL
-        t = nvmes[1]["temp_c"]
-        warn = thresh.get("nvme_warn", 60)
-        crit = thresh.get("nvme_crit", 70)
-        return sensors.fmt_temp(t), self._temp_color(t, warn, crit)
+        return self._get_drive_at(readings, thresh, "nvme_temps", 1, "nvme_warn", "nvme_crit", 60, 70)
+    def _get_nvme3(self, readings, thresh):
+        return self._get_drive_at(readings, thresh, "nvme_temps", 2, "nvme_warn", "nvme_crit", 60, 70)
+    def _get_nvme4(self, readings, thresh):
+        return self._get_drive_at(readings, thresh, "nvme_temps", 3, "nvme_warn", "nvme_crit", 60, 70)
+    def _get_ssd(self,   readings, thresh):
+        return self._get_drive_at(readings, thresh, "ssd_temps",  0, "ssd_warn",  "ssd_crit",  60, 70)
+    def _get_ssd2(self,  readings, thresh):
+        return self._get_drive_at(readings, thresh, "ssd_temps",  1, "ssd_warn",  "ssd_crit",  60, 70)
+    def _get_ssd3(self,  readings, thresh):
+        return self._get_drive_at(readings, thresh, "ssd_temps",  2, "ssd_warn",  "ssd_crit",  60, 70)
+    def _get_ssd4(self,  readings, thresh):
+        return self._get_drive_at(readings, thresh, "ssd_temps",  3, "ssd_warn",  "ssd_crit",  60, 70)
+    def _get_hdd(self,   readings, thresh):
+        return self._get_drive_at(readings, thresh, "hdd_temps",  0, "hdd_warn",  "hdd_crit",  45, 55)
+    def _get_hdd2(self,  readings, thresh):
+        return self._get_drive_at(readings, thresh, "hdd_temps",  1, "hdd_warn",  "hdd_crit",  45, 55)
 
     def _get_fan_or_dimm(self, readings, thresh):
         """
@@ -1609,12 +1680,20 @@ class SensorBar:
             if unit == "kbps":
                 return val * 8388.608
             return val
-        if config_key == "nvme_temp":
-            nvmes = readings.get("nvme_temps", [])
-            return nvmes[0]["temp_c"] if nvmes else None
-        if config_key == "nvme_temp2":
-            nvmes = readings.get("nvme_temps", [])
-            return nvmes[1]["temp_c"] if len(nvmes) >= 2 else None
+        # Storage cells: index into the per-type list.  Without this, history
+        # for SSD/HDD/extra-NVMe slots never populates and inline charts stay
+        # flat while sparkline popups sit on "Collecting data…".
+        _storage_slots = {
+            "nvme_temp":  ("nvme_temps", 0), "nvme_temp2": ("nvme_temps", 1),
+            "nvme_temp3": ("nvme_temps", 2), "nvme_temp4": ("nvme_temps", 3),
+            "ssd_temp":   ("ssd_temps",  0), "ssd_temp2":  ("ssd_temps",  1),
+            "ssd_temp3":  ("ssd_temps",  2), "ssd_temp4":  ("ssd_temps",  3),
+            "hdd_temp":   ("hdd_temps",  0), "hdd_temp2":  ("hdd_temps",  1),
+        }
+        if config_key in _storage_slots:
+            list_key, idx = _storage_slots[config_key]
+            drives = readings.get(list_key, [])
+            return drives[idx]["temp_c"] if len(drives) > idx else None
         if config_key == "gpu_vram":
             used  = readings.get("gpu_vram_used_mb")
             total = readings.get("gpu_vram_total_mb")
@@ -1741,12 +1820,24 @@ class SensorBar:
                 self._last_orient = orient_now
                 self._rebuild_bar_widgets()
 
-            # Auto-hide NVM2 when no second NVMe drive is present, even if
-            # the user enabled it in config — no point reserving a cell for
-            # a drive that doesn't exist.
+            # Auto-hide storage slots based on the Windows-detected drive
+            # count from storage_info (cached for the process lifetime).  The
+            # alternative — hiding when len(readings[list_key]) <= i — meant
+            # cells materialized only 4–5 s after launch when LHM finally
+            # produced its first valid Storage update, even though the drive
+            # was visible to Windows the whole time.
+            from core import storage_info
+            counts = storage_info.get_drive_counts()
             effective_sens = dict(sens)
-            if len(readings.get("nvme_temps", [])) < 2:
-                effective_sens["nvme_temp2"] = False
+            for kind, slot_keys in (
+                ("nvme", ("nvme_temp", "nvme_temp2", "nvme_temp3", "nvme_temp4")),
+                ("ssd",  ("ssd_temp",  "ssd_temp2",  "ssd_temp3",  "ssd_temp4")),
+                ("hdd",  ("hdd_temp",  "hdd_temp2")),
+            ):
+                count = counts.get(kind, 0)
+                for i, key in enumerate(slot_keys):
+                    if count <= i:
+                        effective_sens[key] = False
 
             enabled_now = tuple(
                 k for k in self._SENSOR_DEFS if effective_sens.get(k, False)
@@ -1921,13 +2012,7 @@ class SensorBar:
             pass
 
     def _read_alpha(self) -> float:
-        """Resolve the bar window alpha from the Display → Overlay opacity
-        slider (display.overlay_opacity), clamped to the Tk-supported range."""
-        try:
-            raw = float(cfg.get_value("display", "overlay_opacity", default=0.94))
-        except (TypeError, ValueError):
-            raw = 0.94
-        return max(0.15, min(1.0, raw))
+        return _read_overlay_alpha()
 
     def _apply_alpha_if_changed(self):
         """Re-apply the bar window alpha when the slider value changed.
