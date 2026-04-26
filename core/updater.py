@@ -16,9 +16,11 @@ State file (update_state.json in BASE_DIR):
                                       show the settings footer button instead
 """
 
+import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -131,7 +133,7 @@ def clear_state():
     _save_state(state)
 
 
-def download_and_apply(zipball_url: str, on_progress=None):
+def download_and_apply(zipball_url: str, on_progress=None, expected_sha256: "str | None" = None):
     """
     Download the release zip, extract it, write a batch helper that copies
     files over the current installation and restarts AlienCore, then launch
@@ -173,6 +175,21 @@ def download_and_apply(zipball_url: str, on_progress=None):
         except Exception:
             pass
         raise RuntimeError(f"Download failed: {e}") from e
+
+    # ── Verify SHA-256 ──
+    if not expected_sha256:
+        raise RuntimeError(
+            "This release is missing an integrity hash and cannot be applied automatically.\n"
+            "Check the GitHub release page and update manually if needed."
+        )
+    _progress(on_progress, 57, "Verifying integrity...")
+    h = hashlib.sha256()
+    with open(zip_path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    if h.hexdigest() != expected_sha256:
+        raise RuntimeError("Integrity check failed — update package may be tampered. Aborting.")
+    logger.info("Update SHA-256 verified.")
 
     # ── Extract ──
     _progress(on_progress, 60, "Extracting...")
@@ -273,11 +290,13 @@ def _do_check():
     if _version_tuple(tag) > _version_tuple(VERSION):
         body  = (data.get("body") or "").strip()
         notes = "\n".join(body.splitlines()[:10])
+        sha_match = re.search(r'\bsha256[:\s]+([0-9a-fA-F]{64})\b', body, re.IGNORECASE)
         info  = {
             "version":     tag,
             "notes":       notes,
             "zipball_url": data.get("zipball_url", ""),
             "html_url":    data.get("html_url", ""),
+            "sha256":      sha_match.group(1).lower() if sha_match else None,
         }
         with _lock:
             _cached.clear()

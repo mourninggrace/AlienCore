@@ -17,6 +17,7 @@ Run the server:
 """
 
 import os
+import sys
 
 # ── Server ────────────────────────────────────────────────────────────────────
 BACKEND_HOST = os.getenv("AC_HOST",   "0.0.0.0")
@@ -24,6 +25,13 @@ BACKEND_PORT = int(os.getenv("AC_PORT", "8765"))
 
 # Long random secret — used to protect the /paypal/refund-support admin endpoint
 SECRET_KEY   = os.getenv("AC_SECRET", "CHANGE_ME_IN_PRODUCTION")
+_paypal_mode = os.getenv("AC_PAYPAL_MODE", "live")
+if SECRET_KEY == "CHANGE_ME_IN_PRODUCTION":
+    if _paypal_mode == "live":
+        print("FATAL: AC_SECRET is not set. Generate one with: openssl rand -hex 32", file=sys.stderr)
+        sys.exit(1)
+    else:
+        print("WARNING: AC_SECRET is not set — using insecure default (sandbox mode only).", file=sys.stderr)
 
 # ── Email sending (Brevo HTTPS API) ───────────────────────────────────────────
 # Uses Brevo's transactional email API over HTTPS (port 443). We use HTTPS

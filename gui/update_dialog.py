@@ -120,7 +120,9 @@ def show(info: dict, parent: tk.Misc = None) -> str:
             try:
                 from core import updater
                 updater.download_and_apply(
-                    info["zipball_url"], on_progress=_on_progress)
+                    info["zipball_url"],
+                    on_progress=_on_progress,
+                    expected_sha256=info.get("sha256"))
             except Exception as exc:
                 err = str(exc)
                 if dlg.winfo_exists():

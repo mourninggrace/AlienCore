@@ -6,6 +6,8 @@ server refresh, and license info retrieval.
 All server calls use stdlib urllib only — no third-party HTTP library needed.
 """
 
+import hashlib
+import hmac as _hmac
 import json
 import logging
 import os
@@ -34,14 +36,37 @@ _session: dict = {}   # in-memory cache
 # Startup
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _session_sig(data: dict) -> str:
+    from core import fingerprint as fp
+    key     = hashlib.sha256(("aliencore-session|" + fp.get()).encode()).digest()
+    payload = json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
+    return _hmac.new(key, payload, hashlib.sha256).hexdigest()
+
+
+def _session_sig_valid(data: dict, sig: str) -> bool:
+    try:
+        return _hmac.compare_digest(_session_sig(data), sig)
+    except Exception:
+        return False
+
+
 def load_session():
     """Load any saved session from disk into memory. Call once at startup."""
     global _session
     try:
         if os.path.exists(_SESSION_PATH):
             with open(_SESSION_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict) and data.get("token"):
+                outer = json.load(f)
+            if isinstance(outer, dict) and "d" in outer and "s" in outer:
+                data, sig = outer["d"], outer["s"]
+                if not isinstance(data, dict) or not _session_sig_valid(data, sig):
+                    logger.warning("Session file failed integrity check — discarding")
+                    return
+            elif isinstance(outer, dict) and outer.get("token"):
+                data = outer  # legacy unsigned session — accepted once, re-signed on next persist
+            else:
+                return
+            if data.get("token"):
                 with _lock:
                     _session = data
                 logger.info("Session loaded for %s", data.get("email", "?"))
@@ -66,7 +91,8 @@ def _refresh_blocking():
     if s.get("expires_at", 0) > time.time() + 180 * 86400:
         return
     try:
-        resp = _post("/auth/check", {"token": s["token"]})
+        from core import fingerprint as fp
+        resp = _post("/auth/check", {"token": s["token"], "fingerprint": fp.get()})
         if resp.get("ok"):
             _merge_session(resp)
             logger.info("Session refreshed for %s  base=%s pro=%s",
@@ -194,7 +220,8 @@ def refresh_license() -> tuple[bool, str]:
     if not s.get("token"):
         return False, "Not logged in."
     try:
-        resp = _post("/auth/check", {"token": s["token"]})
+        from core import fingerprint as fp
+        resp = _post("/auth/check", {"token": s["token"], "fingerprint": fp.get()})
         if resp.get("ok"):
             old_base = s.get("has_base")
             old_pro  = s.get("has_pro")
@@ -239,8 +266,14 @@ def _post(endpoint: str, payload: dict) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=12) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            return json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"ok": False, "error": f"HTTP {e.code}"}
 
 
 def _save_session(data: dict):
@@ -295,8 +328,9 @@ def _persist():
         tmp = _SESSION_PATH + ".tmp"
         with _lock:
             data = dict(_session)
+        sig = _session_sig(data)
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+            json.dump({"d": data, "s": sig}, f)
         os.replace(tmp, _SESSION_PATH)
     except Exception as e:
         logger.debug("Session persist error: %s", e)

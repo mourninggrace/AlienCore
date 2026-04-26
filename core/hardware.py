@@ -434,6 +434,31 @@ def _get_ram_info() -> dict:
 
 def _get_drive_info() -> list:
     drives = []
+
+    # Authoritative MediaType + BusType from MSFT_PhysicalDisk. This is what
+    # Windows itself uses to classify drives, so it correctly identifies SATA
+    # SSDs whose model name doesn't include "SSD" (e.g. ADATA SX900).
+    # MediaType: 3=HDD, 4=SSD, 5=SCM.   BusType: 11=SATA, 17=NVMe.
+    msft_by_index: dict = {}
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+    try:
+        import wmi
+        storage = wmi.WMI(namespace=r"root\Microsoft\Windows\Storage")
+        for pd in storage.MSFT_PhysicalDisk():
+            try:
+                msft_by_index[str(pd.DeviceId)] = {
+                    "media": int(pd.MediaType or 0),
+                    "bus":   int(pd.BusType   or 0),
+                }
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug("MSFT_PhysicalDisk query failed: %s", e)
+
     try:
         c = _wmi_connect()
         if c:
@@ -442,19 +467,32 @@ def _get_drive_info() -> list:
                 size   = int(disk.Size or 0)
                 iface  = (disk.InterfaceType or "Unknown").strip()
                 pnpid  = (disk.PNPDeviceID or "").strip().lower()
+                index  = str(disk.Index) if disk.Index is not None else ""
                 is_ramdisk = _detect_ramdisk(name, pnpid)
-                is_nvme    = not is_ramdisk and (
-                    "nvme" in name.lower() or "nvme" in iface.lower() or "nvme" in pnpid
-                )
-                is_ssd     = not is_ramdisk and any(
-                    x in name.lower() for x in ["ssd", "nvme", "solid"]
-                )
-                is_hdd     = (
-                    not is_ramdisk
-                    and not is_nvme
-                    and iface.lower() in ["ide", "sata"]
-                    and not any(x in name.lower() for x in ["ssd", "nvme"])
-                )
+
+                mp         = msft_by_index.get(index, {})
+                bus_type   = mp.get("bus",   0)
+                media_type = mp.get("media", 0)
+
+                if is_ramdisk:
+                    is_nvme = is_ssd = is_hdd = False
+                elif media_type or bus_type:
+                    is_nvme = (bus_type == 17)
+                    is_ssd  = (media_type == 4)
+                    is_hdd  = (media_type == 3)
+                else:
+                    is_nvme = (
+                        "nvme" in name.lower()
+                        or "nvme" in iface.lower()
+                        or "nvme" in pnpid
+                    )
+                    is_ssd  = any(x in name.lower() for x in ["ssd", "nvme", "solid"])
+                    is_hdd  = (
+                        not is_nvme
+                        and iface.lower() in ["ide", "sata"]
+                        and not any(x in name.lower() for x in ["ssd", "nvme"])
+                    )
+
                 drives.append({
                     "name":        name,
                     "size_gb":     round(size / 1024**3, 1),

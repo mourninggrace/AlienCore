@@ -35,9 +35,10 @@ def init_db():
 
             -- Session tokens returned after successful PIN verification
             CREATE TABLE IF NOT EXISTS sessions (
-                token      TEXT PRIMARY KEY,
-                email      TEXT NOT NULL,
-                expires_at REAL NOT NULL
+                token       TEXT PRIMARY KEY,
+                email       TEXT NOT NULL,
+                expires_at  REAL NOT NULL,
+                fingerprint TEXT DEFAULT NULL
             );
 
             -- Audit trail of all PayPal payments received
@@ -62,7 +63,11 @@ def init_db():
                 has_paid         INTEGER NOT NULL DEFAULT 0
             );
         """)
-        # Migration: add trial_started_at to existing databases
+        # Migrations
         cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
         if "trial_started_at" not in cols:
             conn.execute("ALTER TABLE users ADD COLUMN trial_started_at REAL DEFAULT NULL")
+
+        sess_cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+        if "fingerprint" not in sess_cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN fingerprint TEXT DEFAULT NULL")

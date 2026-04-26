@@ -8,6 +8,7 @@ scratch copy of AlienCore. Everything past the network boundary runs for
 real — extract, bat-script generation, state persistence, changelog parse.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -260,8 +261,11 @@ def test_download_and_apply_builds_update_bat(tmp_path, monkeypatch):
     progress = []
     def on_progress(pct, msg): progress.append((pct, msg))
 
+    expected_sha256 = hashlib.sha256(zipball_bytes).hexdigest()
     with _patched_urlopen({"https://example.com/zipball": zipball_bytes}):
-        u.download_and_apply("https://example.com/zipball", on_progress=on_progress)
+        u.download_and_apply("https://example.com/zipball",
+                             on_progress=on_progress,
+                             expected_sha256=expected_sha256)
 
     # Progress fired at least for Downloading → Extracting → Launching
     msgs = " | ".join(m for _, m in progress)

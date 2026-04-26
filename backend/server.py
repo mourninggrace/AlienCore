@@ -116,8 +116,9 @@ def verify_pin():
         token      = secrets.token_urlsafe(40)
         expires_at = time.time() + TOKEN_EXPIRY_DAYS * 86400
         conn.execute(
-            "INSERT OR REPLACE INTO sessions (token, email, expires_at) VALUES (?,?,?)",
-            (token, email, expires_at),
+            "INSERT OR REPLACE INTO sessions (token, email, expires_at, fingerprint)"
+            " VALUES (?,?,?,?)",
+            (token, email, expires_at, fingerprint if fingerprint and fingerprint != "unknown" else None),
         )
 
         conn.execute("INSERT OR IGNORE INTO users (email) VALUES (?)", (email,))
@@ -195,18 +196,34 @@ def verify_pin():
 
 @app.route("/auth/check", methods=["POST"])
 def check_token():
-    data  = request.get_json(force=True, silent=True) or {}
-    token = (data.get("token") or "").strip()
+    data        = request.get_json(force=True, silent=True) or {}
+    token       = (data.get("token")       or "").strip()
+    fingerprint = (data.get("fingerprint") or "").strip()[:64]
     if not token:
         return jsonify({"ok": False, "error": "Token required."}), 400
 
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT email, expires_at FROM sessions WHERE token=?", (token,)
+            "SELECT email, expires_at, fingerprint FROM sessions WHERE token=?", (token,)
         ).fetchone()
 
         if not row or time.time() > row["expires_at"]:
             return jsonify({"ok": False, "error": "Session expired."}), 401
+
+        stored_fp = row["fingerprint"]
+        if stored_fp and stored_fp != "unknown":
+            if fingerprint and fingerprint != "unknown" and stored_fp != fingerprint:
+                logger.warning(
+                    "Fingerprint mismatch — token=%s…  stored=%s…  got=%s…",
+                    token[:8], stored_fp[:8], fingerprint[:8],
+                )
+                return jsonify({"ok": False, "error": "Session is bound to another machine."}), 401
+        elif fingerprint and fingerprint != "unknown":
+            # Session not yet bound — lazy-bind to the first real fingerprint seen
+            conn.execute(
+                "UPDATE sessions SET fingerprint=? WHERE token=?", (fingerprint, token)
+            )
+            logger.info("Session %s… bound to fingerprint %s…", token[:8], fingerprint[:8])
 
         email = row["email"]
         user  = conn.execute(
@@ -306,14 +323,17 @@ def paypal_ipn():
         logger.warning("IPN missing user email in custom field")
         return "", 400
 
-    # Validate the amount matches the product price
+    # Validate item and amount
     product = PRODUCTS.get(item_number)
+    if not product:
+        logger.warning("IPN unknown item_number=%s txn=%s — rejected", item_number, txn_id)
+        return "", 400
     try:
         gross_float = float(mc_gross) if mc_gross else 0.0
     except ValueError:
         logger.warning("IPN unparseable mc_gross: %r", mc_gross)
         return "", 400
-    if product and gross_float < float(product["amount"]) - 0.01:
+    if gross_float < float(product["amount"]) - 0.01:
         logger.warning("IPN amount mismatch: got %s, expected %s",
                        mc_gross, product["amount"])
         return "", 400

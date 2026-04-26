@@ -692,14 +692,21 @@ def _tweak_ram(c: dict, dry_run: bool):
     if ram["clear_standby_cache_on_idle"]:
         logger.info("RAM: standby cache clearing enabled (runs at idle when RAM >70%%)")
 
-    if not ram["pagefile_managed"] and ram["pagefile_custom_mb"] > 0:
-        mb = ram["pagefile_custom_mb"]
-        logger.info("RAM: setting custom pagefile: %d MB", mb)
-        script = (
-            f"$pf = Get-WmiObject Win32_PageFileSetting; "
-            f"if ($pf) {{ $pf.InitialSize = {mb}; $pf.MaximumSize = {mb}; $pf.Put() }}"
-        )
-        _run(["powershell", "-Command", script], dry_run, f"Set pagefile {mb}MB")
+    if not ram["pagefile_managed"]:
+        try:
+            mb = int(ram["pagefile_custom_mb"])
+        except (TypeError, ValueError):
+            logger.warning("RAM: pagefile_custom_mb is not an integer — skipping")
+            mb = 0
+        if not (0 < mb <= 65536):
+            mb = 0
+        if mb > 0:
+            logger.info("RAM: setting custom pagefile: %d MB", mb)
+            script = (
+                f"$pf = Get-WmiObject Win32_PageFileSetting; "
+                f"if ($pf) {{ $pf.InitialSize = {mb}; $pf.MaximumSize = {mb}; $pf.Put() }}"
+            )
+            _run(["powershell", "-Command", script], dry_run, f"Set pagefile {mb}MB")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

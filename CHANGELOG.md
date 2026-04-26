@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security / Legal
 
+- **Session is now bound to the machine that created it.** Three-layer
+  defense added against the "copy `session.json` to another PC" piracy
+  vector. (1) Client sends the hardware fingerprint on every
+  `/auth/check` call, not just at PIN-verify time. (2) Server stores the
+  fingerprint in a new `sessions.fingerprint` column at login, and on
+  every subsequent check rejects the token with
+  *"Session is bound to another machine."* if the incoming fingerprint
+  doesn't match. Sessions that were created with no fingerprint
+  (detection failure / older clients) lazy-bind to the first real
+  fingerprint that checks in — closing the "log in from a sandboxed VM
+  to get an unbound token" bypass. (3) `session.json` itself is now
+  HMAC-signed with a key derived from the machine fingerprint, so
+  tampering with `has_base` / `has_pro` / `expires_at` in a text editor
+  is detected on load and the session is discarded. Legacy unsigned
+  session files are still accepted once and re-signed on next persist.
+- **Auto-update integrity check**: AlienCore now refuses to apply an
+  update unless the GitHub release notes include a
+  `sha256: <64-hex-digest>` line matching the downloaded zip. Closes the
+  unsigned-update RCE path (a tampered zip arriving via DNS poisoning
+  or compromised release would previously have been extracted and run
+  with elevated privileges). Each future release MUST include the
+  digest in its body — generate with
+  `certutil -hashfile <zip> SHA256`.
+- **Backend hard-exits at startup if `AC_SECRET` is the default**
+  (`CHANGE_ME_IN_PRODUCTION`) and `AC_PAYPAL_MODE=live`. Sandbox mode
+  still warns but allows the default for local dev. Stops the server
+  ever shipping with a publicly-known secret protecting any future
+  admin endpoint.
+- **PayPal IPN now rejects unknown `item_number` values** with HTTP 400
+  instead of silently inserting a `status="completed"` purchase row.
+  Previously a crafted IPN with `item_number="AC_FREEBIE"` and
+  `mc_gross=0.01` would skip the price-validation guard (which was
+  gated by `if product and ...`) and pollute the audit trail without
+  granting a license.
+- **PowerShell injection hardened in pagefile tweak.** The
+  `ram.pagefile_custom_mb` value from `config.json` is now hard-cast to
+  `int` and bounds-checked (1 ≤ mb ≤ 65536) before it ever touches the
+  PowerShell command string. A user-writable config file can no longer
+  be used as an LPE vector against the elevated AlienCore process.
 - Added a prominent **trademark disclaimer** to the README (top callout +
   footer notice) clarifying that AlienCore is an independent third-party
   utility and is **not affiliated with, endorsed by, sponsored by, or
@@ -157,6 +196,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Refresh License showed "Cannot reach server" for any non-200
+  response.** `urllib.error.HTTPError` is a subclass of
+  `urllib.error.URLError`, so the existing `except URLError` block in
+  `core/auth.py` was swallowing every server rejection (401 expired
+  token, 401 fingerprint mismatch, 400 bad request) and presenting them
+  all as a generic network failure. `_post()` now catches `HTTPError`
+  separately, reads the JSON error body, and surfaces the actual server
+  message — so users see "Session expired. Please sign in again."
+  instead of being told their connection is down.
+- **Storage tab classified SATA SSDs as HDD** when the drive's WMI
+  model name didn't contain the literal string "SSD" / "NVMe" / "Solid"
+  (e.g., ADATA SX900, certain Crucial / Kingston / WD Blue SATA SSDs).
+  `_get_drive_info()` now consults `MSFT_PhysicalDisk.MediaType` /
+  `BusType` from the `root\Microsoft\Windows\Storage` namespace —
+  Windows' authoritative classification — and only falls back to the
+  model-name heuristic if that namespace is unavailable. Delete the
+  cached `hardware_profile.json` once after upgrading to pick up the
+  corrected drive type.
 - Settings → Drivers: Realtek's own download portal returns 404 at every
   public path — switched the Realtek row to point at a Microsoft Update
   Catalog search filtered for Realtek, which actually surfaces working
