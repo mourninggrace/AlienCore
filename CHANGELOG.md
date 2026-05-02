@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **AlienCore now ships as a standalone Windows installer.** Download
+  `AlienCore-<version>-Setup.exe` from the [GitHub releases page](https://github.com/mourninggrace/AlienCore/releases/latest),
+  double-click, accept the SmartScreen warning, and the installer drops
+  the app into `Program Files\AlienCore\`, creates Start Menu and
+  Desktop shortcuts, and offers to launch on completion.  No need to
+  install Python, no `install_deps.py` to run.  The app self-elevates
+  via UAC on first launch (required for kernel MSR / WMI / SMBus
+  access) and registers its silent auto-start Task Scheduler entry on
+  first run.  See `installer/README.md` for the build pipeline
+  (PyInstaller onedir + Inno Setup 6).
+
+  *Note: the v1.0 installer is unsigned.*  Windows SmartScreen will
+  show a "Windows protected your PC" warning on download — click
+  **More info** → **Run anyway** to proceed.  The installer's
+  SHA-256 digest is published in each GitHub release's notes for users
+  who want to verify it independently.  A signed build is planned for a
+  future release once initial demand justifies the certificate cost.
+
+### Changed
+
+- **In-app updater on installed builds now opens the GitHub releases
+  page in your default browser** instead of attempting an in-place
+  source overlay.  The old robocopy-based updater can't update a
+  PyInstaller-frozen install (the install directory is `aliencore.exe`
+  + `_internal/`, not loose `.py` files), so on installed builds the
+  update dialog's primary button now reads **Download New Installer**
+  and clicking it opens the latest release page where you grab the
+  fresh `Setup.exe`.  Source-run installations (running
+  `python aliencore.py` from a clone) keep the existing seamless
+  source-overlay auto-update behavior.
+- README's Install section restructured: "Recommended — Windows
+  installer" now leads, with the source / developer path moved to
+  "Alternative".
+
 ### Security / Audit
 
 - **Pre-launch security and stability audit** — 25 findings from a
