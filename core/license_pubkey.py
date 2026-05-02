@@ -19,8 +19,7 @@ license signature in the wild):
 """
 
 # Base64-encoded raw 32-byte Ed25519 public key.
-# REPLACE THIS PLACEHOLDER with the contents of license_public.b64 generated
-# by tools/generate_license_keypair.py before the v1.0 release.  An empty or
-# all-zero key is detected by core/license_signing.py and forces all license
-# checks to fail closed — no Pro features unlock until a real key is shipped.
-PUBLIC_KEY_B64 = ""
+# Generated 2026-05-02 by tools/generate_license_keypair.py.  The matching
+# private key lives only on the production backend — it never appears in
+# source control, the .exe installer, or any client-side artifact.
+PUBLIC_KEY_B64 = "RlA+GKrtZT9vH0oYM//PHE6S1X0XE9pSJGJx2UZNnvA="
