@@ -114,7 +114,11 @@ def send_feedback_email(from_email: str, feedback_type: str,
     """
     from backend.config import FROM_EMAIL as _FROM
     support_inbox = _FROM  # feedback goes to the verified sender inbox
-    subject = f"[AlienCore {feedback_type}] from {from_email}"
+    # Belt-and-braces: server.py already strips CR/LF, but defending again
+    # here means the subject can never contain control chars even if some
+    # future caller forgets to sanitize.
+    safe_type = "".join(c for c in feedback_type if c not in "\r\n\x00")[:40]
+    subject = f"[AlienCore {safe_type}] from {from_email}"
 
     text = (f"Feedback type: {feedback_type}\n"
             f"From: {from_email}\n\n"
@@ -127,7 +131,7 @@ def send_feedback_email(from_email: str, feedback_type: str,
                  .replace(">", "&gt;"))
     html = f"""<html><body style="font-family:'Segoe UI',Arial,sans-serif;
                                   background:#111;color:#ddd;padding:24px;">
-<h2 style="color:#00aaff;margin:0 0 8px 0;">AlienCore {_esc(feedback_type)}</h2>
+<h2 style="color:#00aaff;margin:0 0 8px 0;">AlienCore {_esc(safe_type)}</h2>
 <p style="color:#888;margin:0 0 18px 0;">From: <strong>{_esc(from_email)}</strong></p>
 <h3 style="color:#00cc66;margin:0 0 4px 0;">Description</h3>
 <pre style="background:#0d0d0d;border:1px solid #222;padding:12px;

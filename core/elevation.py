@@ -63,8 +63,18 @@ def relaunch_as_admin(extra_args: list[str] | None = None) -> bool:
     if extra_args:
         params.extend(extra_args)
 
-    # Quote each argument for ShellExecuteW
-    quoted = " ".join(f'"{p}"' for p in params)
+    # Refuse to forward args containing control characters — these can't
+    # appear in a legitimate path or argparse flag and would only be present
+    # if argv was crafted to break out of subprocess.list2cmdline's quoting.
+    for p in params:
+        if not isinstance(p, str) or any(c in p for c in ("\r", "\n", "\x00")):
+            logger.error("relaunch_as_admin refused — argv contains control chars")
+            return False
+
+    # subprocess.list2cmdline implements the exact escaping that
+    # CommandLineToArgvW expects on the receiving side, so embedded quotes
+    # and backslash-runs round-trip cleanly.
+    quoted = subprocess.list2cmdline(params)
 
     try:
         # SW_SHOWNORMAL = 1
@@ -114,6 +124,47 @@ def task_exists() -> bool:
         return False
 
 
+def _path_safe_for_elevated_task(p: str) -> bool:
+    """Reject install paths a non-admin user could overwrite, since the task
+    runs /RL HIGHEST.  A non-admin who can swap aliencore.py / python.exe gains
+    persistent elevated execution on every login.
+
+    'Safe' means the path lives under one of the system program directories
+    (Program Files / Program Files (x86) / System32).  Per-user Python installs
+    in %LOCALAPPDATA%\\Programs\\Python and project trees on Desktop or in the
+    user profile are all rejected.
+
+    Set ALIENCORE_ALLOW_USER_INSTALL=1 in the environment to bypass during
+    development — never set this in production builds.
+    """
+    if os.environ.get("ALIENCORE_ALLOW_USER_INSTALL") == "1":
+        return True
+    try:
+        norm = os.path.normcase(os.path.abspath(p))
+    except Exception:
+        return False
+    pf   = os.path.normcase(os.environ.get("ProgramFiles", r"C:\Program Files"))
+    pf86 = os.path.normcase(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+    sysroot = os.path.normcase(os.environ.get("SystemRoot", r"C:\Windows"))
+    safe_roots = [pf, pf86, os.path.join(sysroot, "system32")]
+    for root in safe_roots:
+        try:
+            if os.path.commonpath([norm, root]) == root:
+                return True
+        except ValueError:
+            # different drives — commonpath raises
+            continue
+    return False
+
+
+def _path_safe_for_template(p: str) -> bool:
+    """A path that flows into the schtasks /TR string must not contain
+    characters that would break command-line parsing."""
+    return isinstance(p, str) and bool(p) and not any(
+        c in p for c in ('"', "'", "\r", "\n", "\x00")
+    )
+
+
 def install_elevated_task() -> bool:
     """
     Create a Task Scheduler entry that runs AlienCore at login with highest
@@ -124,6 +175,31 @@ def install_elevated_task() -> bool:
         return False
 
     exe, args = _launch_target()
+    script = os.path.join(_BASE_DIR, "aliencore.py")
+
+    # Refuse if either the interpreter or the install directory is in a
+    # location a non-admin can write to.  Otherwise the elevated task
+    # becomes a persistent local privilege escalation primitive.
+    for label, p in (("interpreter", exe),
+                     ("install_dir", _BASE_DIR),
+                     ("script", script)):
+        if not _path_safe_for_elevated_task(p):
+            logger.error(
+                "Refusing to install elevated startup task — %s lives in a "
+                "user-writable location: %r. Move AlienCore (and its Python "
+                "interpreter) to Program Files, or set "
+                "ALIENCORE_ALLOW_USER_INSTALL=1 if you accept the LPE risk "
+                "(development only).",
+                label, p,
+            )
+            return False
+        if not _path_safe_for_template(p):
+            logger.error(
+                "Refusing to install elevated startup task — %s path "
+                "contains unsafe characters: %r", label, p,
+            )
+            return False
+
     tr = f'"{exe}" {args}'.strip()
 
     # /RL HIGHEST = run with highest privileges

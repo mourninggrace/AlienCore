@@ -37,6 +37,16 @@ _thread  = None
 _running = False
 _lock    = threading.Lock()
 
+# Buffered event appender — see _append_event.  The monitor loop fires
+# thermal/profile-switch events at ~15 s cadence; rewriting the entire
+# learning.json on every event holds _lock across multi-MB disk I/O after a
+# few weeks of accumulated history.  Buffer in memory and flush periodically
+# (or at shutdown) instead.
+_pending_events: list = []
+_pending_lock        = threading.Lock()
+_FLUSH_INTERVAL_SEC  = 300   # 5 minutes
+_last_flush_at: float = 0.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API
@@ -58,6 +68,12 @@ def start():
 def stop():
     global _running
     _running = False
+    # Flush any buffered events synchronously so a graceful shutdown
+    # doesn't drop the last few minutes of profile/thermal history.
+    try:
+        flush_pending()
+    except Exception as e:
+        logger.debug("Learning flush on stop failed: %s", e)
 
 
 def log_profile_switch(profile: str, trigger: str, readings: dict):
@@ -194,6 +210,7 @@ def _loop():
 
     while _running:
         try:
+            flush_pending()   # drain any events buffered since last cycle
             _prune_old_events()
             _run_analysis()
             # Refresh backup after each hourly cycle
@@ -441,9 +458,31 @@ def _rule_hysteresis_tuning(events: list) -> list:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _append_event(event: dict):
+    """Buffer the event in memory and flush to disk at most every
+    _FLUSH_INTERVAL_SEC.  The hourly _loop calls flush_pending() too, and
+    stop() flushes synchronously so a graceful shutdown never loses events."""
+    global _last_flush_at
+    with _pending_lock:
+        _pending_events.append(event)
+        due = (time.time() - _last_flush_at) >= _FLUSH_INTERVAL_SEC
+    if due:
+        flush_pending()
+
+
+def flush_pending():
+    """Drain the in-memory buffer into learning.json.  Safe to call from
+    any thread; a no-op when the buffer is empty."""
+    global _last_flush_at
+    with _pending_lock:
+        if not _pending_events:
+            _last_flush_at = time.time()
+            return
+        batch = list(_pending_events)
+        _pending_events.clear()
+        _last_flush_at = time.time()
     with _lock:
         data = _load_data()
-        data.setdefault("events", []).append(event)
+        data.setdefault("events", []).extend(batch)
         _save_data(data)
 
 

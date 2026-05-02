@@ -83,8 +83,8 @@ def main():
     # LHM (CPU temps via WinRing0 MSR), SMBus DIMM temps, and AWCC WMI all
     # require administrator rights.  Without them the sensor bar shows '---'.
     # Only main + firstrun need elevation; --settings is a subprocess that
-    # inherits the parent's token, --dryrun/--restore/--install/--uninstall
-    # have their own privilege semantics.
+    # inherits the parent's token, --dryrun/--restore have their own
+    # privilege semantics.
     if _should_auto_elevate(args) and not elevation.is_admin():
         root_logger.warning("Not running as admin — requesting UAC elevation "
                             "(pass --no-elevate to skip).")
@@ -92,14 +92,6 @@ def main():
             sys.exit(0)   # elevated copy takes over; this instance exits
         root_logger.warning("UAC declined or failed — continuing without admin. "
                             "CPU temp, DIMM, NVMe sensors may show '---'.")
-
-    # ── Service install / uninstall ───────────────────────────────────────────
-    if args.install:
-        _install_service()
-        return
-    if args.uninstall:
-        _uninstall_service()
-        return
 
     # ── Settings only ─────────────────────────────────────────────────────────
     if args.settings:
@@ -406,6 +398,13 @@ def _start_tray(hw: dict):
                     p.terminate()
                 except Exception:
                     pass
+        # Release the named-event handle so test harnesses that import this
+        # module repeatedly don't accumulate kernel objects.
+        if _show_event:
+            try:
+                _kernel32.CloseHandle(_show_event)
+            except Exception:
+                pass
         # Sensor bar lives on its own thread with its own Tk mainloop — if we
         # don't tear it down explicitly its mainloop keeps the interpreter
         # alive after the tray exits and the whole process hangs.
@@ -434,63 +433,6 @@ def _on_settings_saved():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Windows Service wrapper
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _install_service():
-    """Register AlienCore as a Windows service using pywin32."""
-    try:
-        import win32serviceutil
-        python_exe = sys.executable
-        script     = os.path.abspath(__file__)
-        svc_name   = "AlienCoreService"
-        display    = "AlienCore Adaptive Optimizer"
-        description = "Adaptive system optimizer — manages CPU, GPU, and system tweaks automatically."
-
-        # Use sc.exe for reliability
-        import subprocess
-        _cnw = subprocess.CREATE_NO_WINDOW
-        cmd = [
-            "sc", "create", svc_name,
-            "binPath=",  f'"{python_exe}" "{script}"',
-            "DisplayName=", display,
-            "start=", "auto",
-            "type=", "own",
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True,
-                                creationflags=_cnw, timeout=15)
-        if result.returncode == 0:
-            # Add description
-            subprocess.run(["sc", "description", svc_name, description],
-                           capture_output=True, creationflags=_cnw,
-                           timeout=10)
-            print(f"Service '{svc_name}' installed successfully.")
-            print("To start it now: sc start AlienCoreService")
-            print("Or reboot — it will start automatically.")
-        else:
-            print(f"Service install failed: {result.stderr}")
-            print("Make sure you're running as Administrator.")
-    except Exception as e:
-        print(f"Service install error: {e}")
-
-
-def _uninstall_service():
-    import subprocess
-    _cnw = subprocess.CREATE_NO_WINDOW
-    svc_name = "AlienCoreService"
-    subprocess.run(["sc", "stop",   svc_name], capture_output=True,
-                   creationflags=_cnw, timeout=15)
-    result = subprocess.run(["sc", "delete", svc_name],
-                            capture_output=True, text=True,
-                            creationflags=_cnw, timeout=10)
-    if result.returncode == 0:
-        print(f"Service '{svc_name}' removed.")
-    else:
-        print(f"Remove failed: {result.stderr}")
-        print("Make sure you're running as Administrator.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Argument parser
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -506,8 +448,6 @@ def _parse_args():
     p.add_argument("--login",     action="store_true", help="Open login dialog only (subprocess)")
     p.add_argument("--ai-chat",   action="store_true", help="Open AI chat window only (subprocess)")
     p.add_argument("--dryrun",    action="store_true", help="Show tweaks without applying")
-    p.add_argument("--install",   action="store_true", help="Install as Windows service (Admin)")
-    p.add_argument("--uninstall", action="store_true", help="Remove Windows service (Admin)")
     p.add_argument("--restore",   action="store_true", help="Restore system defaults")
     p.add_argument("--no-elevate", action="store_true",
                    help="Skip the automatic UAC prompt at launch")
@@ -523,8 +463,6 @@ def _should_auto_elevate(args) -> bool:
         return False
     if args.settings or args.login or args.ai_chat or args.dryrun or args.restore:
         return False
-    if args.install or args.uninstall:
-        return False   # sc.exe fails loudly if not admin — let the user see that
     return True
 
 

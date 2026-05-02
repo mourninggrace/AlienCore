@@ -203,9 +203,15 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict):
+    """Atomic write — shared with updater.py.  Either writer crashing mid-write
+    would otherwise empty the file and lose the user's last_seen_version /
+    snooze flags."""
     try:
-        with open(_STATE_PATH, "w", encoding="utf-8") as f:
+        os.makedirs(os.path.dirname(_STATE_PATH), exist_ok=True)
+        tmp = _STATE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
+        os.replace(tmp, _STATE_PATH)
     except Exception as e:
         logger.debug("Failed to save update state: %s", e)
 

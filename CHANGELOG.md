@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security / Audit
+
+- **Pre-launch security and stability audit** — 25 findings from a
+  four-agent review across the backend, client auth/license/updater,
+  privilege/subprocess surfaces, and runtime hot paths.  All 25 fixed.
+  Headlines below; full file:line breakdown in the audit memo.
+
+  *License integrity (Ed25519 signing).*  The backend now signs every
+  `/auth/check` and `/auth/verify-pin` response with an Ed25519 private
+  key the client never sees.  The client refuses to grant `has_base` or
+  `has_pro` without a valid signature over the canonical license payload
+  (`email|has_base|has_pro|trial|exp|issued|signed|fingerprint`).
+  Closes the prior MITM-flip-`has_pro`-to-true vector — even an attacker
+  who can rewrite responses on the wire can no longer forge a Pro grant
+  because they don't have the signing key.  See
+  `tools/generate_license_keypair.py` for the one-shot deploy keygen.
+
+  *Trial farm closed.*  Verify-PIN now refuses empty / `unknown`
+  fingerprints (was previously a free fresh-trial bypass for sandboxed
+  VMs).  Emails are NFKC-normalized and `+tag` aliases are canonicalized
+  server-side so `me+1@gmail.com` no longer earns a separate trial.
+  When a fingerprint already burned a trial, every subsequent email on
+  that hardware inherits the original start date.
+
+  *PIN endpoint hardening.*  Per-email cooldown (60 s) and per-IP daily
+  cap (30) on `/auth/send-pin` shut down the open-spam-relay vector.
+  PINs are now compared with `secrets.compare_digest`, fail counter
+  burns the row at 5 wrong attempts, and every failure path returns the
+  same generic "Invalid email or PIN" message — no more email-existence
+  oracle.  Server-side error responses no longer leak Brevo / urllib
+  exception text back to the client.
+
+  *Session lifetime + binding.*  Sessions now carry an immutable
+  `issued_at`; rolling extension can no longer push the absolute deadline
+  past 90 days, so a stolen token can't be kept alive forever.  The
+  lazy-fingerprint-bind path was removed — every session is bound at
+  `/auth/verify-pin` and any unbound session is rejected on next check.
+
+  *Updater zip-slip + downgrade prevention.*  Update zip extraction now
+  iterates `ZipInfo` manually, rejects absolute paths / `..` segments /
+  symlinks, and verifies every member resolves under the extract dir.
+  `download_and_apply` re-checks the version at apply time AND extracts
+  the bundled `core/constants.py` to confirm its `VERSION` matches the
+  release tag — defeats both pointer-swap and downgrade-by-tag attacks
+  even if a maintainer release token leaks.
+
+  *PATH-hijack hardening.*  `core/fingerprint.py` and `core/auth.py`
+  invoke `wmic.exe` / `powershell.exe` via absolute `%SystemRoot%\
+  System32\…` paths.  Bonus: PowerShell `Get-CimInstance` is now the
+  primary BIOS-UUID source so AlienCore keeps working when Microsoft
+  finishes removing WMIC in Windows 11 24H2.
+
+  *Elevated-task LPE defense.*  `core/elevation.py` refuses to install
+  the `AlienCoreElevatedStartup` Task Scheduler entry when either the
+  Python interpreter or the install directory lives in a user-writable
+  location (per-user `Programs\Python`, project on Desktop, etc.).
+  Set `ALIENCORE_ALLOW_USER_INSTALL=1` to override during development;
+  the .exe installer puts AlienCore under `Program Files` so this is
+  silent in production.  `relaunch_as_admin` now uses
+  `subprocess.list2cmdline` instead of naive `f'"{p}"'` quoting and
+  rejects argv elements with embedded control chars.
+
+  *VBS / registry launcher hardening.*  `core/startup.py` `_write_vbs()`
+  refuses to write a launcher whose interpreter, script, or base-dir
+  path contains `"`, `'`, `\r`, `\n`, or `NUL`.  Same guard on the HKCU
+  Run command.
+
+  *Local stability.*  `config_manager.get()` now returns a true deepcopy
+  (was returning the live cache, letting GUI / advisor mutations corrupt
+  shared state until the next save).  `hardware_profile.json` and
+  `update_state.json` writes are now atomic (`tmp` + `os.replace`) so a
+  power-cut can't truncate them.  `core/sensors.py` parsers use `.get()`
+  defensively — a single malformed LHM JSON line no longer freezes the
+  bar to `---` until restart.  `gui/ai_chat.py::_confirm_tool` has a
+  120 s timeout and a `winfo_exists` guard so a closed chat window
+  during a tool dispatch can no longer hang the API worker thread
+  indefinitely.  `learning.py` event appends are now buffered and
+  flushed every 5 minutes (was rewriting the entire multi-MB JSON on
+  every thermal/profile event).
+
+  *Service-manager lockdown.*  `services_manager.set_startup_type` /
+  `start_service` / `stop_service` now validate `service_name` against
+  the curated list before invoking `sc.exe`.  Future AI tool exposures
+  (e.g. an LLM-driven manage-service) can't reach uncurated services
+  like `Winmgmt` or `RpcSs`.
+
+  *Hygiene cleanup.*  Sensor cells share the same sparkline ring-buffer
+  size (mem-tier-scaled, was hardcoded `90`).  `_reg_set` raises on
+  unknown hive prefix instead of silently writing to HKLM.  `expires_at`
+  rejects `NaN`/`inf` (was extending offline grace forever).  Legacy
+  unsigned `session.json` files are no longer accepted (v1 ships with
+  HMAC-required from day one).  `/health` no longer leaks the version
+  string.  Settings-window worker callbacks check `winfo_exists()`
+  before scheduling on root.  `_show_event` HANDLE is closed at quit.
+
+### Removed
+
+- **Windows-service install path removed.** `aliencore.py --install` and
+  `--uninstall` flags, plus the `_install_service()` / `_uninstall_service()`
+  functions that registered an `AlienCoreService` entry via `sc.exe`, are
+  gone. The service path was structurally broken — it pointed `binPath` at
+  `python.exe aliencore.py`, which never calls `StartServiceCtrlDispatcher`,
+  so Windows always killed the process with **Error 1053** (service didn't
+  respond to start in time). Even if that were fixed, services run in
+  Session 0 where the sensor bar and tray icon can't render. AlienCore's
+  real auto-start path has always been the `AlienCoreElevatedStartup` Task
+  Scheduler entry installed by `core/elevation.py` at first elevated launch
+  — silent, elevated, runs in the user session, fully working.
+  Users who previously ran `aliencore.py --install` should remove the
+  orphaned service with `sc delete AlienCoreService` from an elevated
+  terminal. README and user manual updated accordingly.
+
 ### Security / Legal
 
 - **Session is now bound to the machine that created it.** Three-layer
@@ -235,6 +347,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Settings → Display → CPU temperature mode now actually works.** The
+  Average / Per-core radio buttons wrote to config but no code ever read
+  the value, so the bar always showed package average regardless of the
+  setting. The bar's CPU cell, inline mini-chart, 90-second sparkline,
+  and hover tooltip now all honor the mode. Per-core surfaces the
+  hottest individual core at each tick — useful for catching single-core
+  spikes that the package sensor smooths over (one P-core hitting 95 °C
+  while package reads 78 °C is exactly the case where you want to see
+  the spike). Falls back to package average when per-core data is
+  unavailable (e.g. AMD SMU fallback path on locked systems).
+- **Settings theme picker — Save button now flips to "Save" on theme
+  change.** Previously the button stayed as "Close" because the picker
+  pre-updated the dirty-check baseline before the comparison ran.
+  Removed the redundant baseline write; the bottom-right button now
+  reflects in-session theme changes the same way it reflects checkbox
+  and radio changes.
+- **Settings theme picker — Display tab no longer scrolls back to the
+  top after each theme change.** The theme rebuild destroys and recreates
+  every tab widget, but didn't snapshot the per-tab Canvas yview before
+  teardown.  Added a `_tab_canvases` registry populated by `_make_tab`,
+  with snapshot-and-restore in `_rebuild_for_theme` (deferred via
+  `after_idle` so the inner-frame `<Configure>` binding has time to
+  update the new canvas's scrollregion before `yview_moveto` runs).
+  Active tab keeps its scroll position; inactive tabs reset to top
+  (which is the existing behaviour for any tab the user hasn't visited
+  yet).
 - **Sensor bar now populates near-instantly at startup** instead of showing
   `---` for several seconds. Two changes work together: (1) `lhm_manager`
   now spawns the `lhm_bridge.exe` .NET subprocess on a background prewarm

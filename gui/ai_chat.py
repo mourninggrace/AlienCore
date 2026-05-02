@@ -453,8 +453,22 @@ class AIChatWindow:
             finally:
                 evt.set()
 
-        self.root.after(0, ask)
-        evt.wait()
+        # Don't enqueue if the chat window has already been destroyed —
+        # the after() would silently never fire and the API thread would
+        # block forever on evt.wait().
+        try:
+            if not self.root.winfo_exists():
+                return False
+            self.root.after(0, ask)
+        except tk.TclError:
+            return False
+
+        # Hard cap so a closed window mid-dispatch can't hang the assistant
+        # turn indefinitely.  Two minutes is enough for the user to read
+        # the disclaimer text on a RISK_HIGH dialog without rushing.
+        if not evt.wait(timeout=120):
+            logger.warning("Tool confirmation timed out after 120s — declining %s", name)
+            return False
         return result["approved"]
 
     def _on_reply(self, reply: str):

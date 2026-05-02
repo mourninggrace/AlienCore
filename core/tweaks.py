@@ -1074,7 +1074,11 @@ def _reg_set(path: str, name: str, value, reg_type, dry_run: bool):
         parts    = path.split("\\")
         hive_str = parts[0]
         subpath  = "\\".join(parts[1:])
-        hive     = hive_map.get(hive_str, winreg.HKEY_LOCAL_MACHINE)
+        if hive_str not in hive_map:
+            logger.error("Registry write rejected — unknown hive prefix %r in %s",
+                         hive_str, path)
+            return
+        hive = hive_map[hive_str]
 
         with winreg.CreateKeyEx(hive, subpath, 0,
                                 winreg.KEY_SET_VALUE | winreg.KEY_WOW64_64KEY) as key:

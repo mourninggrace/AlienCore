@@ -276,9 +276,16 @@ class SettingsWindow:
         # synchronous after CreateEvent), fall back to creating it ourselves.
         # restype=c_void_p so the 64-bit HANDLE isn't truncated to 32 bits.
         kernel32 = ctypes.windll.kernel32
-        kernel32.OpenEventW.restype          = ctypes.c_void_p
-        kernel32.CreateEventW.restype        = ctypes.c_void_p
+        kernel32.OpenEventW.restype     = ctypes.c_void_p
+        kernel32.OpenEventW.argtypes    = [ctypes.c_uint32, ctypes.c_int,
+                                           ctypes.c_wchar_p]
+        kernel32.CreateEventW.restype   = ctypes.c_void_p
+        kernel32.CreateEventW.argtypes  = [ctypes.c_void_p, ctypes.c_int,
+                                           ctypes.c_int, ctypes.c_wchar_p]
         kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        kernel32.WaitForSingleObject.restype  = ctypes.c_uint32
+        kernel32.CloseHandle.argtypes   = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype    = ctypes.c_int
         h = kernel32.OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, False,
                                 self._SHOW_EVENT_NAME)
         if not h:
@@ -390,6 +397,15 @@ class SettingsWindow:
         saved_state = dict(self._saved_state)
         saved_theme = self._saved_theme
 
+        # Snapshot scroll positions so the user doesn't lose their place in
+        # the (often long) Display tab when picking a new theme.
+        saved_yviews = {}
+        for label, c in getattr(self, "_tab_canvases", {}).items():
+            try:
+                saved_yviews[label] = c.yview()[0]
+            except Exception:
+                pass
+
         # Tear down
         for w in self.root.winfo_children():
             try:
@@ -398,6 +414,7 @@ class SettingsWindow:
                 pass
         self.vars          = {}
         self._text_widgets = {}
+        self._tab_canvases = {}
 
         # Rebuild
         self.root.configure(bg=BG)
@@ -411,6 +428,22 @@ class SettingsWindow:
             pass
         self._saved_state = saved_state
         self._saved_theme = saved_theme
+
+        # Restore the active tab's scroll position on idle so the inner
+        # frame's <Configure> binding has already updated the canvas
+        # scrollregion — yview_moveto silently no-ops against a stale 0,0
+        # scrollregion if called any earlier.
+        def _restore_scroll():
+            try:
+                active_label = self.nb.tab(self.nb.select(), "text").strip()
+                c = self._tab_canvases.get(active_label)
+                if c is not None and c.winfo_exists():
+                    c.update_idletasks()
+                    c.yview_moveto(saved_yviews.get(active_label, 0.0))
+            except Exception:
+                pass
+        self.root.after_idle(_restore_scroll)
+
         self._mark_dirty()
 
     # ── UI builder ────────────────────────────────────────────────────────────
@@ -599,11 +632,9 @@ class SettingsWindow:
             # Persist immediately so the bar (which runs in a separate
             # subprocess) picks up the theme on its next config-mtime poll
             # — without this, the new theme would only reach the bar after
-            # the user clicked Save.  Update _saved_theme too so the dirty
-            # detector doesn't flag this as unsaved work.
+            # the user clicked Save.
             try:
                 cfg.set_value("display", "settings_theme", value=name)
-                self._saved_theme = name
             except Exception:
                 pass
             _apply_theme(name)
@@ -2705,7 +2736,8 @@ class SettingsWindow:
                         pass
 
                 try:
-                    self.root.after(0, apply)
+                    if self.root.winfo_exists():
+                        self.root.after(0, apply)
                 except Exception:
                     pass
 
@@ -3407,7 +3439,8 @@ class SettingsWindow:
                     except Exception:
                         pass
             try:
-                self.root.after(0, _after_login)
+                if self.root.winfo_exists():
+                    self.root.after(0, _after_login)
             except Exception:
                 pass
 
@@ -4711,6 +4744,12 @@ class SettingsWindow:
             outer = ttk.Frame(self.nb)
             self.nb.add(outer, text=f"  {label}  ")
         canvas = tk.Canvas(outer, bg=BG_SECT, highlightthickness=0, bd=0)
+        # Register the canvas so _rebuild_for_theme can save and restore
+        # scroll position when the theme picker tears down and rebuilds the
+        # entire tab structure.
+        if not hasattr(self, "_tab_canvases"):
+            self._tab_canvases = {}
+        self._tab_canvases[label] = canvas
         sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview,
                            style="Vertical.TScrollbar")
         inner = tk.Frame(canvas, bg=BG_SECT)

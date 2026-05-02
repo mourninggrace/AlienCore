@@ -30,7 +30,9 @@ def init_db():
             CREATE TABLE IF NOT EXISTS pins (
                 email      TEXT PRIMARY KEY,
                 pin        TEXT NOT NULL,
-                expires_at REAL NOT NULL
+                expires_at REAL NOT NULL,
+                attempts   INTEGER NOT NULL DEFAULT 0,
+                last_sent_at REAL DEFAULT NULL
             );
 
             -- Session tokens returned after successful PIN verification
@@ -38,7 +40,16 @@ def init_db():
                 token       TEXT PRIMARY KEY,
                 email       TEXT NOT NULL,
                 expires_at  REAL NOT NULL,
+                issued_at   REAL DEFAULT NULL,
                 fingerprint TEXT DEFAULT NULL
+            );
+
+            -- Per-IP request log for abuse rate limiting
+            CREATE TABLE IF NOT EXISTS pin_requests_by_ip (
+                ip       TEXT NOT NULL,
+                day      TEXT NOT NULL,   -- YYYY-MM-DD UTC
+                count    INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (ip, day)
             );
 
             -- Audit trail of all PayPal payments received
@@ -71,3 +82,19 @@ def init_db():
         sess_cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
         if "fingerprint" not in sess_cols:
             conn.execute("ALTER TABLE sessions ADD COLUMN fingerprint TEXT DEFAULT NULL")
+        if "issued_at" not in sess_cols:
+            # Backfill existing rows with their current expires_at minus
+            # TOKEN_EXPIRY_DAYS so the absolute-lifetime cap kicks in
+            # immediately on the next refresh; that's deliberate — pre-cap
+            # tokens shouldn't get a free extra 90 days.
+            conn.execute("ALTER TABLE sessions ADD COLUMN issued_at REAL DEFAULT NULL")
+            conn.execute(
+                "UPDATE sessions SET issued_at = expires_at - (30*86400) "
+                "WHERE issued_at IS NULL"
+            )
+
+        pin_cols = {row[1] for row in conn.execute("PRAGMA table_info(pins)")}
+        if "attempts" not in pin_cols:
+            conn.execute("ALTER TABLE pins ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+        if "last_sent_at" not in pin_cols:
+            conn.execute("ALTER TABLE pins ADD COLUMN last_sent_at REAL DEFAULT NULL")

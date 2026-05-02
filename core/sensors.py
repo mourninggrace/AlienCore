@@ -95,15 +95,34 @@ def color_for_temp(temp_c: float, warn: float, crit: float) -> str:
     return COLOR_COOL
 
 
+# temp_unit is read at most once per second AND every time the config
+# version OR the underlying _config object identity changes — so a settings
+# save (or a test monkeypatching _config wholesale) applies on the next call
+# without burning the config lock on every per-cell repaint in between.
+_temp_unit_cache: tuple = ("celsius", 0.0, -1, 0)   # (unit, ts, version, config_id)
+
+
+def _temp_unit() -> str:
+    global _temp_unit_cache
+    from core import config_manager as cfg
+    cached, t, ver, cfg_id = _temp_unit_cache
+    now = time.time()
+    cur_ver = cfg.version()
+    cur_cfg_id = id(cfg._config)
+    if (ver == cur_ver and cfg_id == cur_cfg_id and now - t < 1.0):
+        return cached
+    unit = cfg.get_value("display", "temp_unit", default="celsius")
+    _temp_unit_cache = (unit, now, cur_ver, cur_cfg_id)
+    return unit
+
+
 def fmt_temp(val_c: float) -> str:
     """
     Format a Celsius temperature value for display, respecting the user's
     chosen unit (celsius / fahrenheit). Always call with raw °C values.
     Returns a compact string like '72°' or '162°'.
     """
-    from core import config_manager as cfg
-    unit = cfg.get().get("display", {}).get("temp_unit", "celsius")
-    if unit == "fahrenheit":
+    if _temp_unit() == "fahrenheit":
         return f"{int(val_c * 9 / 5 + 32)}°"
     return f"{int(val_c)}°"
 
@@ -180,12 +199,16 @@ def _record_cpu_peak_clock(flat: list):
     if not flat:
         return
     try:
-        clocks = [s.get("value") for s in flat
-                  if s.get("type") == "Clock"
-                  and isinstance(s.get("name"), str)
-                  and ("P-Core #" in s["name"]
-                       or "E-Core #" in s["name"]
-                       or s["name"].startswith("Core #"))]
+        def _is_core_clock(s):
+            if not isinstance(s, dict) or s.get("type") != "Clock":
+                return False
+            name = s.get("name")
+            if not isinstance(name, str):
+                return False
+            return ("P-Core #" in name
+                    or "E-Core #" in name
+                    or name.startswith("Core #"))
+        clocks = [s.get("value") for s in flat if _is_core_clock(s)]
         clocks = [v for v in clocks if v is not None]
         if not clocks:
             return
@@ -242,15 +265,24 @@ def _lhm_readings_with_cache(flat: list) -> dict:
 # type = LHM SensorType string: Temperature, Power, Load, Fan, Clock, ...
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _temps(flat: list) -> list:
+    """Defensive filter: dict entries with type=='Temperature' and a name+value."""
+    return [s for s in flat
+            if isinstance(s, dict)
+            and s.get("type") == "Temperature"
+            and isinstance(s.get("name"), str)
+            and s.get("value") is not None]
+
+
 def _parse_cpu_temp(flat: list) -> dict:
     global _cpu_zero_polls
     result = {"cpu_temp_avg": None, "cpu_temp_package": None, "cpu_temp_cores": []}
 
-    temps = [s for s in flat if s["type"] == "Temperature"]
+    temps = _temps(flat)
 
     # CPU Package — primary Intel thermal sensor, most accurate single value
-    pkg = next((s for s in temps if s["name"] == "CPU Package"), None)
-    if pkg and pkg["value"] > 0:
+    pkg = next((s for s in temps if s.get("name") == "CPU Package"), None)
+    if pkg and pkg.get("value") and pkg["value"] > 0:
         result["cpu_temp_package"] = pkg["value"]
         result["cpu_temp_avg"]     = pkg["value"]
 
@@ -258,15 +290,15 @@ def _parse_cpu_temp(flat: list) -> dict:
     # thermal reading.  Zen 3 / Zen 4 both use this name.
     if result["cpu_temp_avg"] is None:
         tctl = next((s for s in temps
-                     if s["name"] in ("Core (Tctl/Tdie)", "CPU Core (Tctl/Tdie)")), None)
-        if tctl and tctl["value"] > 0:
+                     if s.get("name") in ("Core (Tctl/Tdie)", "CPU Core (Tctl/Tdie)")), None)
+        if tctl and tctl.get("value") and tctl["value"] > 0:
             result["cpu_temp_package"] = tctl["value"]
             result["cpu_temp_avg"]     = tctl["value"]
 
     # Core Average — fallback if Package unavailable
     if result["cpu_temp_avg"] is None:
-        avg = next((s for s in temps if s["name"] == "Core Average"), None)
-        if avg and avg["value"] > 0:
+        avg = next((s for s in temps if s.get("name") == "Core Average"), None)
+        if avg and avg.get("value") and avg["value"] > 0:
             result["cpu_temp_avg"] = avg["value"]
 
     # AMD SMU fallback — when HVCI blocks WinRing0, LHM returns 0 for AMD CPU
@@ -290,16 +322,21 @@ def _parse_cpu_temp(flat: list) -> dict:
     # Individual core temps.
     # Intel hybrid: "P-Core #0" / "E-Core #0"
     # AMD Ryzen:    "Core #1", "Core #2", ... (1-indexed, per-core Tdie)
-    cores = [s for s in temps
-             if (
-                 "P-Core #" in s["name"]
-                 or "E-Core #" in s["name"]
-                 or (s["name"].startswith("Core #")
-                     and "average" not in s["name"].lower()
-                     and "(tctl" not in s["name"].lower())
-             )
-             and "distance" not in s["name"].lower()
-             and 0 < s["value"] < 120]
+    def _is_core(s: dict) -> bool:
+        name = s.get("name") or ""
+        val  = s.get("value")
+        if val is None or not (0 < val < 120):
+            return False
+        if "distance" in name.lower():
+            return False
+        if "P-Core #" in name or "E-Core #" in name:
+            return True
+        if name.startswith("Core #"):
+            n_lower = name.lower()
+            return "average" not in n_lower and "(tctl" not in n_lower
+        return False
+
+    cores = [s for s in temps if _is_core(s)]
     if cores:
         result["cpu_temp_cores"] = [s["value"] for s in cores]
 
@@ -312,15 +349,15 @@ def _parse_gpu_temp(flat: list) -> dict:
         "gpu_temp_hotspot": None,
         "gpu_temp_memory":  None,
     }
-    temps = [s for s in flat if s["type"] == "Temperature"]
-    core = next((s for s in temps if s["name"] == "GPU Core"), None)
-    if core:
+    temps = _temps(flat)
+    core = next((s for s in temps if s.get("name") == "GPU Core"), None)
+    if core and core.get("value") is not None:
         result["gpu_temp"] = core["value"]
-    hot = next((s for s in temps if s["name"] == "GPU Hot Spot"), None)
-    if hot:
+    hot = next((s for s in temps if s.get("name") == "GPU Hot Spot"), None)
+    if hot and hot.get("value") is not None:
         result["gpu_temp_hotspot"] = hot["value"]
-    mem = next((s for s in temps if s["name"] == "GPU Memory Junction"), None)
-    if mem:
+    mem = next((s for s in temps if s.get("name") == "GPU Memory Junction"), None)
+    if mem and mem.get("value") is not None:
         result["gpu_temp_memory"] = mem["value"]
     return result
 
@@ -382,13 +419,13 @@ def _parse_storage_temps(flat: list) -> dict:
 
 def _parse_ram_temp(flat: list) -> dict:
     result = {"ram_temps": []}
-    temps = [s for s in flat if s["type"] == "Temperature"]
-    dimms = [s for s in temps if s["name"].startswith("DIMM #")]
+    dimms = [s for s in _temps(flat) if s.get("name", "").startswith("DIMM #")]
     for s in dimms:
-        if 0 < s["value"] < 100:
+        val = s.get("value")
+        if val is not None and 0 < val < 100:
             result["ram_temps"].append({
-                "name":   s["name"],
-                "temp_c": round(s["value"], 1),
+                "name":   s.get("name"),
+                "temp_c": round(val, 1),
             })
     return result
 
@@ -401,9 +438,9 @@ def _parse_fan_rpm(flat: list) -> dict:
     only including fans with RPM > 0.  Empty list if LHM reports no fan data.
     """
     result = {"lhm_fan_rpms": []}
-    fans = [s for s in flat if s["type"] == "Fan"]
+    fans = [s for s in flat if isinstance(s, dict) and s.get("type") == "Fan"]
     for s in fans:
-        rpm = s.get("value", 0)
+        rpm = s.get("value")
         if rpm is not None and rpm > 0:
             result["lhm_fan_rpms"].append({
                 "name": s.get("name", "Fan"),
@@ -415,11 +452,11 @@ def _parse_fan_rpm(flat: list) -> dict:
 
 def _parse_cpu_watts(flat: list) -> dict:
     result = {"cpu_watts": None}
-    power = [s for s in flat if s["type"] == "Power"]
+    power = [s for s in flat if isinstance(s, dict) and s.get("type") == "Power"]
     # Intel: "CPU Package"
     # AMD:   "Package" or "CPU Package" (LHM name varies by Zen gen), or "CPU PPT"
     for name in ("CPU Package", "Package", "CPU PPT", "Socket"):
-        s = next((p for p in power if p["name"] == name), None)
+        s = next((p for p in power if p.get("name") == name), None)
         if s and s.get("value") is not None:
             result["cpu_watts"] = s["value"]
             break

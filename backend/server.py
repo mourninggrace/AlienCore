@@ -19,10 +19,13 @@ PayPal IPN setup:
   Enable IPN, set Notification URL to:  https://YOUR_DOMAIN/paypal/ipn
 """
 
+import datetime as _dt
 import logging
 import random
+import re
 import secrets
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 
@@ -32,8 +35,124 @@ from backend import db, mail
 from backend.config import (
     BACKEND_HOST, BACKEND_PORT,
     PIN_EXPIRY_MINUTES, TOKEN_EXPIRY_DAYS,
+    SESSION_MAX_LIFETIME_DAYS,
+    PIN_RESEND_COOLDOWN_SEC, PIN_PER_IP_DAILY_CAP, PIN_MAX_ATTEMPTS,
+    LICENSE_PRIVATE_KEY_PATH, LICENSE_PRIVATE_KEY_PEM,
     PAYPAL_EMAIL, PAYPAL_MODE, PRODUCTS,
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# License signing (Ed25519)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_LICENSE_PRIV_KEY = None
+
+
+def _load_license_key():
+    """Load the Ed25519 private key once at startup.  Crashes the process
+    intentionally when the key isn't configured AND PayPal is in live mode —
+    a production server with no signing key issues unsigned license payloads
+    that the client refuses, locking out every paying customer."""
+    global _LICENSE_PRIV_KEY
+    pem = b""
+    if LICENSE_PRIVATE_KEY_PATH:
+        try:
+            with open(LICENSE_PRIVATE_KEY_PATH, "rb") as f:
+                pem = f.read()
+        except Exception as e:
+            logger.error("AC_LICENSE_PRIVATE_KEY_PATH unreadable: %s", e)
+    elif LICENSE_PRIVATE_KEY_PEM:
+        pem = LICENSE_PRIVATE_KEY_PEM.encode("utf-8")
+
+    if not pem:
+        if PAYPAL_MODE == "live":
+            logger.critical(
+                "License private key not configured — refusing to start in "
+                "live mode. Run tools/generate_license_keypair.py and set "
+                "AC_LICENSE_PRIVATE_KEY_PATH (or AC_LICENSE_PRIVATE_KEY)."
+            )
+            import sys
+            sys.exit(2)
+        logger.warning(
+            "License private key not configured (sandbox mode) — "
+            "responses will be unsigned and the client will reject them."
+        )
+        return
+
+    try:
+        from cryptography.hazmat.primitives import serialization
+        _LICENSE_PRIV_KEY = serialization.load_pem_private_key(pem, password=None)
+        logger.info("License signing key loaded.")
+    except Exception as e:
+        logger.error("Failed to load license private key: %s", e)
+        if PAYPAL_MODE == "live":
+            import sys
+            sys.exit(2)
+
+
+def _sign_license(payload: dict) -> dict:
+    """Add `license_sig` and `signed_at` to a license payload.  Returns the
+    same dict (mutated in place) so callers can `return jsonify(payload)`.
+
+    Canonical signing string MUST match core/license_signing._canonical_bytes
+    on the client byte-for-byte."""
+    if _LICENSE_PRIV_KEY is None:
+        return payload
+    import base64
+    payload["signed_at"] = int(time.time())
+    parts = [
+        payload.get("email", ""),
+        "1" if payload.get("has_base") else "0",
+        "1" if payload.get("has_pro") else "0",
+        f"{int(payload.get('trial_started_at') or 0)}",
+        f"{int(payload.get('expires_at') or 0)}",
+        f"{int(payload.get('issued_at') or 0)}",
+        f"{int(payload['signed_at'])}",
+        payload.get("fingerprint", ""),
+    ]
+    canonical = "|".join(parts).encode("utf-8")
+    sig = _LICENSE_PRIV_KEY.sign(canonical)
+    payload["license_sig"] = base64.b64encode(sig).decode("ascii")
+    return payload
+
+
+def _normalize_email(raw: str) -> str:
+    """Canonicalize an email address so a+1@gmail.com / A+1@GMAIL.COM /
+    a@gmail.com all resolve to the same row.  Trial enforcement is per
+    canonical email — the +tag form is the obvious bypass we have to close.
+
+    Lowercase + NFKC normalize + strip everything from `+` to `@` in the
+    local-part.  Domain is also lowercased.  Returns "" for invalid input
+    so the caller can reject early.
+    """
+    if not isinstance(raw, str):
+        return ""
+    s = unicodedata.normalize("NFKC", raw).strip().lower()
+    if "@" not in s or "." not in s.split("@")[-1]:
+        return ""
+    local, domain = s.rsplit("@", 1)
+    if "+" in local:
+        local = local.split("+", 1)[0]
+    return f"{local}@{domain}"
+
+
+def _client_ip() -> str:
+    """Return the originating client IP, respecting X-Forwarded-For when the
+    server is behind nginx/Cloudflare.  Returns "" if unknown."""
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote_addr or ""
+
+
+def _today_utc() -> str:
+    return _dt.datetime.utcnow().strftime("%Y-%m-%d")
+
+
+# Generic "auth failed" message — never reveal which field was wrong, so
+# the endpoint can't be used to enumerate which emails have outstanding PINs.
+_AUTH_FAILED = {"ok": False, "error": "Invalid email or PIN. Request a new code if needed."}
 
 app    = Flask(__name__)
 logger = logging.getLogger("aliencore.backend")
@@ -53,28 +172,63 @@ _PAYPAL_VERIFY = {
 @app.route("/auth/send-pin", methods=["POST"])
 def send_pin():
     data  = request.get_json(force=True, silent=True) or {}
-    email = (data.get("email") or "").strip().lower()
-    if not email or "@" not in email or "." not in email.split("@")[-1]:
+    email = _normalize_email(data.get("email") or "")
+    if not email:
         return jsonify({"ok": False, "error": "Invalid email address."}), 400
 
-    pin        = f"{random.SystemRandom().randint(0, 999999):06d}"
-    expires_at = time.time() + PIN_EXPIRY_MINUTES * 60
+    ip  = _client_ip()
+    now = time.time()
+    today = _today_utc()
 
     with db.get_conn() as conn:
+        # Per-IP daily cap.  Stops the endpoint becoming an open spam relay.
+        cap_row = conn.execute(
+            "SELECT count FROM pin_requests_by_ip WHERE ip=? AND day=?",
+            (ip, today),
+        ).fetchone()
+        if cap_row and cap_row["count"] >= PIN_PER_IP_DAILY_CAP:
+            logger.warning("PIN rate-limit hit for IP %s on %s", ip, today)
+            return jsonify({"ok": False,
+                            "error": "Too many requests from this network. "
+                                     "Try again tomorrow."}), 429
+
+        # Per-email cooldown.  60 s between successive PINs to the same address.
+        prev = conn.execute(
+            "SELECT last_sent_at FROM pins WHERE email=?", (email,)
+        ).fetchone()
+        if prev and prev["last_sent_at"]:
+            elapsed = now - prev["last_sent_at"]
+            if elapsed < PIN_RESEND_COOLDOWN_SEC:
+                wait = int(PIN_RESEND_COOLDOWN_SEC - elapsed)
+                return jsonify({"ok": False,
+                                "error": f"Please wait {wait}s before requesting another code."}), 429
+
+        pin        = f"{random.SystemRandom().randint(0, 999999):06d}"
+        expires_at = now + PIN_EXPIRY_MINUTES * 60
+
         conn.execute("INSERT OR IGNORE INTO users (email) VALUES (?)", (email,))
         conn.execute(
-            "INSERT OR REPLACE INTO pins (email, pin, expires_at) VALUES (?,?,?)",
-            (email, pin, expires_at),
+            "INSERT OR REPLACE INTO pins "
+            "(email, pin, expires_at, attempts, last_sent_at) "
+            "VALUES (?,?,?,?,?)",
+            (email, pin, expires_at, 0, now),
+        )
+        conn.execute(
+            "INSERT INTO pin_requests_by_ip (ip, day, count) VALUES (?,?,1) "
+            "ON CONFLICT(ip, day) DO UPDATE SET count = count + 1",
+            (ip, today),
         )
 
     try:
         mail.send_pin_email(email, pin)
     except Exception as e:
         logger.error("Email send failed for %s: %s", email, e)
+        # Don't echo internal exception details back to the client.
         return jsonify({"ok": False,
-                        "error": f"Could not send email: {e}"}), 500
+                        "error": "Email service is temporarily unavailable. "
+                                 "Please try again in a few minutes."}), 500
 
-    logger.info("PIN sent → %s", email)
+    logger.info("PIN sent → %s  (ip=%s)", email, ip)
     return jsonify({"ok": True})
 
 
@@ -88,37 +242,64 @@ _TRIAL_DAYS = 30
 @app.route("/auth/verify-pin", methods=["POST"])
 def verify_pin():
     data        = request.get_json(force=True, silent=True) or {}
-    email       = (data.get("email")       or "").strip().lower()
+    email       = _normalize_email(data.get("email") or "")
     pin         = (data.get("pin")         or "").strip()
     fingerprint = (data.get("fingerprint") or "").strip()[:64]  # cap length
 
     if not email or not pin:
         return jsonify({"ok": False, "error": "Email and PIN required."}), 400
+    if not pin.isdigit() or len(pin) != 6:
+        return jsonify(_AUTH_FAILED), 401
+    # No legitimate AlienCore client ever submits an empty or "unknown"
+    # fingerprint — that only happens when a sandboxed environment can't
+    # read the hardware identifiers.  Reject so unbound trial farms can't
+    # be created from VMs / locked-down sandboxes.
+    if not fingerprint or fingerprint == "unknown":
+        return jsonify({"ok": False,
+                        "error": "Hardware identification failed. "
+                                 "AlienCore needs to verify your machine "
+                                 "before signing in."}), 400
 
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT pin, expires_at FROM pins WHERE email=?", (email,)
+            "SELECT pin, expires_at, attempts FROM pins WHERE email=?", (email,)
         ).fetchone()
 
+        # Generic auth-failed responses below — don't reveal whether the
+        # email has ever been issued a PIN.  Each branch logs the precise
+        # cause server-side for debugging.
         if not row:
-            return jsonify({"ok": False,
-                            "error": "No PIN found. Request a new one."}), 401
+            logger.info("verify-pin: no PIN for %s", email)
+            return jsonify(_AUTH_FAILED), 401
         if time.time() > row["expires_at"]:
-            return jsonify({"ok": False,
-                            "error": "PIN expired. Request a new one."}), 401
-        if row["pin"] != pin:
-            return jsonify({"ok": False, "error": "Incorrect PIN."}), 401
+            conn.execute("DELETE FROM pins WHERE email=?", (email,))
+            logger.info("verify-pin: PIN expired for %s", email)
+            return jsonify(_AUTH_FAILED), 401
+        if row["attempts"] >= PIN_MAX_ATTEMPTS:
+            conn.execute("DELETE FROM pins WHERE email=?", (email,))
+            logger.warning("verify-pin: too many attempts for %s — PIN burnt", email)
+            return jsonify(_AUTH_FAILED), 401
+        # Constant-time PIN comparison so a network-based timing oracle
+        # can't shave digits off the search space.
+        if not secrets.compare_digest(row["pin"], pin):
+            conn.execute(
+                "UPDATE pins SET attempts = attempts + 1 WHERE email=?", (email,)
+            )
+            return jsonify(_AUTH_FAILED), 401
 
         # Consume the PIN (single use)
         conn.execute("DELETE FROM pins WHERE email=?", (email,))
 
-        # Issue session token
+        # Issue session token, bound to the submitting fingerprint at
+        # creation time.  No more lazy-bind on first /auth/check.
         token      = secrets.token_urlsafe(40)
-        expires_at = time.time() + TOKEN_EXPIRY_DAYS * 86400
+        now        = time.time()
+        expires_at = now + TOKEN_EXPIRY_DAYS * 86400
         conn.execute(
-            "INSERT OR REPLACE INTO sessions (token, email, expires_at, fingerprint)"
-            " VALUES (?,?,?,?)",
-            (token, email, expires_at, fingerprint if fingerprint and fingerprint != "unknown" else None),
+            "INSERT OR REPLACE INTO sessions "
+            "(token, email, expires_at, issued_at, fingerprint) "
+            "VALUES (?,?,?,?,?)",
+            (token, email, expires_at, now, fingerprint),
         )
 
         conn.execute("INSERT OR IGNORE INTO users (email) VALUES (?)", (email,))
@@ -140,18 +321,20 @@ def verify_pin():
         trial_started_at = user["trial_started_at"]
 
         if not user["has_base"] and trial_started_at is None:
-            hw_row = None
-            if fingerprint and fingerprint != "unknown":
-                hw_row = conn.execute(
-                    "SELECT trial_started_at, has_paid FROM hardware_fingerprints"
-                    " WHERE fingerprint=?",
-                    (fingerprint,),
-                ).fetchone()
+            # Fingerprint is guaranteed real here — the early-return above
+            # rejected empty/"unknown".  This closes the email-churn farm:
+            # if this fingerprint already started a trial under a different
+            # email, the new email inherits the same start date.
+            hw_row = conn.execute(
+                "SELECT trial_started_at, has_paid FROM hardware_fingerprints"
+                " WHERE fingerprint=?",
+                (fingerprint,),
+            ).fetchone()
 
             if hw_row and not hw_row["has_paid"]:
                 # This hardware already started a trial — use that start date.
-                # The trial may already be expired; the client will show it as
-                # expired and prompt the user to purchase.
+                # If the original 30 days has elapsed, the new email is
+                # immediately past-trial too.
                 trial_started_at = hw_row["trial_started_at"]
                 logger.info(
                     "Trial fingerprint match for %s — trial started %s ago",
@@ -167,27 +350,30 @@ def verify_pin():
                 (trial_started_at, email),
             )
 
-            # Register / update the fingerprint row
-            if fingerprint and fingerprint != "unknown":
-                conn.execute(
-                    "INSERT OR IGNORE INTO hardware_fingerprints"
-                    " (fingerprint, first_email, trial_started_at)"
-                    " VALUES (?,?,?)",
-                    (fingerprint, email, trial_started_at),
-                )
+            # Register the fingerprint row with the email that first claimed it.
+            conn.execute(
+                "INSERT OR IGNORE INTO hardware_fingerprints"
+                " (fingerprint, first_email, trial_started_at)"
+                " VALUES (?,?,?)",
+                (fingerprint, email, trial_started_at),
+            )
 
     logger.info("Login: %s  base=%s pro=%s  fingerprint=%s",
                 email, bool(user["has_base"]), bool(user["has_pro"]),
                 fingerprint[:8] + "…" if len(fingerprint) > 8 else fingerprint)
-    return jsonify({
+    payload = {
         "ok":               True,
-        "token":            token,
-        "email":            email,
-        "has_base":         bool(user["has_base"]),
-        "has_pro":          bool(user["has_pro"]),
-        "trial_started_at": trial_started_at,
-        "expires_at":       expires_at,
-    })
+        "token":             token,
+        "email":             email,
+        "has_base":          bool(user["has_base"]),
+        "has_pro":           bool(user["has_pro"]),
+        "trial_started_at":  trial_started_at,
+        "expires_at":        expires_at,
+        "issued_at":         now,
+        "fingerprint":       fingerprint,
+    }
+    _sign_license(payload)
+    return jsonify(payload)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,26 +390,49 @@ def check_token():
 
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT email, expires_at, fingerprint FROM sessions WHERE token=?", (token,)
+            "SELECT email, expires_at, issued_at, fingerprint "
+            "FROM sessions WHERE token=?", (token,)
         ).fetchone()
 
-        if not row or time.time() > row["expires_at"]:
+        now = time.time()
+        if not row or now > row["expires_at"]:
             return jsonify({"ok": False, "error": "Session expired."}), 401
 
+        # Absolute lifetime cap — no rolling extension past this.  An
+        # attacker who exfiltrates a token can no longer keep it alive
+        # forever by calling /auth/check once a month.
+        issued_at = row["issued_at"]
+        if issued_at is not None:
+            absolute_deadline = issued_at + SESSION_MAX_LIFETIME_DAYS * 86400
+            if now > absolute_deadline:
+                conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+                return jsonify({"ok": False,
+                                "error": "Session expired. Please sign in again."}), 401
+
         stored_fp = row["fingerprint"]
-        if stored_fp and stored_fp != "unknown":
-            if fingerprint and fingerprint != "unknown" and stored_fp != fingerprint:
-                logger.warning(
-                    "Fingerprint mismatch — token=%s…  stored=%s…  got=%s…",
-                    token[:8], stored_fp[:8], fingerprint[:8],
-                )
-                return jsonify({"ok": False, "error": "Session is bound to another machine."}), 401
-        elif fingerprint and fingerprint != "unknown":
-            # Session not yet bound — lazy-bind to the first real fingerprint seen
-            conn.execute(
-                "UPDATE sessions SET fingerprint=? WHERE token=?", (fingerprint, token)
+        # Sessions issued under the new code are bound at creation; legacy
+        # rows with NULL fingerprint were forcibly migrated, but defensively
+        # treat any unbound row as expired rather than lazy-binding (which
+        # let the first /auth/check claim ownership of an orphaned token).
+        if not stored_fp:
+            conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+            logger.warning(
+                "Session %s… had no fingerprint binding — rejected.", token[:8]
             )
-            logger.info("Session %s… bound to fingerprint %s…", token[:8], fingerprint[:8])
+            return jsonify({"ok": False,
+                            "error": "Session expired. Please sign in again."}), 401
+
+        if not fingerprint or fingerprint == "unknown":
+            return jsonify({"ok": False,
+                            "error": "Hardware identification failed."}), 400
+
+        if stored_fp != fingerprint:
+            logger.warning(
+                "Fingerprint mismatch — token=%s…  stored=%s…  got=%s…",
+                token[:8], stored_fp[:8], fingerprint[:8],
+            )
+            return jsonify({"ok": False,
+                            "error": "Session is bound to another machine."}), 401
 
         email = row["email"]
         user  = conn.execute(
@@ -231,20 +440,28 @@ def check_token():
             (email,),
         ).fetchone()
 
-        # Rolling expiry — refresh on each successful check
-        new_expiry = time.time() + TOKEN_EXPIRY_DAYS * 86400
+        # Rolling expiry — refresh, but never past the absolute deadline.
+        new_expiry = now + TOKEN_EXPIRY_DAYS * 86400
+        if issued_at is not None:
+            absolute_deadline = issued_at + SESSION_MAX_LIFETIME_DAYS * 86400
+            if new_expiry > absolute_deadline:
+                new_expiry = absolute_deadline
         conn.execute(
             "UPDATE sessions SET expires_at=? WHERE token=?", (new_expiry, token)
         )
 
-    return jsonify({
+    payload = {
         "ok":               True,
-        "email":            email,
-        "has_base":         bool(user["has_base"]),
-        "has_pro":          bool(user["has_pro"]),
-        "trial_started_at": user["trial_started_at"],
-        "expires_at":       new_expiry,
-    })
+        "email":             email,
+        "has_base":          bool(user["has_base"]),
+        "has_pro":           bool(user["has_pro"]),
+        "trial_started_at":  user["trial_started_at"],
+        "expires_at":        new_expiry,
+        "issued_at":         issued_at if issued_at is not None else 0,
+        "fingerprint":       fingerprint,
+    }
+    _sign_license(payload)
+    return jsonify(payload)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -417,7 +634,10 @@ def _handle_refund(txn_id: str):
 def support_submit():
     data = request.get_json(force=True, silent=True) or {}
     email        = (data.get("email") or "").strip().lower()
-    feedback_type = (data.get("type") or "Feedback").strip()[:40]
+    raw_type     = (data.get("type") or "Feedback").strip()[:40]
+    # Strip CR/LF so the value can never inject into the email subject
+    # (line splitting → header injection on naive mail clients).
+    feedback_type = re.sub(r"[\r\n\x00]", " ", raw_type)
     description  = (data.get("description") or "").strip()
     sysinfo      = (data.get("sysinfo") or "").strip()
 
@@ -436,7 +656,8 @@ def support_submit():
     except Exception as e:
         logger.error("Feedback relay failed for %s: %s", email, e)
         return jsonify({"ok": False,
-                        "error": f"Could not send feedback: {e}"}), 500
+                        "error": "Feedback service is temporarily unavailable. "
+                                 "Please try again later."}), 500
 
     logger.info("Feedback relayed <- %s (%s)", email, feedback_type)
     return jsonify({"ok": True})
@@ -448,12 +669,19 @@ def support_submit():
 
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"ok": True, "service": "AlienCore API", "version": "1.0.0"})
+    # No version disclosure — would aid targeted attacks if a CVE is later
+    # disclosed for a specific point release.
+    return jsonify({"ok": True, "service": "AlienCore API"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     db.init_db()
+    _load_license_key()
     logger.info("AlienCore backend starting on %s:%d", BACKEND_HOST, BACKEND_PORT)
     app.run(host=BACKEND_HOST, port=BACKEND_PORT, debug=False)
+else:
+    # gunicorn or any other WSGI host imports this module without running
+    # __main__ — make sure the key still loads.
+    _load_license_key()

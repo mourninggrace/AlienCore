@@ -761,12 +761,10 @@
     <tr><td class="setting">Hardware Refresh on Startup</td><td class="default">Off</td><td>Re-scans your hardware on every launch. Off by default so first-boot is faster; enable if you swap hardware regularly.</td></tr>
   </table>
 
-  <h3>Running as a Windows Service</h3>
-  <p>AlienCore can be installed as a Windows service so it runs even before you log in:</p>
-  <pre><code>python aliencore.py --install   # run as Administrator
-python aliencore.py --uninstall # remove the service</code></pre>
-  <div class="box box-warn">
-    <strong>Note:</strong> The GUI (sensor bar, settings window) requires a logged-in desktop session and will not appear when running as a headless service.
+  <h3>Auto-Start at Login</h3>
+  <p>AlienCore registers a silent, elevated Task Scheduler entry on first elevated launch (<code>AlienCoreElevatedStartup</code>) so it starts automatically every time you log in. The sensor bar, tray icon, and adaptive profile engine are running before your desktop finishes drawing — no UAC prompt, no console window.</p>
+  <div class="box box-info">
+    <strong>Note:</strong> AlienCore runs in your user session (not as a Windows service) because the sensor bar and tray icon require a logged-in desktop. To remove the auto-start entry: Settings → Service → "Disable Auto-Start," or run <code>schtasks /Delete /TN AlienCoreElevatedStartup /F</code> from an elevated terminal.
   </div>
 
   <h3>Windows Services Manager</h3>

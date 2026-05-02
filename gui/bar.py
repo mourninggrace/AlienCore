@@ -31,6 +31,62 @@ logger = logging.getLogger("aliencore.bar")
 # so the line flows smoothly leftward between polls.
 CHART_WINDOW_SECONDS   = 20    # time span shown inside each cell
 CHART_DRAW_INTERVAL_MS = 33    # ~30 fps
+
+# net_unit is read live (user can switch between MB/s / Mbps / kbps in
+# Settings), but per-frame helpers can hit this lookup dozens of times per
+# update tick.  Cache for 1 s AND invalidate on cfg.version() change so a
+# Settings save applies on the very next draw.
+_net_unit_cache: tuple = ("MB/s", 0.0, -1, 0)
+
+
+def _net_unit() -> str:
+    global _net_unit_cache
+    cached, t, ver, cfg_id = _net_unit_cache
+    now = time.time()
+    cur_ver = cfg.version()
+    cur_cfg_id = id(cfg._config)
+    if ver == cur_ver and cfg_id == cur_cfg_id and now - t < 1.0:
+        return cached
+    unit = cfg.get_value("display", "net_unit", default="MB/s")
+    _net_unit_cache = (unit, now, cur_ver, cur_cfg_id)
+    return unit
+
+
+# CPU temp display mode — "average" (package/Tdie) or "per_core" (max of
+# per-core readings).  Per-core surfaces single-core spikes that the package
+# sensor smooths over.  Cached identically to net_unit/temp_unit so the
+# config lock isn't hit on every cell repaint.
+_cpu_temp_mode_cache: tuple = ("average", 0.0, -1, 0)
+
+
+def _cpu_temp_mode() -> str:
+    global _cpu_temp_mode_cache
+    cached, t, ver, cfg_id = _cpu_temp_mode_cache
+    now = time.time()
+    cur_ver = cfg.version()
+    cur_cfg_id = id(cfg._config)
+    if ver == cur_ver and cfg_id == cur_cfg_id and now - t < 1.0:
+        return cached
+    mode = cfg.get_value("sensors", "cpu_temp_mode", default="average")
+    if mode not in ("average", "per_core"):
+        mode = "average"
+    _cpu_temp_mode_cache = (mode, now, cur_ver, cur_cfg_id)
+    return mode
+
+
+def _cpu_temp_value(readings: dict):
+    """Return the CPU temp the bar should display, honoring the user's
+    average / per-core mode preference.  Falls back to the package average
+    when per-core data is unavailable (e.g. AMD SMU fallback path)."""
+    if _cpu_temp_mode() == "per_core":
+        cores = readings.get("cpu_temp_cores") or []
+        if cores:
+            try:
+                peak = max(c for c in cores if c is not None)
+                return peak
+            except ValueError:
+                pass   # all cores were None — fall through to avg
+    return readings.get("cpu_temp_avg")
 # Per-sensor ring buffers.  Defaults are sized for 8 GB hosts; systems with
 # more installed RAM keep proportionally more history (see core.mem_tier) so
 # pop-out sparklines and the inline chart can show a longer timeline without
@@ -1345,7 +1401,7 @@ class SensorBar:
                 "label":  label,
             }
             if config_key not in self._history:
-                self._history[config_key] = collections.deque(maxlen=90)
+                self._history[config_key] = collections.deque(maxlen=_SPARK_HISTORY_MAXLEN)
             if config_key not in self._sample_log:
                 self._sample_log[config_key] = collections.deque(maxlen=_SAMPLE_LOG_MAXLEN)
             self._cell_colors.setdefault(config_key, COLOR_COOL)
@@ -1356,6 +1412,15 @@ class SensorBar:
             self._sync_outer_size()
 
     def _tooltip_text(self, label: str, config_key: str) -> str:
+        if config_key == "cpu_temp":
+            mode = _cpu_temp_mode()
+            mode_lbl = "hottest core" if mode == "per_core" else "package avg"
+            hist = self._history.get(config_key)
+            if hist:
+                vals = [v for v in hist if v is not None]
+                if vals:
+                    return f"{label}  {vals[-1]:.1f}°  ({mode_lbl})"
+            return f"{label}  ({mode_lbl})"
         if config_key == "net_io":
             unit    = self._cell_unit(config_key)
             dn_hist = self._history.get("net_io")
@@ -1381,7 +1446,7 @@ class SensorBar:
         """Return the current display unit for a cell.  For net_io this is
         user-configurable (MB/s / Mbps / kbps) and must be looked up live."""
         if config_key == "net_io":
-            return cfg.get_value("display", "net_unit", default="MB/s")
+            return _net_unit()
         return self._cells.get(config_key, {}).get("unit", "")
 
     def _open_sparkline(self, config_key: str, label: str, unit: str):
@@ -1446,7 +1511,7 @@ class SensorBar:
     # ── Sensor getters ────────────────────────────────────────────────────────
 
     def _get_cpu(self, readings, thresh):
-        val = readings.get("cpu_temp_avg")
+        val = _cpu_temp_value(readings)
         if val is None:
             return "---", COLOR_COOL
         return sensors.fmt_temp(val), self._temp_color(
@@ -1618,7 +1683,7 @@ class SensorBar:
             return "---", COLOR_COOL
         # Internal reading is MiB/s (bytes ÷ 2^20).  Convert to the unit
         # the user picked; factors are precise so values match ISP reporting.
-        unit = cfg.get_value("display", "net_unit", default="MB/s")
+        unit = _net_unit()
         if unit == "Mbps":
             dn *= 8.388608
             up *= 8.388608
@@ -1649,8 +1714,12 @@ class SensorBar:
     # ── History extraction (for sparkline + inline micro-chart) ───────────────
 
     def _extract_numeric(self, config_key: str, readings: dict):
+        # CPU temp respects the user's average / per-core mode so the
+        # inline mini-chart and 90 s sparkline track whatever number the
+        # cell displays.
+        if config_key == "cpu_temp":
+            return _cpu_temp_value(readings)
         simple = {
-            "cpu_temp":    "cpu_temp_avg",
             "gpu_temp":    "gpu_temp",
             "gpu_hotspot": "gpu_temp_hotspot",
             "gpu_mem_temp":"gpu_temp_memory",
@@ -1674,7 +1743,7 @@ class SensorBar:
             val = readings.get(field)
             if val is None:
                 return None
-            unit = cfg.get_value("display", "net_unit", default="MB/s")
+            unit = _net_unit()
             if unit == "Mbps":
                 return val * 8.388608
             if unit == "kbps":

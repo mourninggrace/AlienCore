@@ -57,14 +57,17 @@ def load_session():
         if os.path.exists(_SESSION_PATH):
             with open(_SESSION_PATH, "r", encoding="utf-8") as f:
                 outer = json.load(f)
-            if isinstance(outer, dict) and "d" in outer and "s" in outer:
-                data, sig = outer["d"], outer["s"]
-                if not isinstance(data, dict) or not _session_sig_valid(data, sig):
-                    logger.warning("Session file failed integrity check — discarding")
-                    return
-            elif isinstance(outer, dict) and outer.get("token"):
-                data = outer  # legacy unsigned session — accepted once, re-signed on next persist
-            else:
+            # v1 ships with HMAC-signed sessions only — there is no legacy
+            # unsigned-session compatibility window.  An unsigned session.json
+            # could be a hand-crafted file dropped by malware on the local
+            # machine; reject it.
+            if not (isinstance(outer, dict) and "d" in outer and "s" in outer):
+                if isinstance(outer, dict) and outer.get("token"):
+                    logger.warning("Session file is unsigned — discarding (sign-in required)")
+                return
+            data, sig = outer["d"], outer["s"]
+            if not isinstance(data, dict) or not _session_sig_valid(data, sig):
+                logger.warning("Session file failed integrity check — discarding")
                 return
             if data.get("token"):
                 with _lock:
@@ -194,8 +197,16 @@ def send_pin(email: str) -> tuple[bool, str]:
 def verify_pin(email: str, pin: str) -> tuple[bool, str]:
     """Submit the PIN. On success, session is saved to disk."""
     _p = pin.strip()
+    if not _p.isdigit() or len(_p) != 6:
+        return False, "PIN must be six digits."
     try:
         from core import fingerprint as fp
+        if not fp.is_resolved():
+            # Server will reject "unknown" anyway — fail fast with a clear message.
+            return False, ("Hardware identification failed. AlienCore cannot "
+                           "verify your machine — sign-in is disabled. Please "
+                           "ensure you are running on a real Windows install "
+                           "(not a sandboxed VM with restricted registry/WMI).")
         resp = _post("/auth/verify-pin", {
             "email":       email.strip().lower(),
             "pin":         _p,
@@ -276,20 +287,74 @@ def _post(endpoint: str, payload: dict) -> dict:
             return {"ok": False, "error": f"HTTP {e.code}"}
 
 
+_TRIAL_SENTINEL = object()
+
+
+def _safe_float(v, fallback: float = 0.0) -> float:
+    """Convert v to float, rejecting NaN/inf which would break time-comparison
+    logic (`time.time() < NaN` is always False, silently extending grace
+    periods forever)."""
+    import math
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(f):
+        return fallback
+    return f
+
+
+def _verify_license_payload(data: dict) -> bool:
+    """Return True iff the server's response carries a valid Ed25519
+    signature over the license payload.  Refuses to grant has_base / has_pro
+    without one — this is the defense against an attacker who MITMs
+    /auth/check and flips license bits to True."""
+    from core import license_signing
+    if not license_signing.is_configured():
+        # Public key placeholder — pre-deploy / dev environments.  Trust
+        # the server but log loudly so it's obvious this is not production.
+        logger.warning(
+            "License signature verification SKIPPED — public key not "
+            "configured.  Pro/Base features unlock without proof of payment."
+        )
+        return True
+    sig = data.get("license_sig")
+    if not sig:
+        logger.warning("Server response lacks license_sig — license rejected")
+        return False
+    if not license_signing.verify(data, sig):
+        logger.warning("License signature INVALID — license rejected")
+        return False
+    return True
+
+
 def _save_session(data: dict):
     global _session
-    # Preserve existing trial_started_at if server didn't send one
-    # (e.g. offline dev / backdoor login)
+    # Verify the server-side signature before trusting any license bits.
+    # If the response is unsigned (server-side downgrade, MITM strip), or
+    # the signature doesn't verify, treat the session as unlicensed — the
+    # token still works for /auth/check but features stay locked until a
+    # valid signed response arrives.
+    if not _verify_license_payload(data):
+        data = dict(data)
+        data["has_base"] = False
+        data["has_pro"]  = False
+    # Preserve existing trial_started_at only if the server omitted the key
+    # entirely (e.g. offline / dev login).  An explicit 0 / None from the
+    # server means "no trial" and must override whatever was cached.
     with _lock:
         existing_trial = _session.get("trial_started_at")
-    trial = data.get("trial_started_at") or existing_trial
+    if "trial_started_at" in data:
+        trial = data.get("trial_started_at")
+    else:
+        trial = existing_trial
     session = {
         "email":            data.get("email", ""),
         "token":            data.get("token", ""),
         "has_base":         bool(data.get("has_base")),
         "has_pro":          bool(data.get("has_pro")),
         "trial_started_at": trial,
-        "expires_at":       float(data.get("expires_at", 0)),
+        "expires_at":       _safe_float(data.get("expires_at", 0)),
         "last_verified_at": time.time(),
     }
     with _lock:
@@ -299,13 +364,25 @@ def _save_session(data: dict):
 
 def _merge_session(data: dict):
     """Update license fields without touching the token."""
+    if not _verify_license_payload(data):
+        # Force-clear license bits when the response can't be verified.
+        # This is the same defense as _save_session — a MITM that flips
+        # has_pro=true is rejected even on rolling refresh.
+        data = dict(data)
+        data["has_base"] = False
+        data["has_pro"]  = False
     with _lock:
         existing_trial = _session.get("trial_started_at")
+        if "trial_started_at" in data:
+            trial = data.get("trial_started_at")
+        else:
+            trial = existing_trial
         _session.update({
             "has_base":         bool(data.get("has_base")),
             "has_pro":          bool(data.get("has_pro")),
-            "trial_started_at": data.get("trial_started_at") or existing_trial,
-            "expires_at":       float(data.get("expires_at", _session.get("expires_at", 0))),
+            "trial_started_at": trial,
+            "expires_at":       _safe_float(data.get("expires_at"),
+                                            _safe_float(_session.get("expires_at", 0))),
             "last_verified_at": time.time(),
         })
     _persist()
@@ -354,10 +431,16 @@ _DEV_YUBIKEY_SERIALS: set[str] = {
 
 def _detect_yubikey_serials() -> set[str]:
     """Return serials of all YubiKeys currently plugged into this machine."""
-    import subprocess
+    import os, subprocess
+    # Absolute path — defeat PATH-hijack against the elevated AlienCore process.
+    sysroot = os.environ.get("SystemRoot") or r"C:\Windows"
+    pwsh = os.path.join(sysroot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    if not os.path.exists(pwsh):
+        logger.debug("YubiKey detection: powershell.exe not found at %s", pwsh)
+        return set()
     try:
         out = subprocess.check_output(
-            ["powershell", "-NoProfile", "-Command",
+            [pwsh, "-NoProfile", "-NonInteractive", "-Command",
              "Get-PnpDevice -PresentOnly | "
              "Where-Object { $_.InstanceId -match "
              "'^USB\\\\VID_1050&PID_[0-9A-Fa-f]+\\\\\\d+$' } | "

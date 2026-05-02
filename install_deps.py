@@ -20,6 +20,7 @@ REQUIRED_PACKAGES = [
     ("pystray",                "pystray",                 "System tray icon"),
     ("Pillow",                 "PIL",                     "Tray icon image rendering"),
     ("nvidia-ml-py",           "pynvml",                  "NVIDIA GPU sensors (no subprocess)"),
+    ("cryptography",           "cryptography",            "Ed25519 license signature verification"),
     ("pyinstaller",            "PyInstaller",             "Optional: build standalone EXE"),
 ]
 

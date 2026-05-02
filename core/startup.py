@@ -36,6 +36,16 @@ def _launch_command() -> str:
     return f'wscript.exe "{vbs}"'
 
 
+def _safe_path_for_template(p: str) -> bool:
+    """A path is safe to interpolate into the VBS / registry template only if
+    it contains no characters that would break VBScript string parsing or let
+    a crafted install path inject extra commands.  Refuses paths with ", ',
+    \\r, \\n, or NUL — every other Windows-legal path character is fine."""
+    if not isinstance(p, str) or not p:
+        return False
+    return not any(c in p for c in ('"', "'", "\r", "\n", "\x00"))
+
+
 def _write_vbs() -> bool:
     """Write launch.vbs next to aliencore.py with the current Python executable path."""
     base   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,6 +57,16 @@ def _write_vbs() -> bool:
     pythonw    = os.path.join(python_dir, "pythonw.exe")
     if not os.path.exists(pythonw):
         pythonw = sys.executable
+
+    # Refuse to template a VBS with paths that would break — or let an
+    # attacker who controls the install location inject — VBScript syntax.
+    for label, p in (("base", base), ("pythonw", pythonw), ("script", script)):
+        if not _safe_path_for_template(p):
+            logger.error(
+                "launch.vbs not written: %s path contains unsafe characters: %r",
+                label, p,
+            )
+            return False
 
     # The non-admin HKCU fallback must skip auto-elevation — otherwise every
     # boot pops a UAC prompt the user can't easily accept from the logon flow.
@@ -114,9 +134,16 @@ def enable() -> bool:
         logger.warning("Task Scheduler install failed — falling back to HKCU Run")
 
     if not getattr(sys, "frozen", False):
-        _write_vbs()
+        if not _write_vbs():
+            return False
     try:
         cmd = _launch_command()
+        # Defense-in-depth: refuse to register a Run entry whose command
+        # contains characters that could be re-interpreted by the shell
+        # parser when the registry value is later expanded.
+        if any(c in cmd for c in ("\r", "\n", "\x00")):
+            logger.error("Refusing HKCU Run entry — command contains control chars")
+            return False
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _REG_KEY,
                             access=winreg.KEY_SET_VALUE) as key:
             winreg.SetValueEx(key, _REG_NAME, 0, winreg.REG_SZ, cmd)

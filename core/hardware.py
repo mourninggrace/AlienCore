@@ -647,10 +647,16 @@ def _get_platform_flags() -> dict:
 
 
 def _save_cache(profile: dict):
+    """Atomic write — never leave a half-written hardware_profile.json on disk.
+    A power-cut or os._exit during a naive truncate-then-write would clear the
+    file, and the next launch's _load_hw() would silently boot with no boost
+    tracker, no GPU TDP thresholds, no AI watchdog labels."""
     try:
         os.makedirs(os.path.dirname(HARDWARE_CACHE), exist_ok=True)
-        with open(HARDWARE_CACHE, "w", encoding="utf-8") as f:
+        tmp = HARDWARE_CACHE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(profile, f, indent=2)
+        os.replace(tmp, HARDWARE_CACHE)
     except Exception as e:
         logger.error("Failed to save hardware cache: %s", e)
 

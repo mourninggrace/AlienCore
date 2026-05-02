@@ -45,7 +45,7 @@
 
 AlienCore is an **adaptive Windows system optimizer** that watches your workload in real time and applies the right CPU, GPU, RAM, network, and privacy settings automatically — without you touching anything.
 
-Instead of juggling HWiNFO, MSI Afterburner, Process Lasso, ThrottleStop, RAMMap, and a folder full of PowerShell scripts, AlienCore replaces all of them with a single lightweight background service, a floating sensor bar, and an optional AI assistant.
+Instead of juggling HWiNFO, MSI Afterburner, Process Lasso, ThrottleStop, RAMMap, and a folder full of PowerShell scripts, AlienCore replaces all of them with a single lightweight background process, a floating sensor bar, and an optional AI assistant.
 
 Launch a game → clocks ramp, network latency drops, background processes get demoted, GPU power opens up. In under a second.  
 Close the game → everything winds back down. Quieter fans. Cooler silicon. Better battery.
@@ -223,13 +223,7 @@ The manual is also available from inside the app: **Settings → footer → User
    ```
    python aliencore.py --firstrun
    ```
-   Choose your tweaks, click Save. AlienCore initializes immediately.
-
-4. **Install as a Windows service** (run as Administrator):
-   ```
-   python aliencore.py --install
-   ```
-   AlienCore will now start automatically at boot, before login.
+   Choose your tweaks, click Save. AlienCore initializes immediately and registers a silent, elevated Task Scheduler entry so it auto-starts at every login.
 
 ---
 
@@ -239,19 +233,19 @@ The manual is also available from inside the app: **Settings → footer → User
 - **Tray → Open Settings** to change any option at any time
 - **Tray → Override Profile** to manually lock a profile
 - **Tray → View Log** to open `aliencore.log`
-- **Tray → Exit** gracefully stops the service
+- **Tray → Exit** gracefully stops AlienCore
 
 ---
 
 ## Uninstall
 
-```
-python aliencore.py --uninstall
-```
-
 Reverse all registry tweaks:
 ```
-python aliencore.py --restore-defaults
+python aliencore.py --restore
+```
+Then remove the Task Scheduler auto-start entry from Settings → Service, or run:
+```
+schtasks /Delete /TN AlienCoreElevatedStartup /F
 ```
 
 ---
@@ -260,7 +254,7 @@ python aliencore.py --restore-defaults
 
 ```
 aliencore/
-├── aliencore.py            ← Main entry point (service + CLI)
+├── aliencore.py            ← Main entry point (CLI)
 ├── install_deps.py         ← Run once as Admin to install dependencies
 ├── config.json             ← Auto-generated on first run (your settings)
 ├── hardware_profile.json   ← Auto-generated hardware fingerprint

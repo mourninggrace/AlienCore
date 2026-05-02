@@ -133,7 +133,9 @@ def clear_state():
     _save_state(state)
 
 
-def download_and_apply(zipball_url: str, on_progress=None, expected_sha256: "str | None" = None):
+def download_and_apply(zipball_url: str, on_progress=None,
+                       expected_sha256: "str | None" = None,
+                       expected_version: "str | None" = None):
     """
     Download the release zip, extract it, write a batch helper that copies
     files over the current installation and restarts AlienCore, then launch
@@ -141,7 +143,22 @@ def download_and_apply(zipball_url: str, on_progress=None, expected_sha256: "str
 
     on_progress(pct: int, msg: str) is called with progress updates if provided.
     Raises RuntimeError on any fatal error so the caller can display the message.
+
+    expected_version: the tag this download is supposed to be — re-checked at
+    apply time as a downgrade-prevention barrier.  An attacker who can MITM
+    api.github.com (or who later gains release-edit rights) cannot downgrade
+    a user past a security fix without also publishing a new tag whose name
+    is greater than the current one.
     """
+    # Re-check at apply time, not just at the dialog.  download_and_apply is
+    # the only privileged entry — defending it once defends every code path.
+    if expected_version:
+        if _version_tuple(expected_version) <= _version_tuple(VERSION):
+            raise RuntimeError(
+                f"Refusing to apply v{expected_version} — current is v{VERSION}. "
+                "Downgrades are not allowed."
+            )
+
     app_dir  = BASE_DIR
     tmp_dir  = tempfile.mkdtemp(prefix="aliencore_update_")
     zip_path = os.path.join(tmp_dir, "update.zip")
@@ -191,12 +208,18 @@ def download_and_apply(zipball_url: str, on_progress=None, expected_sha256: "str
         raise RuntimeError("Integrity check failed — update package may be tampered. Aborting.")
     logger.info("Update SHA-256 verified.")
 
-    # ── Extract ──
+    # ── Extract (zip-slip safe) ──
     _progress(on_progress, 60, "Extracting...")
-    extract_dir = os.path.join(tmp_dir, "extracted")
+    extract_dir = os.path.abspath(os.path.join(tmp_dir, "extracted"))
+    os.makedirs(extract_dir, exist_ok=True)
     try:
         with zipfile.ZipFile(zip_path, "r") as z:
-            z.extractall(extract_dir)
+            for member in z.infolist():
+                _safe_extract_member(z, member, extract_dir)
+    except RuntimeError:
+        # Path-traversal rejection — re-raise without wrapping so the
+        # message reaches the user verbatim.
+        raise
     except Exception as e:
         raise RuntimeError(f"Extraction failed: {e}") from e
 
@@ -205,6 +228,27 @@ def download_and_apply(zipball_url: str, on_progress=None, expected_sha256: "str
                if os.path.isdir(os.path.join(extract_dir, e))]
     content_root = (os.path.join(extract_dir, entries[0])
                     if len(entries) == 1 else extract_dir)
+
+    # ── Cross-check the bundled VERSION constant ──
+    # Even with SHA-256 verification, a release whose body line points at
+    # an older zipball (downgrade-by-pointer) would be caught here because
+    # the embedded VERSION wouldn't match expected_version.
+    if expected_version:
+        try:
+            with open(os.path.join(content_root, "core", "constants.py"),
+                      "r", encoding="utf-8") as f:
+                src = f.read()
+            m = re.search(r'^VERSION\s*=\s*["\']([0-9.]+)["\']', src, re.MULTILINE)
+            zipped = m.group(1) if m else None
+            if not zipped or _version_tuple(zipped) != _version_tuple(expected_version):
+                raise RuntimeError(
+                    f"Update payload version mismatch — release claims v{expected_version} "
+                    f"but bundled VERSION is v{zipped}. Aborting."
+                )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Could not verify update version: {e}") from e
 
     _progress(on_progress, 75, "Preparing update launcher...")
 
@@ -248,6 +292,48 @@ def download_and_apply(zipball_url: str, on_progress=None, expected_sha256: "str
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _safe_extract_member(z: zipfile.ZipFile, member: zipfile.ZipInfo, dest: str):
+    """Extract a single zip member with full path-traversal validation.
+
+    Rejects:
+      · absolute paths (Windows or POSIX)
+      · drive letters (`C:\\…`)
+      · `..` segments that escape the destination
+      · symlinks (rare in GitHub zips, but a CLR runtime could include them)
+
+    Caller has already validated the SHA-256 of the archive, so this is
+    defence-in-depth for the case where the trust root (GitHub release
+    publisher) is compromised."""
+    name = member.filename
+    if not name or name.endswith("/"):
+        # Empty entries / pure-directory entries: directory creation happens
+        # implicitly when we write a file into it.
+        if name:
+            target = os.path.normpath(os.path.join(dest, name))
+            if os.path.commonpath([os.path.abspath(target), dest]) == dest:
+                os.makedirs(target, exist_ok=True)
+        return
+    # Reject absolute paths and drive letters before joining.
+    if name.startswith("/") or name.startswith("\\") or (len(name) > 1 and name[1] == ":"):
+        raise RuntimeError(f"Update package contains an absolute path: {name!r} — refusing to extract.")
+    target = os.path.abspath(os.path.normpath(os.path.join(dest, name)))
+    if os.path.commonpath([target, dest]) != dest:
+        raise RuntimeError(f"Update package contains a path-traversal entry: {name!r} — refusing to extract.")
+    # Symlinks: the high bit of external_attr indicates POSIX file type;
+    # 0xA000 is S_IFLNK.  Skip without writing.
+    mode = (member.external_attr >> 16) & 0xF000
+    if mode == 0xA000:
+        logger.warning("Update package contains a symlink (%s) — skipping.", name)
+        return
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    with z.open(member) as src, open(target, "wb") as dst:
+        while True:
+            chunk = src.read(65536)
+            if not chunk:
+                break
+            dst.write(chunk)
+
 
 def _progress(cb, pct: int, msg: str):
     if cb:
@@ -326,8 +412,14 @@ def _load_state() -> dict:
 
 
 def _save_state(state: dict):
+    """Atomic write — both updater.py and whats_new_dialog.py share this file
+    and a kill mid-write would leave it empty, dropping the user's snooze /
+    last-seen-version state."""
     try:
-        with open(STATE_PATH, "w", encoding="utf-8") as f:
+        os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+        tmp = STATE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
+        os.replace(tmp, STATE_PATH)
     except Exception as e:
         logger.debug("Failed to save update state: %s", e)

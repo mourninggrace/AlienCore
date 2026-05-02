@@ -238,6 +238,19 @@ def get_service_state(service_name: str) -> dict:
         return {"exists": False, "state": "Unknown", "startup_type": "Unknown"}
 
 
+def _is_curated(service_name: str) -> bool:
+    """Return True if service_name is on AlienCore's curated list — the only
+    services any caller is allowed to mutate.  Belt-and-braces against
+    untrusted callers (future AI tool, scripted automation) reaching this
+    function with an arbitrary name like Winmgmt or RpcSs."""
+    if not isinstance(service_name, str) or not service_name:
+        return False
+    for entry in ALIENCORE_MANAGED + RECOMMENDED_SERVICES:
+        if entry and entry[0] == service_name:
+            return True
+    return False
+
+
 def set_startup_type(service_name: str, startup_type: str,
                      cascade_state: bool = True) -> tuple[bool, str]:
     """
@@ -248,6 +261,8 @@ def set_startup_type(service_name: str, startup_type: str,
                    via explicit Start/Stop buttons.
     Returns (ok, message).
     """
+    if not _is_curated(service_name):
+        return False, f"Refusing to modify uncurated service '{service_name}'."
     type_map = {
         AUTO:     "auto",
         AUTO_DEL: "delayed-auto",
@@ -287,6 +302,8 @@ def set_startup_type(service_name: str, startup_type: str,
 
 def start_service(service_name: str) -> tuple[bool, str]:
     """Start a service by name. Returns (ok, message)."""
+    if not _is_curated(service_name):
+        return False, f"Refusing to start uncurated service '{service_name}'."
     try:
         result = subprocess.run(
             ["sc", "start", service_name],
@@ -306,6 +323,8 @@ def start_service(service_name: str) -> tuple[bool, str]:
 
 def stop_service(service_name: str) -> tuple[bool, str]:
     """Stop a service by name. Returns (ok, message)."""
+    if not _is_curated(service_name):
+        return False, f"Refusing to stop uncurated service '{service_name}'."
     try:
         result = subprocess.run(
             ["sc", "stop", service_name],
