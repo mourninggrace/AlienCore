@@ -414,15 +414,19 @@
   </ol>
 
   <div class="box box-info">
-    <strong>PIN codes expire after 10 minutes.</strong> If yours has expired, click "Resend PIN" to get a fresh one. There's no limit to how many times you can resend.
+    <strong>PIN codes expire after 10 minutes.</strong> If yours has expired, click "Resend PIN" to get a fresh one. To prevent abuse, there is a 60-second cooldown between PIN requests for the same email, and incorrect attempts are limited (the PIN is invalidated after 5 wrong tries — request a new one if you fat-finger it that many times).
+  </div>
+
+  <div class="box box-info">
+    <strong>Hardware identification.</strong> The first time you sign in, AlienCore generates a fingerprint from a few stable hardware identifiers (Windows MachineGuid, BIOS UUID, CPU name) and binds your session to that machine. If AlienCore cannot read those identifiers — usually because it's running in a sandboxed VM or under heavily restricted permissions — sign-in is refused with a "Hardware identification failed" message. Run AlienCore as a normal user on a real Windows install; no special configuration is needed on regular hardware.
   </div>
 
   <h3>Session Persistence</h3>
   <p>Once signed in, your session is cached locally. You won't need to log in again unless:</p>
   <ul style="padding-left:24px; line-height:2">
     <li>You manually log out from the Account tab.</li>
-    <li>Your session token expires (30-day rolling window — automatically refreshed on each launch).</li>
-    <li>The session is moved to a different machine. Sessions are bound to the hardware they were created on; copying <code>session.json</code> to another PC will be rejected at the next license check.</li>
+    <li>Your session token expires. Each session has a 30-day rolling window, automatically refreshed on each launch, and a 90-day absolute cap from the original sign-in. After 90 days you'll need to sign in again — this is a security feature, not a license expiry.</li>
+    <li>The session is moved to a different machine. Sessions are bound to the hardware they were created on; copying <code>session.json</code> to another PC will be rejected at the next license check. The file is also signed so manually editing it (e.g. to flip license fields) breaks the signature and the file is discarded.</li>
   </ul>
 
   <h3>Offline Use</h3>
