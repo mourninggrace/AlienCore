@@ -108,6 +108,21 @@ def show(info: dict, parent: tk.Misc = None) -> str:
 
     def _update_now():
         result[0] = "update_now"
+        # Installer-distributed (PyInstaller-frozen) builds can't apply an
+        # in-place update — the install dir doesn't contain loose .py files
+        # for the updater to overlay.  Direct the user to download a new
+        # installer from the GitHub releases page instead.
+        from core import updater
+        if updater.is_frozen():
+            import webbrowser
+            try:
+                webbrowser.open(updater.RELEASES_URL, new=2)
+            except Exception:
+                pass
+            updater.set_dismissed(info["version"])
+            dlg.destroy()
+            return
+
         _disable_buttons()
         prog_bar.pack(fill="x", pady=(0, 4))
         prog_lbl.pack(fill="x")
@@ -118,7 +133,6 @@ def show(info: dict, parent: tk.Misc = None) -> str:
 
         def _worker():
             try:
-                from core import updater
                 updater.download_and_apply(
                     info["zipball_url"],
                     on_progress=_on_progress,
@@ -147,8 +161,14 @@ def show(info: dict, parent: tk.Misc = None) -> str:
         updater.set_remind_later()
         dlg.destroy()
 
+    # Frozen-build installs can't auto-apply updates; the button instead
+    # opens the GitHub releases page so the user can download a new installer.
+    from core import updater as _updater_mod
+    update_btn_label = ("  Download New Installer  " if _updater_mod.is_frozen()
+                        else "  Update Now  ")
+
     btn_update = tk.Button(
-        foot, text="  Update Now  ",
+        foot, text=update_btn_label,
         command=_update_now,
         bg=ACCENT, fg="#000000",
         font=("Segoe UI", 10, "bold"),

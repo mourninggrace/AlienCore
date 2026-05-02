@@ -133,6 +133,18 @@ def clear_state():
     _save_state(state)
 
 
+RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
+
+
+def is_frozen() -> bool:
+    """True if AlienCore is running from a PyInstaller-frozen build (the
+    .exe shipped via the installer).  In that case the install dir is just
+    aliencore.exe + _internal/ — there are no .py files for the in-app
+    updater's robocopy step to overlay, so the auto-update path is disabled
+    and the user is directed to download a fresh installer instead."""
+    return getattr(sys, "frozen", False)
+
+
 def download_and_apply(zipball_url: str, on_progress=None,
                        expected_sha256: "str | None" = None,
                        expected_version: "str | None" = None):
@@ -150,6 +162,17 @@ def download_and_apply(zipball_url: str, on_progress=None,
     a user past a security fix without also publishing a new tag whose name
     is greater than the current one.
     """
+    # Frozen builds (PyInstaller .exe distributed via the Inno Setup
+    # installer) cannot be auto-updated by overlaying source files — the
+    # install dir is `aliencore.exe + _internal/`, not loose .py files.
+    # Direct the user to download a fresh installer from GitHub instead.
+    if is_frozen():
+        raise RuntimeError(
+            "Auto-update isn't available for installed builds.\n"
+            f"Please download v{expected_version or 'the latest release'} "
+            f"from {RELEASES_URL} and run the installer."
+        )
+
     # Re-check at apply time, not just at the dialog.  download_and_apply is
     # the only privileged entry — defending it once defends every code path.
     if expected_version:

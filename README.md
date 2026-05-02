@@ -210,20 +210,30 @@ The manual is also available from inside the app: **Settings → footer → User
 
 ---
 
-## Setup
+## Install
+
+### Recommended — Windows installer (.exe)
+
+1. Download `AlienCore-<version>-Setup.exe` from the [releases page](https://github.com/mourninggrace/AlienCore/releases/latest).
+2. Double-click to run. The installer drops AlienCore into `Program Files\AlienCore\`, creates Start Menu and Desktop shortcuts, and offers to launch the app on completion.
+3. The first launch automatically opens the first-run setup — pick your tweaks, sign in with your email, and AlienCore is configured.
+
+> **About the SmartScreen warning.** AlienCore is currently distributed unsigned. When you run the installer, Windows SmartScreen may show a blue panel saying "Windows protected your PC." This is normal for unsigned software from a small publisher — it does **not** mean the installer is malicious. Click **More info**, then **Run anyway** to proceed. A signed build is planned for a future release once initial demand justifies the cert cost; until then, you can verify the installer's `sha256` against the digest published in the GitHub release notes.
+
+### Alternative — run from source (developers / advanced users)
 
 1. **Install Python 3.10+** from [python.org](https://python.org) — check *Add to PATH* during install
-
 2. **Run the dependency installer as Administrator:**
    ```
    python install_deps.py
    ```
-
-3. **First run (opens settings GUI):**
+3. **First run:**
    ```
    python aliencore.py --firstrun
    ```
    Choose your tweaks, click Save. AlienCore initializes immediately and registers a silent, elevated Task Scheduler entry so it auto-starts at every login.
+
+When running from source, the in-app auto-updater will overlay new releases automatically. The .exe-installed builds direct you back to the releases page to download a fresh installer instead.
 
 ---
 
