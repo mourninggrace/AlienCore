@@ -1,0 +1,39 @@
+# PyInstaller VERSIONINFO resource file.
+# Embedded in AlienCore.exe so Windows File Properties → Details shows
+# accurate metadata.  Keep in sync with core/constants.py::VERSION.
+#
+# When bumping for a release:
+#   1. Update core/constants.py VERSION
+#   2. Update filevers / prodvers tuples below to match (major, minor, patch, build)
+#   3. Update FileVersion / ProductVersion strings to match
+#   4. Update LegalCopyright year if it has rolled over
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'040904B0',
+        [StringStruct(u'CompanyName',     u'George Kyle Yeroshefsky'),
+        StringStruct(u'FileDescription',  u'AlienCore Adaptive System Optimizer'),
+        StringStruct(u'FileVersion',      u'1.0.0.0'),
+        StringStruct(u'InternalName',     u'AlienCore'),
+        StringStruct(u'LegalCopyright',   u'\xa9 2026 George Kyle Yeroshefsky.  All rights reserved.'),
+        StringStruct(u'OriginalFilename', u'AlienCore.exe'),
+        StringStruct(u'ProductName',      u'AlienCore'),
+        StringStruct(u'ProductVersion',   u'1.0.0.0')])
+      ]
+    ),
+    VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+  ]
+)

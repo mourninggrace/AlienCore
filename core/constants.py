@@ -33,7 +33,18 @@ PAYPAL_CHECKOUT_URL = (
 )
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-BASE_DIR              = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# When running from source, BASE_DIR is the project root (parent of core/).
+# When running from a PyInstaller-frozen build, sys.executable is the
+# installed AlienCore.exe in Program Files, and __file__ points inside the
+# bundle's _internal/ directory.  Use dirname(sys.executable) so all the
+# BASE_DIR-relative paths below (config.json, hardware_profile.json, logs/,
+# tools/lhm_bridge/...) live next to the .exe rather than inside _internal/
+# — that's what the Inno Setup [Files] directives target, and it survives
+# installer-replace cycles cleanly.
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH           = os.path.join(BASE_DIR, "config.json")
 LOG_PATH              = os.path.join(BASE_DIR, "logs", "aliencore.log")
 PROFILE_DIR           = os.path.join(BASE_DIR, "profiles")
