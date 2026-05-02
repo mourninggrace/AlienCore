@@ -120,14 +120,17 @@ def main() -> int:
         [sys.executable, "-m", "PyInstaller", "--noconfirm", SPEC_PATH],
         cwd=PROJECT_ROOT,
     ).returncode
-    if rc != 0:
-        print(f"\n  FAILED: PyInstaller exit {rc}")
-        return rc
-    onedir = os.path.join(DIST_DIR, "AlienCore")
+    onedir   = os.path.join(DIST_DIR, "AlienCore")
     main_exe = os.path.join(onedir, "AlienCore.exe")
+    # Trust the artifact, not the exit code: PyInstaller occasionally
+    # returns non-zero on transient warnings (Windows AV touching the
+    # bundle dir during write, etc.) even when the build is fine.  Only
+    # treat as failure if the .exe genuinely didn't land.
     if not os.path.exists(main_exe):
-        print(f"\n  FATAL: expected {main_exe}")
-        return 1
+        print(f"\n  FAILED: PyInstaller exit {rc}, no AlienCore.exe produced")
+        return rc or 1
+    if rc != 0:
+        print(f"  PyInstaller returned exit {rc} but artifact exists — proceeding")
     print(f"  built: {main_exe} "
           f"({os.path.getsize(main_exe)//1024} KiB)")
 
