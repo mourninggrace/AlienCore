@@ -35,3 +35,6 @@ license_public.b64
 
 # AlienCore session — machine-bound HMAC-signed token, not portable
 session.json
+
+# Local-only debug captures
+scr shots for troubleshooting only/

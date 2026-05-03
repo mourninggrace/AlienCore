@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Installed builds crashed on first launch with `PermissionError [Errno 13]`
+  trying to write `config.json` inside `C:\Program Files\AlienCore\`.** The
+  frozen build resolved every writable path (config, logs, hardware cache,
+  history files, `update_state.json`) relative to the install directory,
+  which Windows protects from non-admin writes. Reproduced on a fresh test
+  install where the desktop shortcut launches without elevation.
+
+  Fix splits the path roots in `core/constants.py`:
+  - `BASE_DIR` keeps pointing at the install dir for read-only bundled
+    assets (`lhm_bridge.exe`, `CHANGELOG.md`, `LICENSE`, `docs/manual.html`).
+  - New `USER_DATA_DIR` resolves to `%LOCALAPPDATA%\AlienCore\` when frozen
+    (project root in source mode so the dev workflow keeps working). All
+    writable state — `config.json`, `logs/`, `learning.json`, `hardware_profile.json`,
+    `update_state.json`, profile dir, throttle/efficiency/boost/pagefile
+    history — now lives there. Survives reinstalls; the Inno Setup uninstaller
+    explicitly does not touch it.
+
+  `os.makedirs(USER_DATA_DIR)` runs once at module import with a `%TEMP%`
+  fallback so a corrupt or locked-down user profile surfaces a clear
+  PermissionError on first write instead of an opaque `ImportError` chain.
+
+- **Frozen-build path resolution audit — five modules computed paths from
+  `__file__`, which resolves inside the PyInstaller bundle archive instead
+  of next to `AlienCore.exe`.** All five would have failed silently or
+  loudly in the installed build:
+  - `core/lhm_manager.py` couldn't find `lhm_bridge.exe` (sensor bar would
+    have stayed `---` forever).
+  - `core/elevation.py` passed a non-existent `cwd` to `ShellExecuteW` and
+    the elevated-task safety check ran against a virtual path.
+  - `core/ai_tools.py::_h_open_settings` and
+    `gui/settings_gui.py::_open_chat` tried to spawn a non-existent
+    `aliencore.py` (AI chat & "Open Settings" tool calls would have died).
+  - `gui/settings_gui.py::_open_manual` looked for `docs/manual.html` next
+    to the .exe instead of inside `_internal/docs/` where PyInstaller puts
+    bundled data files.
+
+  All five now use `core.constants.BASE_DIR` (which is `sys.executable`-aware)
+  for bundled assets, `sys.executable` directly for subprocess relaunches,
+  and `getattr(sys, "_MEIPASS", BASE_DIR)` for PyInstaller-bundled data.
+
+- **Settings tray subprocess relaunch in `aliencore.py`** was passing
+  `aliencore.py` as a script argument, which doesn't exist on disk in a
+  frozen build. Frozen branch now launches `[sys.executable, "--settings"]`
+  directly so the bundle re-enters via its own embedded entry point.
+
+### Security
+
+- **`lhm.bridge_exe` config override is no longer honored unless
+  `ALIENCORE_DEV_BRIDGE_OVERRIDE=1` is set in the environment.** Previously
+  any path written into `config.json` would be spawned as the lhm_bridge
+  subprocess, and AlienCore runs as admin — so a config-file tamper became
+  an admin code-execution primitive. Production installs now always use
+  the bundled `lhm_bridge.exe`; developers building a custom bridge opt
+  in via the env var.
+
+### Changed
+
+- Inno Setup `[UninstallDelete]` comment in `installer/aliencore.iss`
+  updated to reflect that user state lives in `%LOCALAPPDATA%\AlienCore\`
+  and survives uninstall/reinstall cycles untouched.
+
 ### Added
 
 - **AlienCore now ships as a standalone Windows installer.** Download

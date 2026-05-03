@@ -16,12 +16,12 @@ import os
 import re
 import tkinter as tk
 
-from core.constants import APP_NAME, BASE_DIR, VERSION
+from core.constants import APP_NAME, BASE_DIR, USER_DATA_DIR, VERSION
 
 logger = logging.getLogger("aliencore.whatsnew")
 
 _CHANGELOG_PATH = os.path.join(BASE_DIR, "CHANGELOG.md")
-_STATE_PATH     = os.path.join(BASE_DIR, "update_state.json")
+_STATE_PATH     = os.path.join(USER_DATA_DIR, "update_state.json")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

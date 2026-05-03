@@ -759,7 +759,7 @@
 
   <table>
     <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
-    <tr><td class="setting">Logging Enabled</td><td class="default">On</td><td>Writes a log to <code>logs/aliencore.log</code>. Useful for troubleshooting. Safe to leave on — log size is managed automatically.</td></tr>
+    <tr><td class="setting">Logging Enabled</td><td class="default">On</td><td>Writes a log to <code>%LOCALAPPDATA%\AlienCore\logs\aliencore.log</code> (installer build) or <code>logs/aliencore.log</code> in the project root (source build). Useful for troubleshooting. Safe to leave on — log size is managed automatically.</td></tr>
     <tr><td class="setting">Start with Windows</td><td class="default">On</td><td>Adds AlienCore to the startup registry so it launches automatically when you log in.</td></tr>
     <tr><td class="setting">Notify on Profile Switch</td><td class="default">Off</td><td>Shows a Windows toast notification every time the active profile changes (idle → gaming, etc.).</td></tr>
     <tr><td class="setting">Hardware Refresh on Startup</td><td class="default">Off</td><td>Re-scans your hardware on every launch. Off by default so first-boot is faster; enable if you swap hardware regularly.</td></tr>
@@ -806,7 +806,7 @@
   <table>
     <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
     <tr><td class="setting">Provider</td><td class="default">Anthropic</td><td>Choose between Anthropic (Claude) or any OpenAI-compatible API (OpenAI, Groq, local Ollama, etc.).</td></tr>
-    <tr><td class="setting">API Key</td><td class="default">Empty</td><td>Your API key. Stored locally in <code>config.json</code> — never sent to AlienCore servers.</td></tr>
+    <tr><td class="setting">API Key</td><td class="default">Empty</td><td>Your API key. Stored locally in <code>%LOCALAPPDATA%\AlienCore\config.json</code> (installer build) or <code>config.json</code> in the project root (source build) — never sent to AlienCore servers.</td></tr>
     <tr><td class="setting">Model</td><td class="default">Automatic</td><td>Leave blank to use the provider's recommended default, or pick from the dropdown — which is fetched live from the provider's <code>/v1/models</code> endpoint as soon as your API key is set, so new model releases (e.g. a future Claude Opus 4.8) appear automatically without an AlienCore update. Click <strong>↻ Refresh</strong> next to the row to re-fetch on demand. Falls back to a built-in list if the network or the key isn't reachable.</td></tr>
     <tr><td class="setting">Watchdog Enabled</td><td class="default">Off</td><td>Automatically analyzes system health at a set interval and alerts you to anomalies.</td></tr>
     <tr><td class="setting">Watchdog Interval</td><td class="default">300 sec</td><td>How often the AI watchdog checks your system. Minimum 60 seconds.</td></tr>
@@ -1092,7 +1092,7 @@
   </table>
 
   <div class="box box-info">
-    <strong>Your API key stays on your machine.</strong> It's stored in <code>config.json</code> and sent directly to the AI provider (Anthropic/OpenAI) — never to AlienCore servers.
+    <strong>Your API key stays on your machine.</strong> It's stored in <code>%LOCALAPPDATA%\AlienCore\config.json</code> (or in the project root if you're running from source) and sent directly to the AI provider (Anthropic/OpenAI) — never to AlienCore servers.
   </div>
 </section>
 
@@ -1183,7 +1183,7 @@
     <tr><td>system_agent</td><td>System agent</td></tr>
     <tr><td>analog_io</td><td>Analog I/O</td></tr>
   </table>
-  <p>AlienCore clamps offsets to <strong>-150 mV to +100 mV</strong> per plane. Users needing more range can edit <code>config.json</code> directly — the AI tool will not accept it.</p>
+  <p>AlienCore clamps offsets to <strong>-150 mV to +100 mV</strong> per plane. Users needing more range can edit <code>config.json</code> directly (in <code>%LOCALAPPDATA%\AlienCore\</code> on installer builds, or in the project root on source builds) — the AI tool will not accept it.</p>
 
   <div class="box box-warn">
     <strong>Dell / Alienware users:</strong> Dell ships Alienware and XPS laptops with the Plundervolt mitigation (CVE-2019-11157) fully enabled in BIOS with no user toggle. MSR 0x150 writes are silently accepted and dropped. AlienCore detects this and reports voltage control as unavailable rather than letting you believe the offset stuck. On most desktop boards (MSI / ASUS / Gigabyte) and many non-Dell laptops, the writes do take effect.

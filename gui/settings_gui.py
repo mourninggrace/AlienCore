@@ -2831,12 +2831,14 @@ class SettingsWindow:
             # Subprocess so the chat gets its own Tk interpreter — avoids
             # sensor-bar geometry glitches caused by two live tk.Tk() roots.
             import os, sys, subprocess
-            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            subprocess.Popen(
-                [sys.executable, os.path.join(base, "aliencore.py"), "--ai-chat"],
-                cwd=base,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
+            from core.constants import BASE_DIR
+            if getattr(sys, "frozen", False):
+                argv = [sys.executable, "--ai-chat"]
+                cwd  = os.path.dirname(os.path.abspath(sys.executable))
+            else:
+                argv = [sys.executable, os.path.join(BASE_DIR, "aliencore.py"), "--ai-chat"]
+                cwd  = BASE_DIR
+            subprocess.Popen(argv, cwd=cwd, creationflags=subprocess.CREATE_NO_WINDOW)
 
         self._btn(t, "Open AI Chat", _open_chat, ACCENT2).pack(anchor="w",
                   padx=20, pady=(0, 16))
@@ -4997,11 +4999,13 @@ class SettingsWindow:
         self.root.destroy()
 
     def _open_manual(self):
-        import webbrowser
-        manual = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "docs", "manual.html",
-        )
+        import sys, webbrowser
+        # PyInstaller bundles docs/manual.html into _internal/docs/, exposed via
+        # sys._MEIPASS in both onefile and onedir modes.  In source builds the
+        # file lives at <project>/docs/manual.html.
+        from core.constants import BASE_DIR
+        docs_root = getattr(sys, "_MEIPASS", BASE_DIR)
+        manual = os.path.join(docs_root, "docs", "manual.html")
         webbrowser.open(f"file:///{manual.replace(os.sep, '/')}")
 
     def _cancel(self):

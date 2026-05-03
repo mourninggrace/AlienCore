@@ -210,12 +210,15 @@ def _h_memory_status(args: dict):
 
 
 def _h_open_settings(args: dict):
-    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    from core.constants import BASE_DIR
+    if getattr(sys, "frozen", False):
+        argv = [sys.executable, "--settings"]
+        cwd  = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        argv = [sys.executable, os.path.join(BASE_DIR, "aliencore.py"), "--settings"]
+        cwd  = BASE_DIR
     try:
-        subprocess.Popen(
-            [sys.executable, os.path.join(base, "aliencore.py"), "--settings"],
-            cwd=base, creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        subprocess.Popen(argv, cwd=cwd, creationflags=subprocess.CREATE_NO_WINDOW)
     except Exception as e:
         return False, f"Failed to open settings: {e}", None
     return True, "Settings window opened.", None

@@ -18,9 +18,10 @@ import os
 import subprocess
 import sys
 
+from core.constants import BASE_DIR as _BASE_DIR
+
 logger = logging.getLogger("aliencore.elevation")
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TASK_NAME = "AlienCoreElevatedStartup"
 
 # Historical task names installed by earlier versions of startup.py.  If any of

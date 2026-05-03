@@ -29,13 +29,13 @@ import time
 import urllib.request
 import zipfile
 
-from core.constants import APP_NAME, BASE_DIR, VERSION
+from core.constants import APP_NAME, BASE_DIR, USER_DATA_DIR, VERSION
 
 logger = logging.getLogger("aliencore.updater")
 
 GITHUB_REPO             = "mourninggrace/AlienCore"
 GITHUB_API_URL          = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-STATE_PATH              = os.path.join(BASE_DIR, "update_state.json")
+STATE_PATH              = os.path.join(USER_DATA_DIR, "update_state.json")
 UPDATE_CHECK_DELAY      = 30       # seconds after startup before first check
 UPDATE_RECHECK_HOURS    = 6        # hours between subsequent checks
 

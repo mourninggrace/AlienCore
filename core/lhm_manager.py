@@ -20,9 +20,10 @@ import subprocess
 import threading
 import time
 
+from core.constants import BASE_DIR as _BASE_DIR
+
 logger = logging.getLogger("aliencore.lhm")
 
-_BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _BRIDGE_EXE = os.path.join(_BASE_DIR, "tools", "lhm_bridge", "dist", "lhm_bridge.exe")
 
 # ── daemon state ──────────────────────────────────────────────────────────────
@@ -286,9 +287,19 @@ def _log_failure(msg: str):
 
 
 def _bridge_exe_path() -> str:
-    """Return path to bridge exe if it exists, else empty string."""
-    from core import config_manager as cfg
-    c = cfg.get()
-    override = c.get("lhm", {}).get("bridge_exe", "")
-    path = override if override else _BRIDGE_EXE
-    return path if os.path.exists(path) else ""
+    """Return path to bridge exe if it exists, else empty string.
+
+    The config-supplied `lhm.bridge_exe` override is honored only when the
+    ALIENCORE_DEV_BRIDGE_OVERRIDE env var is set to "1" — otherwise an
+    attacker who can edit config.json could point AlienCore (running as
+    admin) at an arbitrary binary.  Production installs always use the
+    bundled lhm_bridge.exe; developers building a custom bridge set the
+    env var themselves.
+    """
+    if os.environ.get("ALIENCORE_DEV_BRIDGE_OVERRIDE") == "1":
+        from core import config_manager as cfg
+        c = cfg.get()
+        override = c.get("lhm", {}).get("bridge_exe", "")
+        if override:
+            return override if os.path.exists(override) else ""
+    return _BRIDGE_EXE if os.path.exists(_BRIDGE_EXE) else ""

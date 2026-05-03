@@ -33,26 +33,54 @@ PAYPAL_CHECKOUT_URL = (
 )
 
 # ── Paths ────────────────────────────────────────────────────────────────────
-# When running from source, BASE_DIR is the project root (parent of core/).
-# When running from a PyInstaller-frozen build, sys.executable is the
-# installed AlienCore.exe in Program Files, and __file__ points inside the
-# bundle's _internal/ directory.  Use dirname(sys.executable) so all the
-# BASE_DIR-relative paths below (config.json, hardware_profile.json, logs/,
-# tools/lhm_bridge/...) live next to the .exe rather than inside _internal/
-# — that's what the Inno Setup [Files] directives target, and it survives
-# installer-replace cycles cleanly.
+# Two roots:
+#   BASE_DIR       — read-only bundled assets (lhm_bridge.exe, CHANGELOG.md,
+#                    LICENSE).  Lives next to AlienCore.exe in Program Files
+#                    when frozen; project root when running from source.
+#   USER_DATA_DIR  — writable per-user state (config.json, logs/, history,
+#                    hardware cache, update_state.json).  Lives in
+#                    %LOCALAPPDATA%\AlienCore\ when frozen because Program
+#                    Files is read-only for non-admin processes; project root
+#                    when running from source so the dev's existing
+#                    config.json keeps working.
 if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    USER_DATA_DIR = os.path.join(
+        os.environ.get("LOCALAPPDATA")
+        or os.path.expanduser(r"~\AppData\Local"),
+        APP_NAME,
+    )
 else:
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH           = os.path.join(BASE_DIR, "config.json")
-LOG_PATH              = os.path.join(BASE_DIR, "logs", "aliencore.log")
-PROFILE_DIR           = os.path.join(BASE_DIR, "profiles")
-HARDWARE_CACHE        = os.path.join(BASE_DIR, "hardware_profile.json")
-THROTTLE_LOG_PATH     = os.path.join(BASE_DIR, "logs", "throttle_events.json")
-EFFICIENCY_HISTORY_PATH = os.path.join(BASE_DIR, "logs", "efficiency_history.json")
-BOOST_HISTORY_PATH    = os.path.join(BASE_DIR, "logs", "boost_history.json")
-PAGEFILE_SESSIONS_PATH = os.path.join(BASE_DIR, "logs", "pagefile_sessions.json")
+    USER_DATA_DIR = BASE_DIR
+
+# Create USER_DATA_DIR up front so every module that imports paths from this
+# file can assume the directory exists.  If creation fails — extremely rare,
+# but possible on locked-down systems where %LOCALAPPDATA% is missing or the
+# user profile is corrupt — fall back to %TEMP% rather than crashing the
+# whole app at import time with a confusing traceback.
+try:
+    os.makedirs(USER_DATA_DIR, exist_ok=True)
+except OSError:
+    import tempfile
+    fallback = os.path.join(tempfile.gettempdir(), APP_NAME)
+    try:
+        os.makedirs(fallback, exist_ok=True)
+        USER_DATA_DIR = fallback
+    except OSError:
+        # Truly nothing we can write to.  Leave USER_DATA_DIR as configured;
+        # the first write will surface a clear PermissionError to the user
+        # instead of an opaque ImportError chain.
+        pass
+
+CONFIG_PATH           = os.path.join(USER_DATA_DIR, "config.json")
+LOG_PATH              = os.path.join(USER_DATA_DIR, "logs", "aliencore.log")
+PROFILE_DIR           = os.path.join(USER_DATA_DIR, "profiles")
+HARDWARE_CACHE        = os.path.join(USER_DATA_DIR, "hardware_profile.json")
+THROTTLE_LOG_PATH     = os.path.join(USER_DATA_DIR, "logs", "throttle_events.json")
+EFFICIENCY_HISTORY_PATH = os.path.join(USER_DATA_DIR, "logs", "efficiency_history.json")
+BOOST_HISTORY_PATH    = os.path.join(USER_DATA_DIR, "logs", "boost_history.json")
+PAGEFILE_SESSIONS_PATH = os.path.join(USER_DATA_DIR, "logs", "pagefile_sessions.json")
 
 # ── Feature thresholds ────────────────────────────────────────────────────────
 TVB_TEMP_THRESHOLD = 70    # Intel TVB activates below this temp (Raptor Lake i9)

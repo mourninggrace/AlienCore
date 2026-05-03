@@ -17,14 +17,14 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from core import config_manager as cfg
-from core.constants import BASE_DIR
+from core.constants import USER_DATA_DIR
 
 logger = logging.getLogger("aliencore.learning")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-LEARNING_PATH    = os.path.join(BASE_DIR, "learning.json")
-LEARNING_BACKUP  = os.path.join(BASE_DIR, "learning.json.bak")
-SUGGESTIONS_PATH = os.path.join(BASE_DIR, "suggestions.json")
+LEARNING_PATH    = os.path.join(USER_DATA_DIR, "learning.json")
+LEARNING_BACKUP  = os.path.join(USER_DATA_DIR, "learning.json.bak")
+SUGGESTIONS_PATH = os.path.join(USER_DATA_DIR, "suggestions.json")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 DATA_RETENTION_DAYS  = 90    # rolling window

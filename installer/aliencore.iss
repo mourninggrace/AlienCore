@@ -102,11 +102,10 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags
 
 
 [UninstallDelete]
-; Leave the user's config / state alone on uninstall — they may be
-; reinstalling and would not want hardware_profile / config wiped.  Logs
-; are also retained so post-incident debugging works after a clean
-; reinstall.  An aggressive "wipe-everything" uninstall could be added
-; later as an opt-in via [Code] CurUninstallStepChanged.
+; User state (config.json, logs/, hardware_profile.json, update_state.json)
+; lives in %LOCALAPPDATA%\AlienCore\, which uninstall does NOT touch — a
+; reinstall picks up the existing config and logs.  Everything below is
+; bundled program data and is safe to remove.
 Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\tools"
 Type: filesandordirs; Name: "{app}\docs"

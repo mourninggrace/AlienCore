@@ -326,6 +326,16 @@ def _start_tray(hw: dict):
     _shown_proc         = None     # subprocess currently showing the window
     _spawn_lock         = threading.Lock()
 
+    # Frozen builds re-launch via sys.executable (= AlienCore.exe) directly —
+    # there's no aliencore.py on disk next to the bundle.  Source builds
+    # invoke `python aliencore.py` as before.
+    if getattr(sys, "frozen", False):
+        _settings_argv = [sys.executable]
+        _settings_cwd  = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        _settings_argv = [sys.executable, os.path.join(BASE_DIR, "aliencore.py")]
+        _settings_cwd  = BASE_DIR
+
     def _spawn_prewarm():
         """Spawn a hidden settings subprocess that waits for show signal."""
         nonlocal _settings_proc
@@ -334,10 +344,8 @@ def _start_tray(hw: dict):
                 return  # already have one
             try:
                 _settings_proc = subprocess.Popen(
-                    [sys.executable,
-                     os.path.join(BASE_DIR, "aliencore.py"),
-                     "--settings", "--prewarm"],
-                    cwd=BASE_DIR,
+                    _settings_argv + ["--settings", "--prewarm"],
+                    cwd=_settings_cwd,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
             except Exception as e:
@@ -373,10 +381,8 @@ def _start_tray(hw: dict):
             # Prewarm missing — cold spawn (no --prewarm; opens immediately)
             try:
                 _shown_proc = subprocess.Popen(
-                    [sys.executable,
-                     os.path.join(BASE_DIR, "aliencore.py"),
-                     "--settings"],
-                    cwd=BASE_DIR,
+                    _settings_argv + ["--settings"],
+                    cwd=_settings_cwd,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
             except Exception as e:
