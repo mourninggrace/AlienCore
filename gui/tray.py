@@ -856,10 +856,15 @@ def _open_ai_chat():
         import os, sys, subprocess
         if _ai_chat_proc is not None and _ai_chat_proc.poll() is None:
             return   # already open
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if getattr(sys, "frozen", False):
+            argv = [sys.executable, "--ai-chat"]
+            cwd  = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            argv = [sys.executable, os.path.join(base, "aliencore.py"), "--ai-chat"]
+            cwd  = base
         _ai_chat_proc = subprocess.Popen(
-            [sys.executable, os.path.join(base, "aliencore.py"), "--ai-chat"],
-            cwd=base,
+            argv, cwd=cwd,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
     except Exception as e:

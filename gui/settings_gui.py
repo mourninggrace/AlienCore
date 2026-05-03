@@ -160,10 +160,13 @@ def open_settings(on_save_callback=None, is_first_run=False, prewarm=False):
     if base not in sys.path:
         sys.path.insert(0, base)
 
+    logger.info("open_settings: entered (prewarm=%s)", prewarm)
+
     # Single-instance mutex — exit silently if settings is already open.
     # In prewarm mode the tray ensures only one prewarm exists at a time.
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, True, "AlienCore_Settings_v1")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        logger.info("open_settings: mutex collision — another Settings already open, exiting")
         ctypes.windll.kernel32.CloseHandle(_mutex)
         return
 
@@ -172,12 +175,20 @@ def open_settings(on_save_callback=None, is_first_run=False, prewarm=False):
     cfg.load()
     _apply_theme(cfg.get_value("display", "settings_theme", default="Venom"))
 
-    root = tk.Tk()
-    SettingsWindow(root, on_save_callback=on_save_callback,
-                   is_first_run=is_first_run, prewarm=prewarm)
-    root.mainloop()
-
-    ctypes.windll.kernel32.CloseHandle(_mutex)
+    try:
+        logger.info("open_settings: creating Tk root")
+        root = tk.Tk()
+        logger.info("open_settings: Tk root created — building SettingsWindow")
+        SettingsWindow(root, on_save_callback=on_save_callback,
+                       is_first_run=is_first_run, prewarm=prewarm)
+        logger.info("open_settings: SettingsWindow built — entering mainloop")
+        root.mainloop()
+        logger.info("open_settings: mainloop returned")
+    except Exception:
+        logger.exception("open_settings: fatal exception")
+        raise
+    finally:
+        ctypes.windll.kernel32.CloseHandle(_mutex)
 
 
 # Also handle being run directly as a subprocess
@@ -190,10 +201,13 @@ if __name__ == "__main__":
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SettingsWindow:
-    # Tab labels whose builders call _gate(). When a background YubiKey
-    # dev-unlock completes after these tabs were already prewarmed, their
-    # lock panels need to be torn down and rebuilt.
-    _GATED_TAB_LABELS = frozenset({"CPU", "GPU", "RAM", "AI"})
+    # Tabs whose UI changes on auth-state flips.  CPU/GPU/RAM/AI render
+    # _gate() lock panels that disappear once a session exists; Account
+    # renders the "Not signed in" header which flips to "Signed in as …"
+    # and shows trial/license status.  All of these need to tear down and
+    # rebuild when a background YubiKey dev-unlock completes after the
+    # tabs were already prewarmed.
+    _GATED_TAB_LABELS = frozenset({"CPU", "GPU", "RAM", "AI", "Account"})
 
     # Process-lifetime driver cache.  The PowerShell Win32_PnPSignedDriver
     # query takes 3-5 s cold; caching across Settings opens makes the Drivers
@@ -265,11 +279,19 @@ class SettingsWindow:
         signals it, marshal back onto the Tk thread and reveal the window.
         Polling on the Tk thread would add up to 50 ms of latency per click;
         a blocking wait + after(0) is effectively zero latency.
+
+        Also waits on the parent process's handle in parallel.  If the parent
+        AlienCore.exe dies (crash, force-quit, manual kill) while the prewarm
+        is hidden, the prewarm would otherwise wait INFINITE for an event that
+        will never come — leaking a process that holds the AlienCore_Settings_v1
+        mutex and blocks every subsequent Settings open.  WaitForMultipleObjects
+        on (show_event, parent_handle) gives us a clean exit path.
         """
-        import ctypes, threading
+        import ctypes, os, threading
         EVENT_MODIFY_STATE = 0x0002
         SYNCHRONIZE        = 0x00100000
         WAIT_OBJECT_0      = 0x00000000
+        PROCESS_SYNCHRONIZE = 0x00100000
 
         # Tray creates the event before spawning us; OpenEventW finds it.
         # If somehow tray hasn't created it yet (shouldn't happen — Popen is
@@ -284,6 +306,12 @@ class SettingsWindow:
                                            ctypes.c_int, ctypes.c_wchar_p]
         kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         kernel32.WaitForSingleObject.restype  = ctypes.c_uint32
+        kernel32.WaitForMultipleObjects.argtypes = [ctypes.c_uint32,
+                                                    ctypes.POINTER(ctypes.c_void_p),
+                                                    ctypes.c_int, ctypes.c_uint32]
+        kernel32.WaitForMultipleObjects.restype  = ctypes.c_uint32
+        kernel32.OpenProcess.restype    = ctypes.c_void_p
+        kernel32.OpenProcess.argtypes   = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
         kernel32.CloseHandle.argtypes   = [ctypes.c_void_p]
         kernel32.CloseHandle.restype    = ctypes.c_int
         h = kernel32.OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, False,
@@ -299,6 +327,14 @@ class SettingsWindow:
             return
 
         self._show_event_handle = h
+
+        # Open a handle to the parent process so we can wait on it dying.
+        parent_pid = os.getppid()
+        parent_handle = kernel32.OpenProcess(PROCESS_SYNCHRONIZE, False, parent_pid)
+        if not parent_handle:
+            logger.warning("Settings prewarm: could not open parent process "
+                           "(pid=%d) — orphan-detection disabled.", parent_pid)
+
         revealed = {"done": False}
 
         def _on_signal():
@@ -307,16 +343,35 @@ class SettingsWindow:
             revealed["done"] = True
             self._reveal()
 
+        def _on_parent_died():
+            # Parent AlienCore.exe is gone; we'd be a phantom.  Tear down
+            # cleanly so the mutex is released and the next AlienCore launch
+            # can spawn a fresh prewarm without hitting AlienCore_Settings_v1.
+            logger.info("Settings prewarm: parent process exited — closing.")
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+
         def _wait():
-            # INFINITE wait — the thread is daemon, so it dies with the process
-            # if the user never clicks and the tray terminates us.
+            # If we have a parent handle, wait on (show_event, parent_handle).
+            # If show fires first, reveal.  If parent fires first, we're an
+            # orphan — quit.  Daemon thread dies with the process either way.
             INFINITE = 0xFFFFFFFF
-            rc = kernel32.WaitForSingleObject(h, INFINITE)
-            if rc == WAIT_OBJECT_0:
-                try:
-                    self.root.after(0, _on_signal)
-                except Exception:
-                    pass
+            if parent_handle:
+                handles = (ctypes.c_void_p * 2)(h, parent_handle)
+                rc = kernel32.WaitForMultipleObjects(2, handles, False, INFINITE)
+                if rc == WAIT_OBJECT_0:
+                    try: self.root.after(0, _on_signal)
+                    except Exception: pass
+                elif rc == WAIT_OBJECT_0 + 1:
+                    try: self.root.after(0, _on_parent_died)
+                    except Exception: pass
+            else:
+                rc = kernel32.WaitForSingleObject(h, INFINITE)
+                if rc == WAIT_OBJECT_0:
+                    try: self.root.after(0, _on_signal)
+                    except Exception: pass
 
         threading.Thread(target=_wait, name="SettingsShowEventWaiter",
                          daemon=True).start()
@@ -3410,12 +3465,20 @@ class SettingsWindow:
         import subprocess, sys as _sys, os as _os
         base_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 
+        # Frozen build: sys.executable IS AlienCore.exe; no aliencore.py on
+        # disk next to the bundle.  Source build: invoke python aliencore.py.
+        if getattr(_sys, "frozen", False):
+            argv = [_sys.executable, "--login"]
+            cwd  = _os.path.dirname(_os.path.abspath(_sys.executable))
+        else:
+            argv = [_sys.executable,
+                    _os.path.join(base_dir, "aliencore.py"), "--login"]
+            cwd  = base_dir
+
         def _work():
             try:
                 subprocess.run(
-                    [_sys.executable,
-                     _os.path.join(base_dir, "aliencore.py"), "--login"],
-                    cwd=base_dir,
+                    argv, cwd=cwd,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
             except Exception as e:

@@ -101,6 +101,18 @@ Name: "{autodesktop}\{#MyAppName}";    Filename: "{app}\{#MyAppExeName}"; Tasks:
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent
 
 
+[UninstallRun]
+; AlienCore registers an elevated logon task (AlienCoreElevatedStartup) the
+; first time the user enables "Start with Windows" so the app can come up
+; with admin rights without a UAC prompt at every login.  The Inno [Files]
+; section can't see it (it's a Task Scheduler entry, not a file), so the
+; default uninstall leaves the task pointing at a now-missing AlienCore.exe.
+; Wipe it on uninstall.  runhidden so no console window flashes;
+; skipifdoesntexist tolerates the case where the user never enabled
+; auto-start.
+Filename: "schtasks.exe"; Parameters: "/Delete /TN AlienCoreElevatedStartup /F"; Flags: runhidden skipifdoesntexist; RunOnceId: "DelElevatedTask"
+
+
 [UninstallDelete]
 ; User state (config.json, logs/, hardware_profile.json, update_state.json)
 ; lives in %LOCALAPPDATA%\AlienCore\, which uninstall does NOT touch — a

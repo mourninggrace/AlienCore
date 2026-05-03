@@ -59,8 +59,17 @@ def relaunch_as_admin(extra_args: list[str] | None = None) -> bool:
     if is_admin():
         return True   # already elevated
 
-    script = os.path.abspath(sys.argv[0])
-    params = [script] + (sys.argv[1:] if len(sys.argv) > 1 else [])
+    # In a frozen PyInstaller build, sys.executable IS the app exe and
+    # sys.argv[0] is the same path — passing argv[0] as a parameter would
+    # invoke "AlienCore.exe AlienCore.exe", which argparse rejects and a
+    # windowed (no-console) build then dies silently.  In source mode,
+    # sys.executable is python.exe and argv[0] is the script path, so the
+    # script path must be forwarded.
+    if getattr(sys, "frozen", False):
+        params = list(sys.argv[1:])
+    else:
+        script = os.path.abspath(sys.argv[0])
+        params = [script] + list(sys.argv[1:])
     if extra_args:
         params.extend(extra_args)
 

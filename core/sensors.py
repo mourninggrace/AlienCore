@@ -837,9 +837,14 @@ def _read_awcc_data() -> dict:
         # Always drain write commands — must be responsive for profile changes.
         awcc.drain_queue()
 
-        # Only query WMI sensors every _AWCC_STRIDE cycles.
+        # Query WMI sensors on cycle 0, then every _AWCC_STRIDE cycles
+        # afterwards.  Incrementing AFTER the check (instead of before) means
+        # the very first poll queries AWCC — otherwise the Service tab's
+        # awcc_available flag stays False for ~15 s after sensors start,
+        # and the prewarmed Settings UI gets built with stale data.
+        do_query    = (_awcc_cycle == 0)
         _awcc_cycle = (_awcc_cycle + 1) % _AWCC_STRIDE
-        if _awcc_cycle != 0:
+        if not do_query:
             return _awcc_cache   # return last known data between strides
 
         if not awcc.is_available():

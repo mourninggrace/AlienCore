@@ -9,6 +9,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Settings could not be opened from a freshly-launched AlienCore after a
+  prior run died unexpectedly.** When the parent AlienCore.exe crashed or
+  was force-quit, its hidden prewarmed Settings subprocess survived as an
+  orphan, blocked INFINITE on a "show" event that would never come from a
+  dead parent. The orphan held the `AlienCore_Settings_v1` mutex, so every
+  subsequent Settings spawn — from the next launch's tray prewarm or a
+  manual `--settings` invocation — collided with the orphan's mutex and
+  silently exited within ~1 second. Symptom: clicking the tray's Settings
+  entry visibly did nothing, no error in the log.
+
+  Fix in `gui/settings_gui.py::_start_show_event_watcher`: the prewarm now
+  records its parent PID via `os.getppid()` and waits on
+  `WaitForMultipleObjects(show_event, parent_handle)`. If the parent dies
+  first, the prewarm calls `root.destroy()` cleanly, releasing the mutex,
+  so the next AlienCore launch can spawn a fresh prewarm. `open_settings`
+  also gained explicit lifecycle logging (entered → mutex check → root
+  created → mainloop) so future silent-exit issues are diagnosable from
+  the log alone.
+
+- **Sign In button did nothing on installed builds.** The Sign In handler
+  in the Settings Account tab (and per-feature lock cards) spawned the
+  login dialog as `subprocess.Popen([sys.executable, aliencore.py, "--login"])`
+  — but in a frozen build, `sys.executable` is `AlienCore.exe` and there's
+  no `aliencore.py` next to it, so argparse rejected the unknown positional
+  arg and the windowed (no-console) process died silently. Fix in
+  `gui/settings_gui.py::_open_login` and `gui/tray.py::_open_ai_chat`:
+  branch on `sys.frozen` and pass `[sys.executable, "--login"]` directly
+  in frozen mode, mirroring the tray's existing `_settings_argv` logic.
+
+- **`relaunch_as_admin()` was broken in frozen builds.** Same root cause:
+  it forwarded `sys.argv[0]` as a parameter, which on a frozen build
+  duplicates the exe path (`AlienCore.exe AlienCore.exe`). The elevated
+  copy died silently on argparse, leaving the user with a UAC prompt that
+  produced "nothing." `core/elevation.py::relaunch_as_admin` now branches
+  on `sys.frozen` and forwards only `sys.argv[1:]` for frozen builds.
+
+- **AWCC live status in the Service tab incorrectly showed "Installed
+  (WMI offline)" for the first ~15 seconds after Settings opened.**
+  `core/sensors.py::_read_awcc_data` incremented its throttle counter
+  *before* the cycle check, so the first AWCC query didn't run until poll
+  #5 (~15 s after `sensors.start()`). The Settings prewarm built the
+  Service tab well before that, capturing the stale `awcc_available=False`
+  default. Now queries on poll #1 and every 5 cycles thereafter.
+
+- **Account tab in Settings did not refresh after a successful Sign In or
+  background YubiKey dev-unlock.** `_GATED_TAB_LABELS` only listed
+  `{CPU, GPU, RAM, AI}`, so `_rebuild_gated_tabs` skipped the Account
+  panel. Added "Account" to the set so the "Not signed in" header,
+  license badge, and action buttons all flip to the post-sign-in state
+  the moment auth flips.
+
 - **Installed builds crashed on first launch with `PermissionError [Errno 13]`
   trying to write `config.json` inside `C:\Program Files\AlienCore\`.** The
   frozen build resolved every writable path (config, logs, hardware cache,
@@ -65,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   in via the env var.
 
 ### Changed
+
+- **Inno Setup uninstaller now removes the `AlienCoreElevatedStartup`
+  scheduled task** via a new `[UninstallRun]` entry in
+  `installer/aliencore.iss`. Previously the task survived uninstall and
+  pointed at a deleted `C:\Program Files\AlienCore\AlienCore.exe`,
+  failing silently on every logon and cluttering Task Scheduler.
 
 - Inno Setup `[UninstallDelete]` comment in `installer/aliencore.iss`
   updated to reflect that user state lives in `%LOCALAPPDATA%\AlienCore\`
