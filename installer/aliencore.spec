@@ -17,10 +17,16 @@ DESIGN NOTES
 ============
 - onedir (not onefile): faster cold-start, easier to inspect on disk.
 - console=False: GUI app, no terminal window.
-- uac_admin=False: AlienCore's Python startup logic does its own UAC
-  relaunch via core/elevation.relaunch_as_admin(); the installer's
-  Debug shortcut passes --no-elevate to skip that.  uac_admin=True at
-  the manifest level would prevent --no-elevate from working at all.
+- uac_admin=True: Windows enforces admin at process creation via the
+  embedded manifest.  Without admin, LHM can't load WinRing0.sys (CPU
+  MSR temps), SMBus DIMM reads fail, and AWCC WMI returns access-denied
+  — sensors silently die.  Earlier builds used uac_admin=False and let
+  Python code (core/elevation.relaunch_as_admin) handle the UAC dance,
+  but that path treated a "No" click on UAC as a soft warning and kept
+  running with broken sensors.  Manifest-level enforcement makes "No"
+  exit the process cleanly instead.  --no-elevate is now a no-op for
+  frozen builds (the process is already admin by the time argparse
+  runs); source-mode unchanged.
 - upx=False: UPX-packed binaries are a frequent AV false-positive
   vector; given AlienCore reads MSRs and queries WMI the AV/EDR
   surface is already touchy enough.
@@ -106,7 +112,7 @@ exe = EXE(
     entitlements_file=None,
     icon=os.path.join(PROJECT_ROOT, "assets", "icon.ico"),
     version=os.path.join(PROJECT_ROOT, "installer", "version_info.txt"),
-    uac_admin=False,
+    uac_admin=True,
     uac_uiaccess=False,
 )
 

@@ -85,9 +85,6 @@ Source: "{#ProjectRoot}README.md";     DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 ; Start Menu — main entry
 Name: "{group}\{#MyAppName}";          Filename: "{app}\{#MyAppExeName}"
-; Start Menu — debug shortcut (skips auto-elevation, useful when sensors
-; are misbehaving and the user wants to inspect the live log without UAC)
-Name: "{group}\{#MyAppName} (Debug)";  Filename: "{app}\{#MyAppExeName}"; Parameters: "--no-elevate"; Comment: "Run without auto-elevation (live log mode)"
 ; Uninstall entry in the Start Menu group
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 ; Optional desktop shortcut, controlled by the Tasks checkbox
@@ -98,7 +95,13 @@ Name: "{autodesktop}\{#MyAppName}";    Filename: "{app}\{#MyAppExeName}"; Tasks:
 ; Final-page checkbox: launch AlienCore now (default checked).  postinstall
 ; means "show as a checkbox at the end of the wizard"; nowait so the
 ; installer process exits immediately after spawning AlienCore.exe.
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent
+;
+; runascurrentuser keeps Inno's elevated token for the spawned process —
+; AlienCore.exe carries requireAdministrator in its manifest, and without
+; this flag CreateProcess fails with code 740 ("requires elevation") because
+; Inno's [Run] step otherwise drops back to the original user's
+; non-elevated identity.
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName} now"; Flags: nowait postinstall skipifsilent runascurrentuser
 
 
 [UninstallRun]

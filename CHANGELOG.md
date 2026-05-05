@@ -9,6 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **AlienCore crashed silently after the first PIN sign-in on a fresh
+  install.** Symptom: install → launch → enter email → enter PIN →
+  "Signed in!" → window vanishes, no traceback in the log, no error
+  dialog. Re-launching from the desktop shortcut worked because the
+  cached `session.json` skipped the login flow entirely.
+
+  Root cause: the first-launch sign-in path in `aliencore.py::_show_login`
+  imported `gui.login_dialog` and called `tk.Tk().mainloop()` directly in
+  the main process, then destroyed that root after the user signed in.
+  The subsequent `tk.Tk()` roots that `gui/bar.py` (daemon thread) and
+  `gui/tray.py` (main thread) build for the sensor bar and tray menu
+  then crashed inside the Tcl/Tk C runtime — recreating a Tk root in a
+  process that had already destroyed one is undefined on Windows and
+  produces no Python traceback. The Settings → Sign In path was already
+  fixed in session 40 by spawning `AlienCore.exe --login` as a
+  subprocess; the first-launch path was missed.
+
+  Fix in `aliencore.py::_show_login`: spawn the login dialog as a
+  `--login` subprocess (same pattern as `settings_gui._open_login`
+  and `tray._open_ai_chat`). After the subprocess exits, reload
+  `session.json` from disk so the parent picks up the new session.
+  Also re-runs `try_dev_unlock()` in case the user plugged a dev
+  YubiKey in during the dialog (in-memory dev sessions don't carry
+  across processes).
+
+- **Inno Setup post-install Launch failed with "CreateProcess failed;
+  code 740. The requested operation requires elevation."** After
+  flipping the manifest to `requireAdministrator`, the installer's
+  `[Run]` step couldn't spawn `AlienCore.exe` because Inno's `[Run]`
+  drops back to the original (non-elevated) user identity by default,
+  even when the installer itself is admin. Fix in
+  `installer/aliencore.iss`: add `runascurrentuser` to the `[Run]`
+  flag list so the spawn keeps Inno's elevated token.
+
+- **AlienCore.exe could fall through to non-admin operation if the user
+  declined UAC.** `aliencore.spec` shipped with `uac_admin=False`,
+  delegating elevation to `core/elevation.relaunch_as_admin()`. If the
+  user clicked "No" on the UAC prompt, the app continued running as a
+  standard user — sensors that need kernel access (CPU MSR temps,
+  SMBus DIMM temps, AWCC WMI) silently returned `---`, leaving the
+  app visibly "running" but functionally broken. `aliencore.spec` is
+  now `uac_admin=True`, so Windows enforces admin at process creation
+  and "No" on UAC means the process does not start at all. The
+  `(Debug)` Start Menu shortcut was removed from `installer/aliencore.iss`
+  since `--no-elevate` is now a no-op in frozen builds.
+
+- **AWCC Service tab status froze on "Installed (WMI offline)" even
+  after the WMI connection completed.** Although session 40's fix made
+  AWCC query on the first sensor poll, the Settings prewarm builds the
+  Service tab ~400 ms after open while the first AWCC poll lands ~3 s
+  in — the label captured the stale `False` default and never
+  re-evaluated. Fix in `gui/settings_gui.py::_hw_panel`: the AWCC
+  label widget reference is now retained, and a 1-second poll (max 60
+  attempts) updates it to "WMI connected" the moment `awcc_available`
+  flips True, then stops polling.
+
 - **Settings could not be opened from a freshly-launched AlienCore after a
   prior run died unexpectedly.** When the parent AlienCore.exe crashed or
   was force-quit, its hidden prewarmed Settings subprocess survived as an

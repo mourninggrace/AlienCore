@@ -4639,8 +4639,10 @@ class SettingsWindow:
             r = tk.Frame(panel, bg=BG_HW); r.pack(anchor="w", pady=1)
             tk.Label(r, text=f"{lbl}:", font=("Segoe UI",8),
                      bg=BG_HW, fg=FG_DIM, width=20, anchor="w").pack(side="left")
-            tk.Label(r, text=str(val), font=("Segoe UI",8,"bold"),
-                     bg=BG_HW, fg=color, anchor="w").pack(side="left")
+            val_lbl = tk.Label(r, text=str(val), font=("Segoe UI",8,"bold"),
+                               bg=BG_HW, fg=color, anchor="w")
+            val_lbl.pack(side="left")
+            return val_lbl
 
         if hw_type == "cpu":
             cpu = hw.get("cpu", {})
@@ -4719,9 +4721,30 @@ class SettingsWindow:
             awcc_status = ("WMI connected"        if _awcc_live
                            else "Installed (WMI offline)" if plat.get("has_awcc")
                            else "Not found")
-            item("AWCC", awcc_status,
-                 color=ACCENT2 if _awcc_live else
-                       WARN    if plat.get("has_awcc") else FG_DIM)
+            awcc_lbl = item("AWCC", awcc_status,
+                            color=ACCENT2 if _awcc_live else
+                                  WARN    if plat.get("has_awcc") else FG_DIM)
+            # AWCC WMI connection lands ~3 s after the SensorThread starts,
+            # which is well after the Service tab is built (the prewarm runs
+            # at ~400 ms).  Without this poller the label is permanently
+            # stuck on "Installed (WMI offline)" even though sensors and tray
+            # are happily reading AWCC data.  Stop polling once the live
+            # status flips to True — no need to keep the timer alive forever.
+            if not _awcc_live and plat.get("has_awcc"):
+                def _refresh_awcc(remaining=60):
+                    try:
+                        if not awcc_lbl.winfo_exists():
+                            return
+                        from core import sensors as _sens2
+                        live = bool(_sens2.get_readings().get("awcc_available", False))
+                        if live:
+                            awcc_lbl.config(text="WMI connected", fg=ACCENT2)
+                            return
+                        if remaining > 0:
+                            self.root.after(1000, lambda: _refresh_awcc(remaining - 1))
+                    except Exception:
+                        pass
+                self.root.after(1000, _refresh_awcc)
             item("nvidia-smi",  "Available" if plat.get("has_nvidia_smi") else "Not found",
                  color=ACCENT2 if plat.get("has_nvidia_smi") else WARN)
             os_info = hw.get("os", {})

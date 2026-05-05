@@ -285,8 +285,36 @@ def _run(firstrun: bool = False):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _show_login():
-    from gui.login_dialog import show as show_login
-    show_login()
+    """Spawn the login dialog as a separate subprocess.
+
+    Running the dialog in-process creates a tk.Tk() root in the main
+    AlienCore process and destroys it after sign-in. Once that happens,
+    the subsequent tk.Tk() roots that gui/bar.py (daemon thread) and
+    gui/tray.py (main thread) build for the sensor bar and tray menu
+    have undefined behaviour — on Windows the process dies inside the
+    Tcl/Tk C runtime with no Python traceback. Subprocess isolation
+    keeps the dialog's Tk root in its own process so the main one
+    never has to recreate Tk after a destroy. Same pattern as
+    settings_gui._open_login() and tray._open_ai_chat().
+    """
+    import subprocess
+    if getattr(sys, "frozen", False):
+        argv = [sys.executable, "--login"]
+        cwd  = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        argv = [sys.executable, os.path.join(BASE_DIR, "aliencore.py"), "--login"]
+        cwd  = BASE_DIR
+    try:
+        subprocess.run(argv, cwd=cwd, creationflags=subprocess.CREATE_NO_WINDOW)
+    except Exception as e:
+        logging.getLogger("aliencore").warning("Login subprocess error: %s", e)
+    from core import auth as _auth
+    _auth.load_session()
+    # YubiKey dev-unlock is in-memory only and lives in whichever process
+    # detected it. If the user plugged the key in during the login dialog,
+    # the subprocess saw it but this process didn't — re-detect here.
+    if not _auth.is_logged_in():
+        _auth.try_dev_unlock()
 
 
 def _show_first_run_gui():
