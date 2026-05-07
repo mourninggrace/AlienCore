@@ -132,6 +132,24 @@ def main():
         show_login()
         return
 
+    # ── Paywall dialog only (subprocess) ──────────────────────────────────────
+    # Hard-lock shown when the trial has expired and no base license is owned.
+    # Subprocessed for the same Tk-isolation reason as login: the paywall's
+    # tk.Tk() must not share a process with the bar/tray Tk roots that may
+    # follow if the user purchases successfully.
+    if args.paywall:
+        cfg.load()
+        from core import auth as _auth
+        _auth.load_session()
+        # If the gate condition no longer holds (license arrived between the
+        # parent's check and now, or the user pulled their YubiKey), exit
+        # immediately so the parent re-evaluates and continues.
+        if not _auth.needs_paywall():
+            return
+        from gui.paywall_dialog import show as show_paywall
+        show_paywall()
+        return
+
     # ── AI chat only (subprocess) ────────────────────────────────────────────
     # Running the chat as its own process keeps it out of the main Tk
     # interpreter.  When the chat lived on a background thread with a second
@@ -193,6 +211,43 @@ def _run(firstrun: bool = False):
                 # User closed the window without signing in — exit gracefully
                 logging.getLogger("aliencore").info("No session — exiting.")
                 return
+
+    # 0a. Trial-expiry hard lock.  The login flow above might have just
+    # returned a session whose trial is already past 30 days (returning user
+    # who never bought); in that case we run a synchronous license refresh so
+    # we have the latest server-side license bits before deciding whether to
+    # paywall — otherwise a user who DID purchase but launches with stale
+    # cached state would see the paywall briefly before the background
+    # refresh corrects it.
+    if _auth.needs_paywall():
+        try:
+            _auth.refresh_license()
+        except Exception as e:
+            logging.getLogger("aliencore").debug(
+                "Pre-paywall refresh failed: %s", e)
+    # Loop the paywall: each pass shows the dialog, then re-checks. The user
+    # can sign out from inside the paywall, which routes us back through the
+    # login dialog → trial check → potentially paywall again. Capped at a
+    # small number of iterations to defend against pathological auth state.
+    for _ in range(3):
+        if not _auth.needs_paywall():
+            break
+        _show_paywall()
+        if _auth.is_licensed():
+            break   # purchased (or YubiKey dev unlock) — continue startup
+        if not _auth.is_logged_in():
+            # Sign Out from inside the paywall — fall back to login flow
+            _show_login()
+            if not _auth.is_logged_in():
+                logging.getLogger("aliencore").info(
+                    "No session after paywall sign-out — exiting.")
+                return
+            continue
+        # Still paywalled (user clicked Quit, or closed the window) — exit
+        logging.getLogger("aliencore").info(
+            "Trial expired and no license purchased — exiting.")
+        return
+
     # Refresh license from server in the background (non-blocking)
     _auth.refresh_session_async()
 
@@ -315,6 +370,36 @@ def _show_login():
     # the subprocess saw it but this process didn't — re-detect here.
     if not _auth.is_logged_in():
         _auth.try_dev_unlock()
+
+
+def _show_paywall():
+    """Spawn the trial-expired paywall as a separate subprocess.
+
+    Same Tk-isolation rationale as _show_login: a tk.Tk() created and
+    destroyed in the main process before later spawning gui/bar.py and
+    gui/tray.py crashes the Tcl C runtime on Windows. Subprocessing keeps
+    the paywall's Tk root in its own process so the parent's first Tk
+    root is the one the bar/tray build."""
+    import subprocess
+    if getattr(sys, "frozen", False):
+        argv = [sys.executable, "--paywall"]
+        cwd  = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        argv = [sys.executable, os.path.join(BASE_DIR, "aliencore.py"),
+                "--paywall"]
+        cwd  = BASE_DIR
+    try:
+        subprocess.run(argv, cwd=cwd, creationflags=subprocess.CREATE_NO_WINDOW)
+    except Exception as e:
+        logging.getLogger("aliencore").warning(
+            "Paywall subprocess error: %s", e)
+    # Reload session — purchase and sign-out write through to disk via the
+    # subprocess; the parent must re-read to see them.  YubiKey dev-unlock is
+    # in-memory only (not persisted), so re-detect here unconditionally so
+    # the parent's _session ends up holding the dev override too.
+    from core import auth as _auth
+    _auth.load_session()
+    _auth.try_dev_unlock()
 
 
 def _show_first_run_gui():
@@ -480,6 +565,7 @@ def _parse_args():
     p.add_argument("--prewarm",   action="store_true",
                    help="Build settings window hidden; deiconify when tray signals show event")
     p.add_argument("--login",     action="store_true", help="Open login dialog only (subprocess)")
+    p.add_argument("--paywall",   action="store_true", help="Open trial-expired paywall only (subprocess)")
     p.add_argument("--ai-chat",   action="store_true", help="Open AI chat window only (subprocess)")
     p.add_argument("--dryrun",    action="store_true", help="Show tweaks without applying")
     p.add_argument("--restore",   action="store_true", help="Restore system defaults")
@@ -495,7 +581,8 @@ def _should_auto_elevate(args) -> bool:
     """
     if getattr(args, "no_elevate", False):
         return False
-    if args.settings or args.login or args.ai_chat or args.dryrun or args.restore:
+    if (args.settings or args.login or args.paywall or args.ai_chat
+            or args.dryrun or args.restore):
         return False
     return True
 

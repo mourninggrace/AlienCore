@@ -16,13 +16,26 @@ import time
 import urllib.error
 import urllib.request
 
+from core.constants import USER_DATA_DIR
+
 logger = logging.getLogger("aliencore.auth")
 
-# Session file location: %APPDATA%\AlienCore\session.json
-_SESSION_DIR  = os.path.join(
-    os.environ.get("APPDATA", os.path.expanduser("~")), "AlienCore"
-)
+# Session file lives alongside the rest of writable user state in
+# USER_DATA_DIR (%LOCALAPPDATA%\AlienCore\ in installer builds, project root
+# in source builds).  Keeping it here means an uninstall + Local-AppData wipe
+# actually severs the cached session — earlier builds put session.json under
+# %APPDATA%\AlienCore\ (Roaming), which survived a Local wipe and silently
+# auto-signed users back in after a "clean" reinstall.
+_SESSION_DIR  = USER_DATA_DIR
 _SESSION_PATH = os.path.join(_SESSION_DIR, "session.json")
+
+# Legacy location (%APPDATA%\AlienCore\session.json) — read once at startup
+# so users upgrading from <= 1.0.0 don't get forced to sign in again.  The
+# legacy file is moved into the new location on first load_session() call.
+_LEGACY_SESSION_PATH = os.path.join(
+    os.environ.get("APPDATA", os.path.expanduser("~")),
+    "AlienCore", "session.json",
+)
 
 # Grace period: if server is unreachable, allow this many seconds of offline use
 _OFFLINE_GRACE_SECS = 72 * 3600   # 72 hours
@@ -50,9 +63,30 @@ def _session_sig_valid(data: dict, sig: str) -> bool:
         return False
 
 
+def _migrate_legacy_session_if_needed():
+    """One-time move of session.json from the old Roaming AppData location
+    into USER_DATA_DIR.  Done in-place (os.replace) so the file ends up
+    exactly where the new code expects it; the HMAC remains valid because
+    it's keyed on the hardware fingerprint, not the path.  Silently no-op
+    if the new file already exists or the legacy one doesn't."""
+    if _SESSION_PATH == _LEGACY_SESSION_PATH:
+        return  # source build — both paths resolve to the same file
+    if os.path.exists(_SESSION_PATH):
+        return  # already migrated (or fresh install on the new path)
+    if not os.path.exists(_LEGACY_SESSION_PATH):
+        return
+    try:
+        os.makedirs(_SESSION_DIR, exist_ok=True)
+        os.replace(_LEGACY_SESSION_PATH, _SESSION_PATH)
+        logger.info("Migrated session.json from legacy %APPDATA% location.")
+    except Exception as e:
+        logger.debug("Legacy session migration failed: %s", e)
+
+
 def load_session():
     """Load any saved session from disk into memory. Call once at startup."""
     global _session
+    _migrate_legacy_session_if_needed()
     try:
         if os.path.exists(_SESSION_PATH):
             with open(_SESSION_PATH, "r", encoding="utf-8") as f:
@@ -168,6 +202,30 @@ def trial_days_left() -> int:
 def is_pro() -> bool:
     """True if the user has the Pro add-on (+$4.99)."""
     return is_licensed() and bool(get_session().get("has_pro"))
+
+
+def needs_paywall() -> bool:
+    """
+    True when the user is signed in but their 30-day trial has ended and they
+    haven't purchased a base license.  This is the hard-lock condition: every
+    other launch path either has a paid license, an active trial, or no
+    session (in which case the login dialog runs first).
+
+    Distinct from `not is_on_trial()` because users who never started a trial
+    (e.g. fresh sign-in mid-session-rejection) should fall through to the
+    normal flow, not be paywalled.  The gate fires only when the server
+    confirmed at some point that this account had a trial and the trial has
+    since elapsed.
+    """
+    if not is_logged_in():
+        return False
+    if is_licensed():
+        return False
+    s = get_session()
+    started = s.get("trial_started_at")
+    if not started:
+        return False
+    return (time.time() - started) >= (_TRIAL_DAYS * 86400)
 
 
 def get_email() -> str:

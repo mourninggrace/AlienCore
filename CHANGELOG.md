@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Hard-lock paywall on trial expiry.** Previously the trial-expired
+  state was a soft-lock — basic monitoring, the sensor bar, and the
+  baseline + profile tweaks kept running indefinitely; only ~14 advanced
+  Settings panels (CPU TVB optimizer, GPU dynamic boost, RAM working-set
+  trimmer, etc.) and the AI tab gated behind `_gate()` actually showed
+  "trial expired" lock cards. A user who never paid could keep using
+  AlienCore's core feature set forever.
+
+  Now: whenever a user is signed in but their 30-day trial has elapsed
+  and they haven't purchased a base license, AlienCore refuses to run.
+  Launch shows a dedicated paywall window (`gui/paywall_dialog.py`) that
+  replaces the normal startup entirely. The window offers:
+  - Purchase the AlienCore base license ($19.99) → opens PayPal in the
+    browser, polls `/auth/check` every 3 s for activation (3-minute
+    timeout), then closes and lets startup continue once the IPN lands.
+  - Pro $4.99 add-on shown but locked (Pro requires base ownership;
+    cannot be reached from this dialog by definition).
+  - Sign Out → clears the session and routes back through the login
+    dialog so the user can authenticate with a different email that
+    already owns a license.
+  - Quit / window close → exits AlienCore. The paywall reappears on the
+    next launch until purchase or sign-out resolves it.
+
+  New `auth.needs_paywall()` is the single-source-of-truth gate
+  condition: `is_logged_in() AND not is_on_trial() AND not is_licensed()
+  AND trial_started_at is set`. The paywall is subprocessed via
+  `aliencore.py --paywall` for the same Tk-isolation reason as the login
+  dialog (a tk.Tk() destroyed in the main process before later spawning
+  the bar/tray Tk roots crashes the Tcl C runtime on Windows).
+
+  Dev YubiKey passthrough still works — a serial-allowlisted YubiKey
+  detected by the paywall's poll thread activates the in-memory dev
+  session and unlocks startup without payment, identical to how it
+  works in the login dialog.
+
+### Security
+
+- **Reinstalling AlienCore could silently re-sign-in the previous user.**
+  Symptom: uninstall AlienCore, delete `%LOCALAPPDATA%\AlienCore\`,
+  reinstall, launch — the Account tab showed the same email signed in
+  with the same trial countdown, no PIN prompt. Anyone with physical
+  access to the machine could effectively impersonate the prior user
+  by reinstalling.
+
+  Root cause: `core/auth.py` stored `session.json` under
+  `%APPDATA%\AlienCore\` (Roaming) while every other piece of writable
+  user state — config, logs, hardware cache, update state — lived under
+  `%LOCALAPPDATA%\AlienCore\` (Local). Wiping the Local folder did
+  nothing to the Roaming session file, so `load_session()` read the
+  stale token after reinstall and skipped the login dialog entirely.
+  The fingerprint-bound trial countdown ride-along was a separate
+  symptom of the same orphaned file (it caches `trial_started_at`).
+
+  Fix in `core/auth.py`: `_SESSION_DIR` now points at `USER_DATA_DIR`
+  so `session.json` lives next to `config.json` and friends. Wiping
+  `%LOCALAPPDATA%\AlienCore\` now actually clears the cached session.
+  A one-time `_migrate_legacy_session_if_needed()` runs at startup to
+  move any pre-existing `session.json` from the old Roaming path into
+  the new location, so users upgrading from earlier 1.0.x builds stay
+  signed in across the upgrade.
+
+  Trial-reset abuse remains blocked: trial start is still anchored to
+  the hardware fingerprint server-side (`backend/server.py`), so a
+  reinstall + sign-in correctly resumes the same trial clock from the
+  server even though the local session is now wiped.
+
 ### Fixed
 
 - **AlienCore crashed silently after the first PIN sign-in on a fresh
@@ -736,7 +804,7 @@ Initial public release.
 ### Security
 
 - All auth traffic flows over HTTPS to `aliencoreapp.duckdns.org`.
-- Session tokens are stored locally under `%APPDATA%\AlienCore\session.json`
+- Session tokens are stored locally under `%LOCALAPPDATA%\AlienCore\session.json`
   with atomic replace writes; a 72-hour offline grace period lets licensed
   users work without network access.
 - Dev YubiKey serials are burned into the key's chip by Yubico and cannot
