@@ -544,6 +544,62 @@ def describe(name: str) -> dict:
     }
 
 
+def _matches_type(value, expected: str) -> bool:
+    if expected == "string":  return isinstance(value, str)
+    if expected == "integer": return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":  return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected == "boolean": return isinstance(value, bool)
+    if expected == "array":   return isinstance(value, list)
+    if expected == "object":  return isinstance(value, dict)
+    if expected == "null":    return value is None
+    return True   # unknown declared type — fall through
+
+
+def _validate_args(args: dict, schema: dict) -> str | None:
+    """Validate `args` against an Anthropic-style JSON input_schema.
+
+    Returns None on success, a short error string on failure.  Covers the
+    subset Anthropic tool schemas actually use: object with properties,
+    required, type / enum / minimum / maximum constraints, and
+    additionalProperties.  Deliberately not using `jsonschema` so the
+    frozen build doesn't grow a new dependency for what's effectively
+    defense-in-depth at v1.0.0 (every current tool's handler also
+    validates its own args via Python type coercion).
+    """
+    if not isinstance(args, dict):
+        return f"args must be an object, got {type(args).__name__}"
+
+    props      = schema.get("properties", {})
+    required   = schema.get("required", [])
+    additional = schema.get("additionalProperties", True)
+
+    for field in required:
+        if field not in args:
+            return f"missing required field '{field}'"
+
+    for field, value in args.items():
+        if field not in props:
+            if additional is False:
+                return f"unknown field '{field}'"
+            continue
+        field_schema  = props[field]
+        expected_type = field_schema.get("type")
+        if expected_type and not _matches_type(value, expected_type):
+            return (f"field '{field}' must be {expected_type}, "
+                    f"got {type(value).__name__}")
+        enum = field_schema.get("enum")
+        if enum is not None and value not in enum:
+            return f"field '{field}' must be one of {enum}, got {value!r}"
+        if expected_type in ("integer", "number"):
+            mn = field_schema.get("minimum")
+            mx = field_schema.get("maximum")
+            if mn is not None and value < mn:
+                return f"field '{field}' must be >= {mn}, got {value}"
+            if mx is not None and value > mx:
+                return f"field '{field}' must be <= {mx}, got {value}"
+    return None
+
+
 def execute(name: str, args: dict,
             confirm_fn: Callable | None = None) -> dict:
     """Execute a tool by name.
@@ -552,12 +608,25 @@ def execute(name: str, args: dict,
     RISK_SOFT or above. If it returns False, the tool is declined and the
     returned dict has declined=True so the caller can tell the model.
 
+    Args are validated against the tool's input_schema before dispatch —
+    a schema violation never reaches the handler, so handlers can trust
+    arg shape without re-validating.  Tools execute as Administrator;
+    keeping a contract layer at the dispatch boundary means a future
+    tool added without per-handler validation is still safe.
+
     Returns: {ok, message, data, declined}.
     """
     spec = TOOLS.get(name)
     if spec is None:
         return {"ok": False, "declined": False,
                 "message": f"Unknown tool '{name}'.", "data": None}
+
+    schema = spec.get("input_schema") or {}
+    err = _validate_args(args or {}, schema)
+    if err:
+        logger.warning("Tool %s rejected on schema: %s (args=%s)", name, err, args)
+        return {"ok": False, "declined": False,
+                "message": f"Invalid arguments: {err}", "data": None}
 
     if spec["risk"] >= RISK_SOFT and confirm_fn is not None:
         try:

@@ -733,10 +733,12 @@ class SettingsWindow:
                      fmt=lambda v: f"{int(v)}°C")
         self._opt(t, "cpu.full_power_in_gaming",    "Full power during gaming",    "Removes ceiling when game detected")
         self._opt(t, "cpu.full_power_in_streaming", "Full power during streaming", "Removes ceiling when OBS/XSplit detected")
-        self._gate(t, "cpu_tvb_optimizer",    self._cpu_tvb_panel)
-        self._gate(t, "cpu_boost_score",      self._cpu_boost_score_panel)
-        self._gate(t, "cpu_topology",         self._cpu_core_role_panel)
-        self._gate(t, "cpu_interrupt_steering", self._cpu_interrupt_steering_panel)
+        self._gate_group(t, [
+            ("cpu_tvb_optimizer",      self._cpu_tvb_panel),
+            ("cpu_boost_score",        self._cpu_boost_score_panel),
+            ("cpu_topology",           self._cpu_core_role_panel),
+            ("cpu_interrupt_steering", self._cpu_interrupt_steering_panel),
+        ])
 
     def _tab_gpu(self):
         t = self._make_tab("GPU")
@@ -753,11 +755,13 @@ class SettingsWindow:
             self._note(t, "Spins fans to 100% for rapid cooling via AWCC. Auto-disables when timer OR temps cool — whichever first.")
             self._slider(t, "turbo_cool.auto_off_minutes", "Auto-disable after (minutes)", 1, 60, 1, fmt=lambda v: f"{int(v)} min")
             self._opt(t, "turbo_cool.auto_off_on_cool", "Also disable when temps drop below warning thresholds", "")
-        self._gate(t, "gpu_dynamic_boost",    self._gpu_dynamic_boost_panel)
-        self._gate(t, "gpu_vram_clock_lock",  self._gpu_vram_clock_panel)
-        self._gate(t, "gpu_driver_features",  self._gpu_driver_features_panel)
-        self._gate(t, "gpu_throttle_log",     self._gpu_throttle_log_panel)
-        self._gate(t, "gpu_efficiency_curve", self._gpu_efficiency_panel)
+        self._gate_group(t, [
+            ("gpu_dynamic_boost",    self._gpu_dynamic_boost_panel),
+            ("gpu_vram_clock_lock",  self._gpu_vram_clock_panel),
+            ("gpu_driver_features",  self._gpu_driver_features_panel),
+            ("gpu_throttle_log",     self._gpu_throttle_log_panel),
+            ("gpu_efficiency_curve", self._gpu_efficiency_panel),
+        ])
 
     def _tab_ram(self):
         t = self._make_tab("RAM")
@@ -769,12 +773,14 @@ class SettingsWindow:
         self._slider(t, "ram.pagefile_custom_mb", "Custom pagefile (MB)", 0, 32768, 512,
                      fmt=lambda v: "Windows managed" if int(v)==0 else f"{int(v)} MB")
         self._opt(t, "ram.clear_standby_cache_on_idle","Clear standby cache at idle",  "Frees unused RAM")
-        self._gate(t, "ram_composition",       self._ram_composition_panel)
-        self._gate(t, "ram_unified_pressure",  self._ram_unified_pressure_panel)
-        self._gate(t, "ram_working_set_trimmer", self._ram_working_set_panel)
-        self._gate(t, "ram_leak_watchdog",     self._ram_leak_watchdog_panel)
-        self._gate(t, "ram_dimm_protection",   self._ram_dimm_protection_panel)
-        self._gate(t, "ram_pagefile_advisor",  self._ram_pagefile_advisor_panel)
+        self._gate_group(t, [
+            ("ram_composition",         self._ram_composition_panel),
+            ("ram_unified_pressure",    self._ram_unified_pressure_panel),
+            ("ram_working_set_trimmer", self._ram_working_set_panel),
+            ("ram_leak_watchdog",       self._ram_leak_watchdog_panel),
+            ("ram_dimm_protection",     self._ram_dimm_protection_panel),
+            ("ram_pagefile_advisor",    self._ram_pagefile_advisor_panel),
+        ])
 
     # ─────────────────────────────────────────────────────────────────────────
     # CPU advanced panels
@@ -3387,10 +3393,47 @@ class SettingsWindow:
         if ok:
             builder_fn(parent)
             return
+        self._render_lock_card(parent, feature, reason)
 
+    def _gate_group(self, parent, items):
+        """Render multiple gated panels as a unit.
+
+        items: list of (feature: str, builder_fn) tuples.
+
+        If every feature passes lic.check, calls each builder_fn in order.
+        If ANY is locked, renders ONE shared lock card and skips all panels.
+        Eliminates the stacked-gate visual on tabs (CPU / GPU / RAM) where
+        several features gate together behind the same Base license trigger.
+
+        Reason text comes from the first locked feature; the trial-expired
+        message is identical across all BASE features anyway, and feature-
+        specific messages would only matter when one is unlocked while
+        another is locked, which doesn't happen with the current license
+        tiers (a tab's gated features all unlock together with the Base
+        license)."""
+        from core import license as lic
+        unlocked_builders = []
+        first_locked = None
+        for feature, builder in items:
+            ok, reason = lic.check(feature)
+            if ok:
+                unlocked_builders.append(builder)
+            elif first_locked is None:
+                first_locked = (feature, reason)
+        if first_locked is None:
+            for b in unlocked_builders:
+                b(parent)
+            return
+        feature, reason = first_locked
+        self._render_lock_card(parent, feature, reason)
+
+    def _render_lock_card(self, parent, feature: str, reason: str):
+        """Pack a 'locked' notice into parent — used by _gate (one card per
+        gated feature) and _gate_group (one shared card for a group of
+        features that all gate together)."""
         import webbrowser, urllib.parse
         from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL, PAYPAL_CHECKOUT_URL
-        from core import auth
+        from core import auth, license as lic
 
         is_pro_feature = feature in lic.PRO_FEATURES
 

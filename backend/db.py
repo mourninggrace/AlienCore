@@ -44,8 +44,21 @@ def init_db():
                 fingerprint TEXT DEFAULT NULL
             );
 
-            -- Per-IP request log for abuse rate limiting
+            -- Per-IP request log for abuse rate limiting on /auth/send-pin
             CREATE TABLE IF NOT EXISTS pin_requests_by_ip (
+                ip       TEXT NOT NULL,
+                day      TEXT NOT NULL,   -- YYYY-MM-DD UTC
+                count    INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (ip, day)
+            );
+
+            -- Per-IP failed-verify counter for /auth/verify-pin.  Per-PIN
+            -- attempts cap (PIN_MAX_ATTEMPTS=5) only stops single-IP brute
+            -- force; a botnet sharing many IPs can combine to crack the
+            -- 6-digit space.  This bucket is incremented on every verify
+            -- failure regardless of whether the PIN row existed, so an
+            -- attacker probing arbitrary emails still consumes their quota.
+            CREATE TABLE IF NOT EXISTS pin_verify_attempts_by_ip (
                 ip       TEXT NOT NULL,
                 day      TEXT NOT NULL,   -- YYYY-MM-DD UTC
                 count    INTEGER NOT NULL DEFAULT 0,

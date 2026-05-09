@@ -83,6 +83,12 @@ PIN_PER_IP_DAILY_CAP     = 30
 # a 6-digit PIN can't be brute-forced before it expires.
 PIN_MAX_ATTEMPTS = 5
 
+# /auth/verify-pin: per-IP daily cap on failed verify attempts.  Defends
+# against botnet-scale brute force where each IP only contributes 5 attempts
+# per email but many IPs combine to crack the 6-digit space.  50 = 10 PIN
+# cycles × 5 attempts/cycle, generous headroom for a legit user mis-typing.
+PIN_VERIFY_PER_IP_DAILY_CAP = 50
+
 # ── Products (item_number must match what you set in PayPal button) ───────────
 PRODUCTS = {
     "AC_BASE":    {"name": "AlienCore — Lifetime License",      "amount": "19.99"},

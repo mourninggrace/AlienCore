@@ -17,6 +17,7 @@ ai.model, then a sensible default per provider).
 
 import json
 import logging
+import re
 import threading
 import time
 from datetime import datetime
@@ -113,6 +114,30 @@ def _machine_label() -> str:
         return "Alienware gaming laptop, Windows 11"
 
 
+_PROMPT_BAD_CHARS = re.compile(r"[`\r\n\x00]|\"\"\"|'''")
+
+
+def _sanitize_for_prompt(value, max_len: int = 256):
+    """Strip prompt-control characters from string values that flow into a
+    Claude system / user prompt.
+
+    The system context dict (get_system_context) embeds hardware-vendor
+    strings — NVMe model names, DIMM labels, machine label.  NVMe names in
+    particular come from USB devices the user might plug in, so they're
+    attacker-influencable.  An adversarial drive named with backticks /
+    triple-quotes / newlines could try to break out of the JSON snapshot
+    and inject instructions into the watchdog or chat prompt.
+
+    Claude is robust to most of this in practice (and the JSON.dumps step
+    already escapes quotes), but defense-in-depth: replace control chars
+    with spaces, strip backticks and triple-quotes, hard-cap length.
+    """
+    if isinstance(value, str):
+        cleaned = _PROMPT_BAD_CHARS.sub(" ", value)
+        return cleaned[:max_len]
+    return value
+
+
 def get_system_context() -> str:
     """Compact JSON snapshot of live sensor state sent with every API call."""
     from core import sensors, profiles
@@ -121,15 +146,22 @@ def get_system_context() -> str:
     c        = cfg.get()
     thresh   = c.get("thresholds", {})
 
-    # NVMe temps — per drive and max
+    # NVMe temps — per drive and max.  NVMe names come from USB-connected
+    # vendor firmware and are attacker-influencable; sanitize before they
+    # become dict keys that get JSON-serialised into the prompt.
     nvme_list  = readings.get("nvme_temps", [])
     nvme_max   = max((n["temp_c"] for n in nvme_list), default=None)
-    nvme_each  = {n["name"]: n["temp_c"] for n in nvme_list} if nvme_list else None
+    nvme_each  = ({_sanitize_for_prompt(n["name"]): n["temp_c"]
+                   for n in nvme_list}
+                  if nvme_list else None)
 
-    # DIMM temps — per slot and max
+    # DIMM temps — per slot and max.  Names come from BIOS SPD data,
+    # very low risk, but sanitize for consistency.
     dimm_list  = readings.get("ram_temps", [])
     dimm_max   = max((d["temp_c"] for d in dimm_list), default=None)
-    dimm_each  = {d["name"]: d["temp_c"] for d in dimm_list} if dimm_list else None
+    dimm_each  = ({_sanitize_for_prompt(d["name"]): d["temp_c"]
+                   for d in dimm_list}
+                  if dimm_list else None)
 
     # Fan data — AWCC physical fans preferred, GPU fan as fallback
     fan_data = None

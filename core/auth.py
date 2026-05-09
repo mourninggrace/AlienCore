@@ -84,29 +84,41 @@ def _migrate_legacy_session_if_needed():
 
 
 def load_session():
-    """Load any saved session from disk into memory. Call once at startup."""
+    """Load (or reload) the saved session from disk into memory.
+
+    Reload-safe: if the session file is missing (e.g. a subprocess just
+    called auth.logout() which removed it), the in-memory _session is
+    cleared.  Without this, a Sign Out from the paywall subprocess
+    leaves the parent process's _session global holding the stale
+    pre-logout token — is_logged_in() returns True, the paywall loop's
+    "fall back to login" branch misroutes to "exit", and the user has
+    to manually relaunch AlienCore to see the login dialog again.
+    """
     global _session
     _migrate_legacy_session_if_needed()
+    if not os.path.exists(_SESSION_PATH):
+        with _lock:
+            _session = {}
+        return
     try:
-        if os.path.exists(_SESSION_PATH):
-            with open(_SESSION_PATH, "r", encoding="utf-8") as f:
-                outer = json.load(f)
-            # v1 ships with HMAC-signed sessions only — there is no legacy
-            # unsigned-session compatibility window.  An unsigned session.json
-            # could be a hand-crafted file dropped by malware on the local
-            # machine; reject it.
-            if not (isinstance(outer, dict) and "d" in outer and "s" in outer):
-                if isinstance(outer, dict) and outer.get("token"):
-                    logger.warning("Session file is unsigned — discarding (sign-in required)")
-                return
-            data, sig = outer["d"], outer["s"]
-            if not isinstance(data, dict) or not _session_sig_valid(data, sig):
-                logger.warning("Session file failed integrity check — discarding")
-                return
-            if data.get("token"):
-                with _lock:
-                    _session = data
-                logger.info("Session loaded for %s", data.get("email", "?"))
+        with open(_SESSION_PATH, "r", encoding="utf-8") as f:
+            outer = json.load(f)
+        # v1 ships with HMAC-signed sessions only — there is no legacy
+        # unsigned-session compatibility window.  An unsigned session.json
+        # could be a hand-crafted file dropped by malware on the local
+        # machine; reject it.
+        if not (isinstance(outer, dict) and "d" in outer and "s" in outer):
+            if isinstance(outer, dict) and outer.get("token"):
+                logger.warning("Session file is unsigned — discarding (sign-in required)")
+            return
+        data, sig = outer["d"], outer["s"]
+        if not isinstance(data, dict) or not _session_sig_valid(data, sig):
+            logger.warning("Session file failed integrity check — discarding")
+            return
+        if data.get("token"):
+            with _lock:
+                _session = data
+            logger.info("Session loaded for %s", data.get("email", "?"))
     except Exception as e:
         logger.debug("Session load error: %s", e)
 

@@ -54,7 +54,7 @@ def show(on_complete=None):
     _PaywallDialog(root, on_complete)
 
     root.update_idletasks()
-    w, h = 520, 660
+    w, h = 580, 860
     sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
     root.geometry(f"{w}x{h}+{(sw-w)//2}+{(sh-h)//2}")
     root.mainloop()
@@ -123,7 +123,7 @@ class _PaywallDialog:
                        "continue using the app. AlienCore is unavailable "
                        "until activation completes."),
                  font=("Segoe UI", 9), bg=BG_CARD, fg=FG,
-                 wraplength=440, justify="left").pack(anchor="w")
+                 wraplength=480, justify="left").pack(anchor="w")
 
         # ── Base license card ────────────────────────────────────────────────
         base = tk.Frame(outer, bg=BG_CARD, padx=22, pady=16)
@@ -175,7 +175,7 @@ class _PaywallDialog:
                       "above first.",
                  font=("Segoe UI", 9, "italic"),
                  bg=BG_LOCK, fg=FG_LOCK,
-                 wraplength=440, justify="left").pack(anchor="w", pady=(0, 8))
+                 wraplength=470, justify="left").pack(anchor="w", pady=(0, 8))
 
         locked_btn = tk.Label(pro, text="  Locked  ✕  ",
                               font=("Segoe UI", 10, "bold"),
@@ -188,7 +188,7 @@ class _PaywallDialog:
         self.status_lbl = tk.Label(outer, textvariable=self.status_var,
                                    font=("Segoe UI", 9, "italic"),
                                    bg=BG, fg=FG_DIM,
-                                   wraplength=460, justify="left")
+                                   wraplength=510, justify="left")
         self.status_lbl.pack(anchor="w", pady=(14, 0))
 
         # ── Footer: Sign Out + Quit ─────────────────────────────────────────
@@ -205,7 +205,7 @@ class _PaywallDialog:
                  text="Already paid? Click Refresh after a moment, or sign "
                       "out and back in with the email you used at checkout.",
                  font=("Segoe UI", 8), bg=BG, fg=FG_DIM,
-                 wraplength=460, justify="left").pack(anchor="w", pady=(14, 4))
+                 wraplength=510, justify="left").pack(anchor="w", pady=(14, 4))
 
         self.refresh_btn = self._btn(outer, "Refresh License",
                                      self._manual_refresh, FG_DIM)

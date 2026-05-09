@@ -37,6 +37,7 @@ from backend.config import (
     PIN_EXPIRY_MINUTES, TOKEN_EXPIRY_DAYS,
     SESSION_MAX_LIFETIME_DAYS,
     PIN_RESEND_COOLDOWN_SEC, PIN_PER_IP_DAILY_CAP, PIN_MAX_ATTEMPTS,
+    PIN_VERIFY_PER_IP_DAILY_CAP,
     LICENSE_PRIVATE_KEY_PATH, LICENSE_PRIVATE_KEY_PEM,
     PAYPAL_EMAIL, PAYPAL_MODE, PRODUCTS,
 )
@@ -260,23 +261,52 @@ def verify_pin():
                                  "AlienCore needs to verify your machine "
                                  "before signing in."}), 400
 
+    ip    = _client_ip()
+    today = _today_utc()
+
     with db.get_conn() as conn:
+        # Per-IP daily cap on verify failures.  Per-PIN attempts cap stops
+        # single-IP brute force; this stops botnet-style multi-IP brute
+        # force where each IP only contributes 5/email but combined IPs
+        # could crack the 6-digit space.  Returns _AUTH_FAILED (same as
+        # any other failure) so the cap can't be probed for enumeration.
+        verify_cap_row = conn.execute(
+            "SELECT count FROM pin_verify_attempts_by_ip WHERE ip=? AND day=?",
+            (ip, today),
+        ).fetchone()
+        if verify_cap_row and verify_cap_row["count"] >= PIN_VERIFY_PER_IP_DAILY_CAP:
+            logger.warning("verify-pin rate-limit hit for IP %s on %s", ip, today)
+            return jsonify(_AUTH_FAILED), 401
+
+        def _bump_verify_failure():
+            conn.execute(
+                "INSERT INTO pin_verify_attempts_by_ip (ip, day, count) "
+                "VALUES (?,?,1) "
+                "ON CONFLICT(ip, day) DO UPDATE SET count = count + 1",
+                (ip, today),
+            )
+
         row = conn.execute(
             "SELECT pin, expires_at, attempts FROM pins WHERE email=?", (email,)
         ).fetchone()
 
         # Generic auth-failed responses below — don't reveal whether the
         # email has ever been issued a PIN.  Each branch logs the precise
-        # cause server-side for debugging.
+        # cause server-side for debugging.  Every failure path bumps the
+        # per-IP counter so an attacker probing arbitrary emails still
+        # consumes their quota even when the email row doesn't exist.
         if not row:
+            _bump_verify_failure()
             logger.info("verify-pin: no PIN for %s", email)
             return jsonify(_AUTH_FAILED), 401
         if time.time() > row["expires_at"]:
             conn.execute("DELETE FROM pins WHERE email=?", (email,))
+            _bump_verify_failure()
             logger.info("verify-pin: PIN expired for %s", email)
             return jsonify(_AUTH_FAILED), 401
         if row["attempts"] >= PIN_MAX_ATTEMPTS:
             conn.execute("DELETE FROM pins WHERE email=?", (email,))
+            _bump_verify_failure()
             logger.warning("verify-pin: too many attempts for %s — PIN burnt", email)
             return jsonify(_AUTH_FAILED), 401
         # Constant-time PIN comparison so a network-based timing oracle
@@ -285,6 +315,7 @@ def verify_pin():
             conn.execute(
                 "UPDATE pins SET attempts = attempts + 1 WHERE email=?", (email,)
             )
+            _bump_verify_failure()
             return jsonify(_AUTH_FAILED), 401
 
         # Consume the PIN (single use)
@@ -510,7 +541,13 @@ def paypal_ipn():
     payment_status = _p("payment_status")
     receiver_email = _p("receiver_email").lower()
     txn_id         = _p("txn_id")
-    custom         = _p("custom").strip().lower()   # user's AlienCore email
+    # Defensive normalization: the current client always sends an already-
+    # canonical email (`auth.get_email()` returns what /auth/verify-pin
+    # normalized at sign-in), but if a future code change ever fed a raw
+    # user-typed email into the PayPal `custom` field, the IPN would land
+    # on a non-canonical row and the matching user would never see the
+    # license activate.  Normalizing here keeps that class of bug local.
+    custom         = _normalize_email(_p("custom"))   # user's AlienCore email
     item_number    = _p("item_number")
     mc_gross       = _p("mc_gross")
     mc_currency    = _p("mc_currency")
@@ -620,7 +657,17 @@ def _handle_refund(txn_id: str):
             "UPDATE purchases SET status='refunded' WHERE txn_id=?", (txn_id,)
         )
         if item == "AC_BASE":
-            conn.execute("UPDATE users SET has_base=0 WHERE email=?", (email,))
+            # Pro depends on Base — cascade-revoke so a refunded Base never
+            # leaves a user with has_pro=1 / has_base=0 (visibly inconsistent
+            # state, and lets them keep using Pro features).  Any pre-existing
+            # Pro purchase row that paid for the now-revoked Pro grant gets
+            # marked revoked_with_base for the audit trail.
+            conn.execute("UPDATE users SET has_base=0, has_pro=0 WHERE email=?", (email,))
+            conn.execute(
+                "UPDATE purchases SET status='revoked_with_base' "
+                "WHERE email=? AND product='AC_PRO' AND status='completed'",
+                (email,),
+            )
         elif item == "AC_PRO":
             conn.execute("UPDATE users SET has_pro=0  WHERE email=?", (email,))
         logger.info("Refund processed: %s → %s", txn_id, email)

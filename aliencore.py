@@ -98,13 +98,22 @@ def main():
         cfg.load()
         from core import auth as _auth
         _auth.load_session()
-        # Dev YubiKey detection runs PowerShell (Get-PnpDevice) which has a
-        # highly variable cold-start cost (300 ms → 5 s+). Don't block window
-        # open on it — resolve in the background so Settings pops up fast and
-        # the Account tab refreshes once detection completes.
-        if not _auth.is_logged_in():
-            threading.Thread(target=_auth.try_dev_unlock, daemon=True,
-                             name="SettingsDevUnlock").start()
+        # YubiKey dev-unlock is in-memory only and lives in whichever process
+        # detected it.  The parent app process re-detects in _show_paywall();
+        # this Settings subprocess must do the same independently or every
+        # gated panel renders locked even when a dev YubiKey is plugged in.
+        # Run sync so the panels render with the correct license bits the
+        # first time — deferring to a thread would render gates locked then
+        # unlock them mid-session, which is glitchy and the user can't tell
+        # whether their key worked.  The 300 ms – 5 s PowerShell cost is
+        # invisible during prewarm (subprocess waits hidden on a named event
+        # before being shown — see session 40) and only user-visible on the
+        # rare cold-spawn fallback when prewarm crashed.
+        if not _auth.is_pro():
+            try:
+                _auth.try_dev_unlock()
+            except Exception:
+                pass
         # Load cached hardware profile so boost_tracker has correct thresholds
         hw = hardware.build_profile(force_refresh=False)
         from core import boost_tracker as _bt
@@ -160,8 +169,17 @@ def main():
         cfg.load()
         from core import auth as _auth
         _auth.load_session()
-        if not _auth.is_logged_in():
-            _auth.try_dev_unlock()
+        # AI chat is a Pro feature — fire dev-unlock whenever the user lacks
+        # Pro, not only when they're not logged in.  Without this, a dev with
+        # a real signed-in (trial-expired or Base-only) account opens the
+        # chat and sees the Pro-locked screen even with the YubiKey plugged
+        # in.  See settings handler above for the same fix on the gated
+        # Settings panels.
+        if not _auth.is_pro():
+            try:
+                _auth.try_dev_unlock()
+            except Exception:
+                pass
         # The chat needs live sensor readings to build its system-context
         # snapshot; start sensors but skip the heavier monitor / tweaks stack.
         sensors.start()
@@ -569,8 +587,15 @@ def _parse_args():
     p.add_argument("--ai-chat",   action="store_true", help="Open AI chat window only (subprocess)")
     p.add_argument("--dryrun",    action="store_true", help="Show tweaks without applying")
     p.add_argument("--restore",   action="store_true", help="Restore system defaults")
-    p.add_argument("--no-elevate", action="store_true",
-                   help="Skip the automatic UAC prompt at launch")
+    # --no-elevate is source-mode-only: in frozen builds the embedded
+    # manifest sets requireAdministrator, so the OS enforces elevation
+    # at process creation and the flag is a no-op.  Hiding it on frozen
+    # builds keeps --help honest and avoids advertising a flag that
+    # would only matter if a future build accidentally dropped uac_admin
+    # from the spec.
+    if not getattr(sys, "frozen", False):
+        p.add_argument("--no-elevate", action="store_true",
+                       help="Skip the automatic UAC prompt at launch (source mode only)")
     return p.parse_args()
 
 

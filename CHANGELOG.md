@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-09
+
 ### Added
 
 - **Hard-lock paywall on trial expiry.** Previously the trial-expired
@@ -46,6 +48,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- **Pre-launch audit hardening (session 43).**
+  - **Per-IP rate limit on `/auth/verify-pin`.** The per-PIN attempt
+    cap (`PIN_MAX_ATTEMPTS = 5`) blocked single-IP brute force, but a
+    botnet sharing many IPs could still combine to brute-force the
+    6-digit PIN space. Added `pin_verify_attempts_by_ip` table tracking
+    failed attempts per `(ip, day)`; rejects further verify requests
+    from an IP after `PIN_VERIFY_PER_IP_DAILY_CAP = 50` failures in a
+    UTC day. Failure response is the generic `_AUTH_FAILED` so the cap
+    can't be probed for email enumeration.
+  - **IPN `custom` email defensive normalization.** PayPal IPN handler
+    now runs the buyer email from the `custom` field through
+    `_normalize_email()` (lowercase + NFKC + strip-`+alias`) instead
+    of just `strip().lower()`. The current client always sends an
+    already-canonical email, so this is defense-in-depth — a future
+    code change that fed a raw user-typed address into the PayPal URL
+    would have created license rows on a non-canonical user with
+    matching support tickets that were very hard to debug.
+  - **Refund cascade on `AC_BASE`.** When PayPal issues a Base refund,
+    the server now also clears `has_pro` (Pro depends on Base — leaving
+    a refunded user with `has_pro=1, has_base=0` was visibly inconsistent
+    state and let them keep using Pro features). Any matching
+    `AC_PRO` purchase row is marked `revoked_with_base` for the audit
+    trail.
+  - **AI watchdog prompt-injection defense.** `core/ai_manager.py`
+    sanitizes string fields in `get_system_context()` before they get
+    JSON-serialized into the watchdog / chat prompt. Defense against a
+    USB device or external sensor whose vendor-supplied name string
+    contains backticks, triple-quotes, or newlines designed to break
+    out of the JSON snapshot and inject instructions. Claude is robust
+    to most of this in practice, but defense-in-depth.
+  - **AI tool argument schema enforcement at dispatch.** Tool calls
+    from the model now validate against the tool's `input_schema`
+    before reaching the handler. A schema violation never executes —
+    every current handler also validates its own args, but the contract
+    layer means a future tool added without per-handler validation is
+    still safe. Tools execute as Administrator, so this is a
+    privilege-escalation hardening.
+
 - **Reinstalling AlienCore could silently re-sign-in the previous user.**
   Symptom: uninstall AlienCore, delete `%LOCALAPPDATA%\AlienCore\`,
   reinstall, launch — the Account tab showed the same email signed in
@@ -75,7 +115,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   reinstall + sign-in correctly resumes the same trial clock from the
   server even though the local session is now wiped.
 
+### Changed
+
+- **`--no-elevate` argparse flag is now registered only in source mode.**
+  Frozen builds enforce elevation via the `requireAdministrator`
+  manifest, so the flag was a no-op on installed builds — but
+  advertising it in `--help` was misleading and would have hidden a
+  regression if a future build accidentally dropped `uac_admin=True`
+  from the PyInstaller spec.
+
 ### Fixed
+
+- **Sign Out from the trial-expired paywall exited AlienCore instead of
+  returning to the login dialog.** Expected behavior was: clicking
+  Sign Out clears the session and routes back through the login
+  dialog so the user can re-authenticate with a different email that
+  already owns a license. Actual behavior: the app exited and the
+  user had to manually relaunch to see the login dialog again. Root
+  cause was a stale in-memory session in the parent process: after
+  the paywall subprocess deleted `session.json` via `auth.logout()`,
+  the parent's `auth.load_session()` reload silently no-op'd because
+  the file no longer existed — it left the parent's `_session` global
+  holding the old token. `is_logged_in()` then returned True in the
+  parent and the paywall loop's "fall back to login" branch never
+  fired. Fix in `core/auth.py::load_session()`: now clears `_session`
+  when the file is missing, making the function reload-safe across
+  subprocess sign-out boundaries.
+
+- **Trial-expired paywall window still cropped its Refresh License
+  button below the visible area** after the first round of layout
+  fixes. The "Already paid? Click Refresh after a moment, or sign
+  out and back in with the email you used at checkout." help text
+  wraps onto two lines and pushed the Refresh button off the bottom
+  of the 780 px window. Bumped to 580×860 with a comfortable bottom
+  margin so a future copy edit to the help text doesn't re-clip.
+
+- **Trial-expired paywall window clipped its own text and hid its
+  controls.** First paragraph lost the leading "P" of "Purchase…" off
+  the left edge and trailed off the right; the YubiKey-detected status
+  line clipped on the right. The Sign Out, Refresh License, and Quit
+  buttons were missing entirely from the visible window — implemented in
+  code, but rendered below the bottom edge. Root cause in
+  `gui/paywall_dialog.py`: 520×660 window with internal frame padding
+  left only ~420 px of horizontal content area, but several labels had
+  `wraplength` set to 440–460; vertical content summed to ~744 px and
+  overflowed the 660 px window. Bumped to 580×780 with corrected
+  wraplengths (480 banner / 470 Pro / 510 status & footer help text).
+
+- **YubiKey developer dev-unlock did not unlock the Settings or AI Chat
+  windows.** Inserting the dev YubiKey while the trial-expiry paywall
+  was open dismissed the paywall and started the app, but every gated
+  Settings panel still rendered locked, the Account tab still showed
+  "No active license", and the AI tab still showed the Pro paywall.
+  Root cause: `try_dev_unlock()` is in-memory only by design (so pulling
+  the key reverts on restart) — the paywall subprocess set its own
+  `_session` to dev, but the Settings and AI Chat subprocesses each
+  read `session.json` from disk on startup and only re-ran
+  `try_dev_unlock()` when `is_logged_in()` was False. With a real
+  trial-expired account signed in, the guard was always True so the
+  dev unlock never fired in those subprocesses. Fix in `aliencore.py`:
+  the Settings and AI Chat handlers now run `try_dev_unlock()` whenever
+  `is_pro()` is False, which covers every state where dev unlock could
+  rescue the user. Sync execution (instead of a background thread) so
+  panel gates render with the correct license bits the first time —
+  the 300 ms – 5 s PowerShell cost is invisible during the prewarmed
+  Settings path.
+
+- **CPU / GPU / RAM Settings tabs rendered 4–6 stacked copies of the
+  same trial-expired lock card** when the user was past their 30-day
+  trial without a license. `_gate()` in `gui/settings_gui.py` packs one
+  full lock frame per gated feature, and these tabs each call `_gate()`
+  4–6 times for features that all gate behind the same Base license, so
+  every feature got its own identical "Buy AlienCore $19.99" banner.
+  Fix introduces `_gate_group()` which renders all panels if every
+  feature unlocks, or one shared lock card if any are locked. The CPU,
+  GPU, and RAM tab builders now call `_gate_group` once instead of
+  `_gate` per feature.
 
 - **AlienCore crashed silently after the first PIN sign-in on a fresh
   install.** Symptom: install → launch → enter email → enter PIN →
