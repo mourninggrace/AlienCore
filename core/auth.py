@@ -494,9 +494,31 @@ def _persist():
 # normal login behaviour.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_DEV_YUBIKEY_SERIALS: set[str] = {
-    "26483466",   # copykitten
+# Serial numbers are NOT stored here.  Instead we keep PBKDF2-SHA256 digests
+# (600 000 iterations, app-specific salt).  A customer reading this source
+# learns nothing useful — brute-forcing an 8-digit space at this work factor
+# takes months on GPU.  Your dev access is unchanged: plug in the YubiKey and
+# try_dev_unlock() hashes what it detects, then compares.
+#
+# To add a new YubiKey: run this in a Python shell and paste the output here —
+#   import hashlib
+#   SALT = b'AlienCore\x00devkey\x00v1'
+#   print(hashlib.pbkdf2_hmac('sha256', b'<serial>', SALT, 600_000).hex())
+
+_DEV_YUBIKEY_HASHES: set[str] = {
+    "06dd3f28ec22749a84289293989a07b109813f599c56dca5c74b5d31b961e59b",  # copykitten
 }
+
+_PBKDF2_SALT       = b'AlienCore\x00devkey\x00v1'
+_PBKDF2_ITERATIONS = 600_000
+
+
+def _hash_serial(serial: str) -> str:
+    """Return the PBKDF2-SHA256 digest of a YubiKey serial string."""
+    import hashlib
+    return hashlib.pbkdf2_hmac(
+        "sha256", serial.encode(), _PBKDF2_SALT, _PBKDF2_ITERATIONS
+    ).hex()
 
 
 def _detect_yubikey_serials() -> set[str]:
@@ -534,7 +556,7 @@ def try_dev_unlock() -> bool:
     """If a developer YubiKey is plugged in, activate an in-memory dev session
     (not persisted to disk). Returns True if the session was activated."""
     global _session
-    if not (_detect_yubikey_serials() & _DEV_YUBIKEY_SERIALS):
+    if not ({_hash_serial(s) for s in _detect_yubikey_serials()} & _DEV_YUBIKEY_HASHES):
         return False
     with _lock:
         _session = {
