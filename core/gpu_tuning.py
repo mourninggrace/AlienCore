@@ -257,7 +257,17 @@ def set_power_limit(watts: float) -> tuple[bool, str]:
     nv = _nvidia_status()
     lo = nv.get("power_limit_min_w")
     hi = nv.get("power_limit_max_w")
-    if lo is not None and hi is not None and not (lo <= watts <= hi):
+    # SAFETY: never write a power limit we can't bound-check.  If NVML failed
+    # to report the firmware min/max constraints, applying a raw watt value is
+    # a hardware risk — a too-high cap on a card with weak VRM cooling can cook
+    # MOSFETs (see module header).  Refuse instead of guessing.  Previously this
+    # path fell through and applied the unvalidated value whenever lo/hi were
+    # None; that was the one place an out-of-spec power cap could reach hardware.
+    if lo is None or hi is None:
+        return False, ("Cannot read GPU firmware power-limit constraints from "
+                       "NVML — refusing to set an unbounded power limit. "
+                       "Update the NVIDIA driver / nvidia-ml-py and retry.")
+    if not (lo <= watts <= hi):
         return False, (f"Power limit {watts:g} W out of firmware range "
                        f"({lo:g}..{hi:g} W).")
 

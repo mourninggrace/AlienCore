@@ -16,20 +16,24 @@ State file (update_state.json in BASE_DIR):
                                       show the settings footer button instead
 """
 
+import base64
 import hashlib
 import json
 import logging
 import os
 import re
+import ssl
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import urllib.request
+import urllib.parse
 import zipfile
 
 from core.constants import APP_NAME, BASE_DIR, USER_DATA_DIR, VERSION
+from core.update_pubkey import UPDATE_PUBLIC_KEY_B64
 
 logger = logging.getLogger("aliencore.updater")
 
@@ -43,6 +47,93 @@ _lock           = threading.Lock()
 _cached: dict   = {}               # {} = no update / not yet checked; {...} = update info
 _checked        = False            # True once first check completes
 _dialog_pending = threading.Event()
+
+# Hostnames the updater is permitted to fetch from.  Anything else (a
+# zipball_url / html_url that an attacker rewrote to point at their own
+# server) is rejected before urlopen() ever runs.
+_ALLOWED_HOST_SUFFIXES = ("github.com", "githubusercontent.com", "api.github.com")
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Explicit default TLS context (cert + hostname verification on) used for
+    every network fetch, rather than relying on urlopen's implicit default.
+    Defence-in-depth alongside the Ed25519 signature gate."""
+    return ssl.create_default_context()
+
+
+def _validate_https_github(url: str) -> str:
+    """Reject any URL that is not https:// on a GitHub-owned host.
+
+    Returns the url unchanged if valid; raises RuntimeError otherwise.  This
+    runs BEFORE urlopen() for the release check, the zipball download, and any
+    other URL the updater opens, so a MITM/compromised API response cannot
+    redirect the privileged downloader at an attacker-controlled host."""
+    if not isinstance(url, str) or not url:
+        raise RuntimeError("Refusing to fetch an empty/invalid update URL.")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        raise RuntimeError(f"Refusing non-HTTPS update URL: {url!r}")
+    host = (parsed.hostname or "").lower()
+    if not host or not any(
+        host == suf or host.endswith("." + suf) for suf in _ALLOWED_HOST_SUFFIXES
+    ):
+        raise RuntimeError(f"Refusing update URL on untrusted host {host!r}: {url!r}")
+    return url
+
+
+def _load_update_public_key():
+    """Decode the embedded base64 update-signing public key.
+
+    Returns (Ed25519PublicKey, None) on success, or (None, error_msg) so the
+    caller can fail closed.  A blank/placeholder key returns (None, msg)."""
+    if not UPDATE_PUBLIC_KEY_B64 or all(c in ("A", "=") for c in UPDATE_PUBLIC_KEY_B64):
+        return None, "Update public key is not configured (placeholder)"
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        raw = base64.b64decode(UPDATE_PUBLIC_KEY_B64, validate=True)
+        if len(raw) != 32:
+            return None, f"Update public key wrong length: {len(raw)}"
+        return Ed25519PublicKey.from_public_bytes(raw), None
+    except ImportError:
+        return None, "cryptography package missing"
+    except Exception as e:
+        return None, f"Update public key load failed: {e}"
+
+
+def _verify_update_signature(zip_bytes: bytes, sig_b64: "str | None"):
+    """Verify a detached Ed25519 signature (base64) over the raw zip bytes
+    against the embedded update public key.
+
+    Raises RuntimeError if the key is unconfigured, the signature is missing/
+    malformed, or verification fails.  Returns None on success.  This is the
+    TRUST ROOT for auto-updates — the SHA-256 is only a cheap pre-check."""
+    key, err = _load_update_public_key()
+    if key is None:
+        raise RuntimeError(
+            f"Cannot verify update signature — {err}. Refusing to apply update."
+        )
+    if not isinstance(sig_b64, str) or not sig_b64.strip():
+        raise RuntimeError(
+            "This release is not cryptographically signed (no update signature "
+            "found). Refusing to apply — update manually from the GitHub release "
+            "page if you trust it."
+        )
+    try:
+        sig = base64.b64decode(sig_b64.strip(), validate=True)
+    except Exception as e:
+        raise RuntimeError(f"Update signature is malformed: {e}") from e
+    if len(sig) != 64:
+        raise RuntimeError(
+            f"Update signature wrong length ({len(sig)} bytes) — refusing update."
+        )
+    try:
+        key.verify(sig, zip_bytes)
+    except Exception:
+        raise RuntimeError(
+            "Update signature verification FAILED — the package is not signed "
+            "by the AlienCore release key and may be tampered. Aborting update."
+        )
+    logger.info("Update Ed25519 signature verified.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -147,7 +238,8 @@ def is_frozen() -> bool:
 
 def download_and_apply(zipball_url: str, on_progress=None,
                        expected_sha256: "str | None" = None,
-                       expected_version: "str | None" = None):
+                       expected_version: "str | None" = None,
+                       expected_sig: "str | None" = None):
     """
     Download the release zip, extract it, write a batch helper that copies
     files over the current installation and restarts AlienCore, then launch
@@ -183,10 +275,39 @@ def download_and_apply(zipball_url: str, on_progress=None,
             )
 
     app_dir  = BASE_DIR
+
+    # ── Install-location safety gate (LPE primitive defence) ──
+    # The updater runs AS ADMIN and robocopies the new tree over the install
+    # dir.  If BASE_DIR / the Python interpreter / the launch script live
+    # somewhere a non-admin user can write (Desktop, %LOCALAPPDATA%, a project
+    # checkout), then overlaying them as admin lets any local user stage files
+    # that then run elevated — a local privilege-escalation primitive.  Reuse
+    # the SAME install-location check the elevated-task installer uses and
+    # refuse the auto-apply for unsafe locations.  ALIENCORE_ALLOW_USER_INSTALL=1
+    # bypasses for development (handled inside _path_safe_for_elevated_task).
+    from core.elevation import _path_safe_for_elevated_task
+    main_py_check = os.path.join(app_dir, "aliencore.py")
+    unsafe = [
+        p for p in (app_dir, sys.executable, main_py_check)
+        if not _path_safe_for_elevated_task(p)
+    ]
+    if unsafe:
+        logger.warning(
+            "Auto-update refused: install location is user-writable "
+            "(unsafe paths: %s). Manual update required.", unsafe
+        )
+        raise RuntimeError(
+            "Auto-update is disabled because AlienCore is installed in a "
+            "user-writable location, where overlaying files as Administrator "
+            "would be a privilege-escalation risk.\n"
+            f"Please update manually from {RELEASES_URL}."
+        )
+
     tmp_dir  = tempfile.mkdtemp(prefix="aliencore_update_")
     zip_path = os.path.join(tmp_dir, "update.zip")
 
     # ── Download ──
+    _validate_https_github(zipball_url)
     logger.info("Downloading update: %s", zipball_url)
     _progress(on_progress, 0, "Downloading update...")
     try:
@@ -194,7 +315,8 @@ def download_and_apply(zipball_url: str, on_progress=None,
             zipball_url,
             headers={"User-Agent": f"{APP_NAME}/{VERSION}"}
         )
-        with urllib.request.urlopen(req, timeout=120) as resp, \
+        ctx = _ssl_context()
+        with urllib.request.urlopen(req, timeout=120, context=ctx) as resp, \
              open(zip_path, "wb") as fout:
             total      = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
@@ -216,20 +338,41 @@ def download_and_apply(zipball_url: str, on_progress=None,
             pass
         raise RuntimeError(f"Download failed: {e}") from e
 
-    # ── Verify SHA-256 ──
-    if not expected_sha256:
-        raise RuntimeError(
-            "This release is missing an integrity hash and cannot be applied automatically.\n"
-            "Check the GitHub release page and update manually if needed."
-        )
-    _progress(on_progress, 57, "Verifying integrity...")
-    h = hashlib.sha256()
-    with open(zip_path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    if h.hexdigest() != expected_sha256:
-        raise RuntimeError("Integrity check failed — update package may be tampered. Aborting.")
-    logger.info("Update SHA-256 verified.")
+    # ── Verify SHA-256 (cheap pre-check only — NOT the trust root) ──
+    # The SHA-256 comes from the same GitHub response as the zip URL, so it
+    # only catches accidental corruption / truncation.  The real trust anchor
+    # is the Ed25519 signature verified below against an embedded public key.
+    if expected_sha256:
+        _progress(on_progress, 57, "Verifying integrity...")
+        h = hashlib.sha256()
+        with open(zip_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        if h.hexdigest() != expected_sha256:
+            _cleanup_tmp(tmp_dir)
+            raise RuntimeError("Integrity check failed — update package may be tampered. Aborting.")
+        logger.info("Update SHA-256 verified (pre-check).")
+
+    # ── Verify Ed25519 signature (TRUST ROOT) ──
+    # This MUST pass before any extraction or robocopy.  An attacker who can
+    # MITM / edit the GitHub release supplies both the zip and its SHA-256, but
+    # cannot forge a signature without update_private.pem.  Missing or invalid
+    # signature => abort and clean up.
+    _progress(on_progress, 58, "Verifying signature...")
+    try:
+        with open(zip_path, "rb") as f:
+            zip_bytes = f.read()
+        # The GUI caller (gui/update_dialog.py) passes the cached release info
+        # but not the signature explicitly; fall back to the `sig` parsed from
+        # the release body in _do_check() so existing call sites stay valid.
+        sig = expected_sig
+        if sig is None:
+            with _lock:
+                sig = _cached.get("sig")
+        _verify_update_signature(zip_bytes, sig)
+    except RuntimeError:
+        _cleanup_tmp(tmp_dir)
+        raise
 
     # ── Extract (zip-slip safe) ──
     _progress(on_progress, 60, "Extracting...")
@@ -358,6 +501,15 @@ def _safe_extract_member(z: zipfile.ZipFile, member: zipfile.ZipInfo, dest: str)
             dst.write(chunk)
 
 
+def _cleanup_tmp(tmp_dir: str):
+    """Best-effort removal of the temp download/extract dir on abort."""
+    import shutil
+    try:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+
 def _progress(cb, pct: int, msg: str):
     if cb:
         try:
@@ -381,6 +533,7 @@ def _check_loop():
 
 
 def _do_check():
+    _validate_https_github(GITHUB_API_URL)
     req = urllib.request.Request(
         GITHUB_API_URL,
         headers={
@@ -388,7 +541,8 @@ def _do_check():
             "Accept":     "application/vnd.github+json",
         },
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    ctx = _ssl_context()
+    with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
         data = json.loads(resp.read().decode())
 
     tag = (data.get("tag_name") or "").lstrip("v").strip()
@@ -400,12 +554,17 @@ def _do_check():
         body  = (data.get("body") or "").strip()
         notes = "\n".join(body.splitlines()[:10])
         sha_match = re.search(r'\bsha256[:\s]+([0-9a-fA-F]{64})\b', body, re.IGNORECASE)
+        # Detached Ed25519 signature over the raw zip bytes, base64-encoded,
+        # provided as a `sig:<base64>` line in the release body.  This is the
+        # trust root verified in download_and_apply() before extraction.
+        sig_match = re.search(r'\bsig[:\s]+([A-Za-z0-9+/=]{80,200})\b', body)
         info  = {
             "version":     tag,
             "notes":       notes,
             "zipball_url": data.get("zipball_url", ""),
             "html_url":    data.get("html_url", ""),
             "sha256":      sha_match.group(1).lower() if sha_match else None,
+            "sig":         sig_match.group(1) if sig_match else None,
         }
         with _lock:
             _cached.clear()

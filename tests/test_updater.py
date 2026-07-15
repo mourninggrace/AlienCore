@@ -68,7 +68,7 @@ def _make_fake_zipball(file_contents: dict[str, str]) -> bytes:
 @contextmanager
 def _patched_urlopen(responses: dict[str, bytes]):
     """Patch urllib.request.urlopen to dispatch by URL prefix match."""
-    def _fake(req, timeout=None):
+    def _fake(req, timeout=None, context=None):
         url = req.full_url if hasattr(req, "full_url") else str(req)
         for prefix, body in responses.items():
             if url.startswith(prefix):
@@ -79,6 +79,30 @@ def _patched_urlopen(responses: dict[str, bytes]):
         raise AssertionError(f"Unexpected URL fetched: {url}")
     with patch("urllib.request.urlopen", _fake):
         yield
+
+
+# Host the updater accepts (github-owned).  example.com is now rejected by the
+# scheme/host allow-list, so tests must use a github.com URL for the zipball.
+_TEST_ZIPBALL_URL = "https://codeload.github.com/mourninggrace/AlienCore/zip/refs/tags/v1.0.1"
+
+
+def _make_update_keypair():
+    """Generate a throwaway Ed25519 keypair and return
+    (private_key, public_key_b64) for exercising the update signature gate."""
+    from cryptography.hazmat.primitives import serialization  # noqa: F401
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    priv = Ed25519PrivateKey.generate()
+    pub_raw = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    import base64 as _b64
+    return priv, _b64.b64encode(pub_raw).decode("ascii")
+
+
+def _sign_bytes(priv, data: bytes) -> str:
+    import base64 as _b64
+    return _b64.b64encode(priv.sign(data)).decode("ascii")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,8 +249,16 @@ def test_download_and_apply_builds_update_bat(tmp_path, monkeypatch):
     Runs download_and_apply against a temp app directory and a synthesised
     zipball. We monkeypatch subprocess.Popen and sys.exit so nothing
     actually launches the installer / kills the test runner.
+
+    The new signature gate is exercised end-to-end: we generate a throwaway
+    update keypair, embed its public half, and supply a valid detached Ed25519
+    signature over the zip bytes.  The install-location safety gate is bypassed
+    with ALIENCORE_ALLOW_USER_INSTALL=1 since the temp app dir is user-writable.
     """
     import core.updater as u
+
+    # Bypass the install-location gate for the user-writable temp dir.
+    monkeypatch.setenv("ALIENCORE_ALLOW_USER_INSTALL", "1")
 
     # Temp "installed" copy of AlienCore
     app_dir = tmp_path / "app"
@@ -241,6 +273,11 @@ def test_download_and_apply_builds_update_bat(tmp_path, monkeypatch):
         "core/constants.py":    'VERSION = "1.0.1"\n',
         "CHANGELOG.md":         "## [1.0.1] — 2026-05-01\n- test release\n",
     })
+
+    # Embed a throwaway update public key and sign the zip with its private half.
+    priv, pub_b64 = _make_update_keypair()
+    monkeypatch.setattr(u, "UPDATE_PUBLIC_KEY_B64", pub_b64)
+    good_sig = _sign_bytes(priv, zipball_bytes)
 
     monkeypatch.setattr(u, "BASE_DIR", str(app_dir))
     monkeypatch.setattr(u, "STATE_PATH", str(app_dir / "update_state.json"))
@@ -262,10 +299,11 @@ def test_download_and_apply_builds_update_bat(tmp_path, monkeypatch):
     def on_progress(pct, msg): progress.append((pct, msg))
 
     expected_sha256 = hashlib.sha256(zipball_bytes).hexdigest()
-    with _patched_urlopen({"https://example.com/zipball": zipball_bytes}):
-        u.download_and_apply("https://example.com/zipball",
+    with _patched_urlopen({_TEST_ZIPBALL_URL: zipball_bytes}):
+        u.download_and_apply(_TEST_ZIPBALL_URL,
                              on_progress=on_progress,
-                             expected_sha256=expected_sha256)
+                             expected_sha256=expected_sha256,
+                             expected_sig=good_sig)
 
     # Progress fired at least for Downloading → Extracting → Launching
     msgs = " | ".join(m for _, m in progress)
@@ -288,6 +326,128 @@ def test_download_and_apply_builds_update_bat(tmp_path, monkeypatch):
 
     # sys.exit(0) was called at the end
     assert exit_calls == [0]
+
+
+def _prep_apply_env(tmp_path, monkeypatch):
+    """Shared setup for the signature-gate tests: temp app dir, embedded test
+    update key, patched Popen/exit, returns (u, app_dir, zipball_bytes, priv)."""
+    import core.updater as u
+    monkeypatch.setenv("ALIENCORE_ALLOW_USER_INSTALL", "1")
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    (app_dir / "aliencore.py").write_text("# old\n")
+    (app_dir / "core").mkdir()
+    (app_dir / "core" / "constants.py").write_text('VERSION = "1.0.0"\n')
+    zipball_bytes = _make_fake_zipball({
+        "aliencore.py":      "# new\n",
+        "core/constants.py": 'VERSION = "1.0.1"\n',
+    })
+    priv, pub_b64 = _make_update_keypair()
+    monkeypatch.setattr(u, "UPDATE_PUBLIC_KEY_B64", pub_b64)
+    monkeypatch.setattr(u, "BASE_DIR", str(app_dir))
+    monkeypatch.setattr(u, "STATE_PATH", str(app_dir / "update_state.json"))
+    monkeypatch.setattr("subprocess.Popen",
+                        lambda *a, **kw: type("_P", (), {})())
+    monkeypatch.setattr("sys.exit", lambda code=0: None)
+    return u, app_dir, zipball_bytes, priv
+
+
+def test_download_and_apply_rejects_missing_signature(tmp_path, monkeypatch):
+    """NEGATIVE: a release with a valid SHA-256 but NO signature must be
+    rejected before extraction — the SHA-256 is not the trust root."""
+    u, app_dir, zipball_bytes, priv = _prep_apply_env(tmp_path, monkeypatch)
+    sha = hashlib.sha256(zipball_bytes).hexdigest()
+    # Ensure no cached sig leaks in via the _do_check fallback.
+    u._cached.clear()
+    with _patched_urlopen({_TEST_ZIPBALL_URL: zipball_bytes}):
+        with pytest.raises(RuntimeError, match="not cryptographically signed|signature"):
+            u.download_and_apply(_TEST_ZIPBALL_URL,
+                                 expected_sha256=sha,
+                                 expected_sig=None)
+    # The overlay must NOT have happened: aliencore.py is still the old content.
+    assert (app_dir / "aliencore.py").read_text() == "# old\n"
+
+
+def test_download_and_apply_rejects_bad_signature(tmp_path, monkeypatch):
+    """NEGATIVE: a release signed by the WRONG key (an attacker who controls
+    the GitHub response but not the private key) must be rejected."""
+    u, app_dir, zipball_bytes, _priv = _prep_apply_env(tmp_path, monkeypatch)
+    sha = hashlib.sha256(zipball_bytes).hexdigest()
+    # Sign with a DIFFERENT key than the embedded public key.
+    attacker_priv, _ = _make_update_keypair()
+    forged_sig = _sign_bytes(attacker_priv, zipball_bytes)
+    u._cached.clear()
+    with _patched_urlopen({_TEST_ZIPBALL_URL: zipball_bytes}):
+        with pytest.raises(RuntimeError, match="signature verification FAILED|signature"):
+            u.download_and_apply(_TEST_ZIPBALL_URL,
+                                 expected_sha256=sha,
+                                 expected_sig=forged_sig)
+    assert (app_dir / "aliencore.py").read_text() == "# old\n"
+
+
+def test_download_and_apply_rejects_untrusted_host(tmp_path, monkeypatch):
+    """NEGATIVE (Finding #2): a zipball_url on a non-GitHub host must be
+    rejected before any network fetch."""
+    u, app_dir, zipball_bytes, priv = _prep_apply_env(tmp_path, monkeypatch)
+    sha = hashlib.sha256(zipball_bytes).hexdigest()
+    good_sig = _sign_bytes(priv, zipball_bytes)
+    evil_url = "https://evil.example.com/zipball"
+    with _patched_urlopen({evil_url: zipball_bytes}):
+        with pytest.raises(RuntimeError, match="untrusted host|non-HTTPS"):
+            u.download_and_apply(evil_url,
+                                 expected_sha256=sha,
+                                 expected_sig=good_sig)
+
+
+def test_download_and_apply_rejects_http_scheme(tmp_path, monkeypatch):
+    """NEGATIVE (Finding #2): a plain-HTTP github URL must be rejected."""
+    u, app_dir, zipball_bytes, priv = _prep_apply_env(tmp_path, monkeypatch)
+    sha = hashlib.sha256(zipball_bytes).hexdigest()
+    good_sig = _sign_bytes(priv, zipball_bytes)
+    http_url = "http://codeload.github.com/x/y/zip"
+    with _patched_urlopen({http_url: zipball_bytes}):
+        with pytest.raises(RuntimeError, match="non-HTTPS|untrusted"):
+            u.download_and_apply(http_url,
+                                 expected_sha256=sha,
+                                 expected_sig=good_sig)
+
+
+def test_download_and_apply_refuses_user_writable_install(tmp_path, monkeypatch):
+    """NEGATIVE (Finding #4): without the dev bypass, an install in a
+    user-writable location must refuse the elevated overlay."""
+    u, app_dir, zipball_bytes, priv = _prep_apply_env(tmp_path, monkeypatch)
+    sha = hashlib.sha256(zipball_bytes).hexdigest()
+    good_sig = _sign_bytes(priv, zipball_bytes)
+    # Remove the dev bypass so the real install-location gate runs.
+    monkeypatch.delenv("ALIENCORE_ALLOW_USER_INSTALL", raising=False)
+    with _patched_urlopen({_TEST_ZIPBALL_URL: zipball_bytes}):
+        with pytest.raises(RuntimeError, match="user-writable|privilege"):
+            u.download_and_apply(_TEST_ZIPBALL_URL,
+                                 expected_sha256=sha,
+                                 expected_sig=good_sig)
+    # No overlay happened.
+    assert (app_dir / "aliencore.py").read_text() == "# old\n"
+
+
+def test_do_check_parses_signature_line(tmp_path, monkeypatch):
+    """The release-body `sig:<base64>` line is parsed into info['sig']."""
+    import core.updater as u
+    _reset_updater_state()
+    monkeypatch.setattr(u, "VERSION", "1.0.0")
+    monkeypatch.setattr(u, "STATE_PATH", str(tmp_path / "update_state.json"))
+    fake_sig = "A" * 88  # plausible base64 length for a 64-byte sig
+    body = f"- A fix\nsha256: {'a'*64}\nsig:{fake_sig}\n"
+    release = _make_release_json(
+        "1.0.1",
+        zipball_url="https://codeload.github.com/x/y/zip/v1.0.1",
+        body=body,
+    )
+    with _patched_urlopen({u.GITHUB_API_URL: release}):
+        u._do_check()
+    info = u.get_update_info()
+    assert info is not None
+    assert info["sig"] == fake_sig
+    assert info["sha256"] == "a" * 64
 
 
 # ─────────────────────────────────────────────────────────────────────────────

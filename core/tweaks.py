@@ -264,8 +264,54 @@ def _ensure_aliencore_power_plan(dry_run: bool):
     return None
 
 
+# Processor-state percentage is a hardware-applied value: it caps how high
+# (max) or how low (min) Windows lets every core's P-state run.  A Windows
+# "Processor performance state" is defined only over 0..100 %; powercfg will
+# reject or silently misbehave on out-of-range input, and a corrupt config,
+# a drifting learning suggestion, or an arithmetic overflow upstream could in
+# principle produce a value outside that window.  This is the single choke
+# point through which EVERY processor-state write in the app flows
+# (apply_profile, the dynamic idle ceiling in monitor.py, the DIMM-thermal
+# and TVB optimizers), so clamping here makes every applied value provably
+# in-range regardless of what the caller computed.
+PROC_STATE_MIN_PCT = 0
+PROC_STATE_MAX_PCT = 100
+
+
+def _clamp_proc_state(pct) -> int:
+    """Coerce a processor-state percentage to a safe integer in 0..100.
+
+    Non-numeric / NaN input falls back to 100 % (full performance), which is
+    the safe-for-hardware default: it never *restricts* cooling headroom and
+    matches Windows' own out-of-box ceiling.  Restricting (a low ceiling) is
+    the only way this lever can harm responsiveness, so when the requested
+    value is garbage we err toward not restricting.
+    """
+    try:
+        f = float(pct)
+    except (TypeError, ValueError):
+        logger.warning("Processor-state pct %r invalid — defaulting to 100%%", pct)
+        return PROC_STATE_MAX_PCT
+    if f != f:  # NaN guard (NaN != NaN)
+        logger.warning("Processor-state pct was NaN — defaulting to 100%%")
+        return PROC_STATE_MAX_PCT
+    if f == float("inf"):
+        logger.warning("Processor-state pct was +inf — clamped to 100%%")
+        return PROC_STATE_MAX_PCT
+    if f == float("-inf"):
+        logger.warning("Processor-state pct was -inf — clamped to 0%%")
+        return PROC_STATE_MIN_PCT
+    v = int(round(f))
+    clamped = max(PROC_STATE_MIN_PCT, min(PROC_STATE_MAX_PCT, v))
+    if clamped != v:
+        logger.warning("Processor-state pct %s out of range — clamped to %d%%",
+                       v, clamped)
+    return clamped
+
+
 def _set_max_processor_state(pct: int, ac_dc: str, dry_run: bool):
     """Set max processor state % on the active power plan."""
+    pct  = _clamp_proc_state(pct)
     sub  = "54533251-82be-4824-96c1-47b60b740d00"
     guid = "bc5038f7-23e0-4960-96da-33abaf5935ec"
     scheme = _get_active_scheme()
@@ -278,6 +324,7 @@ def _set_max_processor_state(pct: int, ac_dc: str, dry_run: bool):
 
 
 def _set_min_processor_state(pct: int, ac_dc: str, dry_run: bool):
+    pct  = _clamp_proc_state(pct)
     sub  = "54533251-82be-4824-96c1-47b60b740d00"
     guid = "893dee8e-2bef-41e0-89c6-b55d0929964c"
     scheme = _get_active_scheme()

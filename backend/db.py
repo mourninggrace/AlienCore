@@ -65,6 +65,19 @@ def init_db():
                 PRIMARY KEY (ip, day)
             );
 
+            -- Per-IP request log for abuse rate limiting on /support/submit.
+            -- /support/submit is an unauthenticated outbound-email relay, so
+            -- without this cap an attacker could exhaust the Brevo 300/day
+            -- quota and lock out PIN delivery.  last_at drives a short cooldown
+            -- between successive submissions from the same IP.
+            CREATE TABLE IF NOT EXISTS support_requests_by_ip (
+                ip       TEXT NOT NULL,
+                day      TEXT NOT NULL,   -- YYYY-MM-DD UTC
+                count    INTEGER NOT NULL DEFAULT 0,
+                last_at  REAL    DEFAULT NULL,
+                PRIMARY KEY (ip, day)
+            );
+
             -- Audit trail of all PayPal payments received
             CREATE TABLE IF NOT EXISTS purchases (
                 txn_id     TEXT PRIMARY KEY,

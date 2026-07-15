@@ -91,7 +91,7 @@ If you didn't request this, you can safely ignore this email.
         <td style="background:#0d0d0d;padding:16px 32px;
                    border-top:1px solid #222;text-align:center;">
           <span style="color:#333;font-size:11px;">
-            AlienCore by Kyle Yeroshefsky &nbsp;·&nbsp; mourning.grace.2014@gmail.com
+            AlienCore by Kyle Yeroshefsky &nbsp;·&nbsp; {FROM_EMAIL}
           </span>
         </td>
       </tr>
@@ -118,6 +118,10 @@ def send_feedback_email(from_email: str, feedback_type: str,
     # here means the subject can never contain control chars even if some
     # future caller forgets to sanitize.
     safe_type = "".join(c for c in feedback_type if c not in "\r\n\x00")[:40]
+    # Same defence-in-depth for the user-supplied from_email: it's only
+    # @-validated upstream, so strip CR/LF/NUL before it lands in the subject
+    # line or the Reply-To header (header-injection guard).
+    from_email = "".join(c for c in from_email if c not in "\r\n\x00")[:254]
     subject = f"[AlienCore {safe_type}] from {from_email}"
 
     text = (f"Feedback type: {feedback_type}\n"

@@ -54,8 +54,30 @@ def configure(max_freq_mhz: int, tvb_threshold: float = TVB_TEMP_THRESHOLD):
 
 
 def record(freq_ghz: float, temp_c: float, cores: list | None = None):
-    """Record one sample (called from the sensor poll loop)."""
+    """Record one sample (called from the sensor poll loop).
+
+    Non-finite freq/temp samples (NaN/inf from a flaky sensor) are dropped:
+    a single NaN would otherwise poison avg_freq for the whole 60 s window
+    (sum([..., NaN, ...]) == NaN) and silently corrupt the boost score.
+    Out-of-range values are also rejected as a sanity filter — a CPU core
+    clock is physically in (0, 12] GHz and a die temp in (0, 150] °C.
+    """
     global _samples
+    import math
+    # Validate freq: must be a finite, physically plausible clock or None.
+    if freq_ghz is not None:
+        try:
+            if not math.isfinite(freq_ghz) or not (0.0 < freq_ghz <= 12.0):
+                freq_ghz = None
+        except TypeError:
+            freq_ghz = None
+    # Validate temp: must be a finite, plausible die temperature or None.
+    if temp_c is not None:
+        try:
+            if not math.isfinite(temp_c) or not (0.0 < temp_c <= 150.0):
+                temp_c = None
+        except TypeError:
+            temp_c = None
     now = time.time()
     with _lock:
         _samples.append((now, freq_ghz, temp_c, cores))

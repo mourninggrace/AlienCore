@@ -30,6 +30,7 @@ import urllib.parse
 import urllib.request
 
 from flask import Flask, request, jsonify
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend import db, mail
 from backend.config import (
@@ -38,6 +39,7 @@ from backend.config import (
     SESSION_MAX_LIFETIME_DAYS,
     PIN_RESEND_COOLDOWN_SEC, PIN_PER_IP_DAILY_CAP, PIN_MAX_ATTEMPTS,
     PIN_VERIFY_PER_IP_DAILY_CAP,
+    SUPPORT_PER_IP_DAILY_CAP, SUPPORT_RESEND_COOLDOWN_SEC,
     LICENSE_PRIVATE_KEY_PATH, LICENSE_PRIVATE_KEY_PEM,
     PAYPAL_EMAIL, PAYPAL_MODE, PRODUCTS,
 )
@@ -139,11 +141,13 @@ def _normalize_email(raw: str) -> str:
 
 
 def _client_ip() -> str:
-    """Return the originating client IP, respecting X-Forwarded-For when the
-    server is behind nginx/Cloudflare.  Returns "" if unknown."""
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """Return the originating client IP.
+
+    The app is wrapped in werkzeug ProxyFix(x_for=1), and nginx is configured
+    to OVERWRITE X-Forwarded-For with $remote_addr (a single trusted hop), so
+    request.remote_addr is the real client IP — the client can no longer spoof
+    it via a forged X-Forwarded-For header.  Returns "" if unknown.
+    """
     return request.remote_addr or ""
 
 
@@ -155,10 +159,54 @@ def _today_utc() -> str:
 # the endpoint can't be used to enumerate which emails have outstanding PINs.
 _AUTH_FAILED = {"ok": False, "error": "Invalid email or PIN. Request a new code if needed."}
 
-app    = Flask(__name__)
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging — mask PII (email addresses) in INFO logs.  Backend runs under
+# systemd with StandardOutput=journal, so journald owns log rotation/size
+# limits (journald.conf SystemMaxUse) — we don't add a RotatingFileHandler
+# here, that would double-write.  What we DO add is an email-masking Filter so
+# the journal isn't a plaintext dump of every user's address.  Full addresses
+# are preserved only at DEBUG level (which is off in production).
+# ─────────────────────────────────────────────────────────────────────────────
+
+_EMAIL_RE = re.compile(r"\b([A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]*)(@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
+
+
+def _mask_email_match(m: "re.Match") -> str:
+    # a***@gmail.com — keep first char of local-part + domain, mask the rest.
+    return f"{m.group(1)}***{m.group(3)}"
+
+
+class EmailMaskingFilter(logging.Filter):
+    """Redact email addresses in log records at INFO and above; leaves DEBUG
+    records untouched so full addresses are still available when explicitly
+    debugging.  Masks the fully-rendered message (args already applied)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno > logging.DEBUG:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                return True
+            if "@" in msg:
+                record.msg = _EMAIL_RE.sub(_mask_email_match, msg)
+                record.args = ()
+        return True
+
+
+app = Flask(__name__)
+# Trust exactly one proxy hop (nginx).  nginx overwrites X-Forwarded-For with
+# $remote_addr, so after ProxyFix request.remote_addr is the real client IP
+# and can't be spoofed via a forged header.  This is what closes the
+# rate-limit-bypass finding — see _client_ip().
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
 logger = logging.getLogger("aliencore.backend")
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s  %(levelname)-8s  %(message)s")
+# Attach the masking filter to the root logger's handlers (installed by
+# basicConfig) so every emitted record is scrubbed, regardless of call-site.
+for _h in logging.getLogger().handlers:
+    _h.addFilter(EmailMaskingFilter())
 
 _PAYPAL_VERIFY = {
     "live":    "https://ipnpb.paypal.com/cgi-bin/webscr",
@@ -698,6 +746,31 @@ def support_submit():
     if len(sysinfo) > 60000:
         sysinfo = sysinfo[:60000] + "\n...(truncated)"
 
+    # Per-IP abuse control.  /support/submit is unauthenticated (support must
+    # work for not-yet-signed-in users), so the per-IP daily cap + cooldown is
+    # the ONLY thing stopping it being used as an open relay to exhaust the
+    # Brevo 300/day quota and lock out PIN delivery.  Mirrors the PIN-send cap.
+    ip    = _client_ip()
+    now   = time.time()
+    today = _today_utc()
+    with db.get_conn() as conn:
+        cap_row = conn.execute(
+            "SELECT count, last_at FROM support_requests_by_ip WHERE ip=? AND day=?",
+            (ip, today),
+        ).fetchone()
+        if cap_row and cap_row["count"] >= SUPPORT_PER_IP_DAILY_CAP:
+            logger.warning("support rate-limit hit for IP %s on %s", ip, today)
+            return jsonify({"ok": False,
+                            "error": "Too many support requests from this "
+                                     "network. Try again tomorrow."}), 429
+        if cap_row and cap_row["last_at"]:
+            elapsed = now - cap_row["last_at"]
+            if elapsed < SUPPORT_RESEND_COOLDOWN_SEC:
+                wait = int(SUPPORT_RESEND_COOLDOWN_SEC - elapsed)
+                return jsonify({"ok": False,
+                                "error": f"Please wait {wait}s before sending "
+                                         f"another message."}), 429
+
     try:
         mail.send_feedback_email(email, feedback_type, description, sysinfo)
     except Exception as e:
@@ -705,6 +778,16 @@ def support_submit():
         return jsonify({"ok": False,
                         "error": "Feedback service is temporarily unavailable. "
                                  "Please try again later."}), 500
+
+    # Only count successful relays toward the cap so a transient Brevo outage
+    # doesn't burn a legitimate user's daily allowance.
+    with db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO support_requests_by_ip (ip, day, count, last_at) "
+            "VALUES (?,?,1,?) "
+            "ON CONFLICT(ip, day) DO UPDATE SET count = count + 1, last_at = ?",
+            (ip, today, now, now),
+        )
 
     logger.info("Feedback relayed <- %s (%s)", email, feedback_type)
     return jsonify({"ok": True})

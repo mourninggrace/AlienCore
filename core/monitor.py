@@ -171,12 +171,27 @@ def _adjust_cpu_ceiling_dynamically(readings: dict, c: dict):
     global _current_cpu_ceiling, _pending_cpu_ceiling, _pending_since
 
     import time
+    import math
     cpu_temp  = readings.get("cpu_temp_avg")
     cpu_load  = readings.get("cpu_load_pct")
     temp_trig = c["cpu"]["throttle_temp_trigger"]
     min_ceil  = c["cpu"]["idle_max_state_pct"]
 
     if cpu_temp is None or cpu_load is None:
+        return
+
+    # SAFETY: a NaN/inf sensor reading must NOT be treated as "cool".  All the
+    # temperature comparisons below are False for NaN, so a NaN temp would fall
+    # through to the cool-and-busy branch and *raise* the ceiling to 100 % on a
+    # CPU whose real temperature is unknown — exactly backwards.  Bail out and
+    # leave the ceiling untouched until we get a trustworthy sample.
+    try:
+        if not (math.isfinite(cpu_temp) and math.isfinite(cpu_load)):
+            logger.debug("CPU ceiling: non-finite sensor sample "
+                         "(temp=%r load=%r) — holding current ceiling",
+                         cpu_temp, cpu_load)
+            return
+    except TypeError:
         return
 
     # ── Calculate target ceiling ──

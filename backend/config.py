@@ -5,10 +5,9 @@ configured without touching source code.  Edit the defaults below only
 for local development.
 
 Deployment checklist:
-  AC_SECRET     — long random string (openssl rand -hex 32)
-  AC_SMTP_USER  — Gmail address you'll send PINs from
-  AC_SMTP_PASS  — Gmail App Password (not your regular password)
-  AC_PAYPAL_EMAIL — your PayPal account email (mourning.grace.2014@gmail.com)
+  AC_FROM_EMAIL   — verified Brevo sender address PINs are sent from
+  AC_BREVO_API_KEY — Brevo transactional API key (mail goes over HTTPS)
+  AC_PAYPAL_EMAIL — your PayPal business account email
   AC_PAYPAL_MODE  — "live" for real payments, "sandbox" for testing
 
 Run the server:
@@ -23,31 +22,35 @@ import sys
 BACKEND_HOST = os.getenv("AC_HOST",   "0.0.0.0")
 BACKEND_PORT = int(os.getenv("AC_PORT", "8765"))
 
-# Long random secret — used to protect the /paypal/refund-support admin endpoint
-SECRET_KEY   = os.getenv("AC_SECRET", "CHANGE_ME_IN_PRODUCTION")
-_paypal_mode = os.getenv("AC_PAYPAL_MODE", "live")
-if SECRET_KEY == "CHANGE_ME_IN_PRODUCTION":
-    if _paypal_mode == "live":
-        print("FATAL: AC_SECRET is not set. Generate one with: openssl rand -hex 32", file=sys.stderr)
-        sys.exit(1)
-    else:
-        print("WARNING: AC_SECRET is not set — using insecure default (sandbox mode only).", file=sys.stderr)
+# "live" | "sandbox" — gates the fail-fast checks below.
+PAYPAL_MODE  = os.getenv("AC_PAYPAL_MODE", "live")
 
 # ── Email sending (Brevo HTTPS API) ───────────────────────────────────────────
 # Uses Brevo's transactional email API over HTTPS (port 443). We use HTTPS
 # rather than SMTP because cloud providers routinely block outbound SMTP.
 # Sign up at https://brevo.com (free — 300 emails/day), verify your sender
 # address, then generate an API key under SMTP & API → API Keys.
+#
+# FROM_EMAIL has NO default — a hardcoded personal address would leak into the
+# repo and silently become the live sender if the env var were ever dropped.
+# In live mode an unset value is a hard-fail, mirroring the rest of config.
 BREVO_API_KEY = os.getenv("AC_BREVO_API_KEY", "")
-FROM_EMAIL    = os.getenv("AC_FROM_EMAIL",   "mourning.grace.2014@gmail.com")
+FROM_EMAIL    = os.getenv("AC_FROM_EMAIL", "")
 FROM_NAME     = "AlienCore"
+if not FROM_EMAIL and PAYPAL_MODE == "live":
+    print("FATAL: AC_FROM_EMAIL is not set — refusing to start in live mode. "
+          "Set it to your verified Brevo sender address.", file=sys.stderr)
+    sys.exit(1)
 
 # ── PayPal ────────────────────────────────────────────────────────────────────
 # Set to your PayPal business account email.
 # In PayPal → Profile → Account Settings → Notifications → IPN:
 #   Enable IPN, set Notification URL to https://YOUR_SERVER/paypal/ipn
-PAYPAL_EMAIL = os.getenv("AC_PAYPAL_EMAIL", "mourning.grace.2014@gmail.com")
-PAYPAL_MODE  = os.getenv("AC_PAYPAL_MODE",  "live")   # "live" | "sandbox"
+PAYPAL_EMAIL = os.getenv("AC_PAYPAL_EMAIL", "")
+if not PAYPAL_EMAIL and PAYPAL_MODE == "live":
+    print("FATAL: AC_PAYPAL_EMAIL is not set — refusing to start in live mode. "
+          "Set it to your PayPal business account email.", file=sys.stderr)
+    sys.exit(1)
 
 # ── License signing (Ed25519) ─────────────────────────────────────────────────
 # AC_LICENSE_PRIVATE_KEY_PATH points at a PEM-encoded Ed25519 private key file
@@ -88,6 +91,13 @@ PIN_MAX_ATTEMPTS = 5
 # per email but many IPs combine to crack the 6-digit space.  50 = 10 PIN
 # cycles × 5 attempts/cycle, generous headroom for a legit user mis-typing.
 PIN_VERIFY_PER_IP_DAILY_CAP = 50
+
+# /support/submit: unauthenticated outbound-email relay.  Per-IP daily cap +
+# cooldown so it can't be abused to exhaust the Brevo 300/day quota (which
+# would lock out PIN delivery).  No session token required — support must work
+# for not-yet-signed-in users; the per-IP cap + cooldown is the only control.
+SUPPORT_PER_IP_DAILY_CAP    = 5
+SUPPORT_RESEND_COOLDOWN_SEC = 60
 
 # ── Products (item_number must match what you set in PayPal button) ───────────
 PRODUCTS = {
