@@ -243,7 +243,7 @@
 <nav id="sidebar">
   <div id="sidebar-header">
     <div class="logo">AlienCore</div>
-    <div class="ver">User Manual &nbsp;·&nbsp; v1.0.0</div>
+    <div class="ver">User Manual &nbsp;·&nbsp; v1.1.0</div>
   </div>
   <button id="btn-download" onclick="window.print()">&#8681;&nbsp; Save as PDF</button>
   <ul id="toc">
@@ -252,9 +252,8 @@
     <li><a href="#requirements">System Requirements</a></li>
     <li><a href="#firstrun">First Run</a></li>
 
-    <li class="toc-section">Account</li>
-    <li><a href="#login">Login System</a></li>
-    <li><a href="#purchasing">Purchasing</a></li>
+    <li class="toc-section">License</li>
+    <li><a href="#license">Free License</a></li>
 
     <li class="toc-section">Interface</li>
     <li><a href="#sensor-bar">Sensor Bar</a></li>
@@ -276,20 +275,20 @@
     <li><a href="#tab-insights">Insights</a></li>
     <li><a href="#tab-drivers">Drivers</a></li>
 
-    <li class="toc-section">Advanced CPU <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-section">Advanced CPU</li>
     <li class="toc-sub"><a href="#cpu-tvb">TVB Optimizer</a></li>
     <li class="toc-sub"><a href="#cpu-boost">Boost Score</a></li>
     <li class="toc-sub"><a href="#cpu-topology">Topology &amp; Core Roles</a></li>
     <li class="toc-sub"><a href="#cpu-irq">Interrupt Steering</a></li>
 
-    <li class="toc-section">Advanced GPU <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-section">Advanced GPU</li>
     <li class="toc-sub"><a href="#gpu-dynamic-boost">Dynamic Boost Monitor</a></li>
     <li class="toc-sub"><a href="#gpu-vram">VRAM Clock Lock</a></li>
     <li class="toc-sub"><a href="#gpu-throttle">Throttle Log</a></li>
     <li class="toc-sub"><a href="#gpu-efficiency">Efficiency Curve</a></li>
     <li class="toc-sub"><a href="#gpu-driver">Driver Feature Flags</a></li>
 
-    <li class="toc-section">Advanced RAM <span class="badge badge-base">BASE</span> / <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-section">Advanced RAM</li>
     <li class="toc-sub"><a href="#ram-composition">Composition</a></li>
     <li class="toc-sub"><a href="#ram-pressure">Unified Pressure</a></li>
     <li class="toc-sub"><a href="#ram-trimmer">Working Set Trimmer</a></li>
@@ -297,7 +296,7 @@
     <li class="toc-sub"><a href="#ram-dimm">DIMM Protection</a></li>
     <li class="toc-sub"><a href="#ram-pagefile">Pagefile Advisor</a></li>
 
-    <li class="toc-section">AI Features <span class="badge badge-pro">PRO</span></li>
+    <li class="toc-section">AI Features</li>
     <li class="toc-sub"><a href="#ai-chat">AI Chat</a></li>
     <li class="toc-sub"><a href="#ai-agentic">Agentic Tools &amp; Safety</a></li>
     <li class="toc-sub"><a href="#ai-watchdog">AI Watchdog</a></li>
@@ -321,15 +320,14 @@
 ════════════════════════════════════════════════════════════ -->
 <section id="welcome">
   <h1><span class="accent">Alien</span>Core &nbsp; User Manual</h1>
-  <p class="subtitle">Adaptive system optimizer for Windows &nbsp;·&nbsp; v1.0.0</p>
+  <p class="subtitle">Adaptive system optimizer for Windows &nbsp;·&nbsp; v1.1.0</p>
 
   <p>AlienCore is an intelligent, automatic system optimizer built for Windows. It continuously monitors your hardware — CPU, GPU, RAM, thermals, and storage — and applies the right settings for whatever you're doing, whether you're gaming, streaming, working, or idle.</p>
 
   <p>Unlike static tuning tools, AlienCore switches profiles on the fly as it detects what's running. It applies dozens of Windows-level tweaks that Microsoft buries under dozens of menus (or hides entirely), and it does it all automatically in the background.</p>
 
   <div class="box box-info">
-    <strong>Free 30-day trial — no card needed.</strong> Every new account gets a full 30-day trial of all base features automatically on first sign-in. Pro features are visible but locked during the trial. When the trial ends, AlienCore won't run until you purchase the base license — every launch will show a paywall window with the buy option until you complete checkout.<br /><br />
-    <strong>Two tiers:</strong> The base license ($19.99 one-time) unlocks all hardware features. The Pro add-on (+$4.99) adds AI-powered analysis, chat, and automated health monitoring.
+    <strong>AlienCore is free.</strong> Every feature — including the AI integration (chat, watchdog, Config Advisor) — is unlocked for everyone. There is no account, no sign-in, no trial clock, and no payment.
   </div>
 </section>
 
@@ -346,7 +344,7 @@
     <tr><td>RAM</td><td>8 GB minimum; 16 GB+ for full feature benefit</td></tr>
     <tr><td>Python</td><td>3.11 or later (bundled with the installer)</td></tr>
     <tr><td>Admin rights</td><td>Required — AlienCore modifies system-level registry and power settings</td></tr>
-    <tr><td>Internet</td><td>Required at first login; 72-hour offline grace period after that</td></tr>
+    <tr><td>Internet</td><td>Not required — AlienCore is fully functional offline. (Optional AI features need internet to reach your AI provider; the update checker needs it to see new releases.)</td></tr>
   </table>
 
   <div class="box box-tip">
@@ -381,7 +379,6 @@
   <h2>First Run</h2>
   <p>When you launch AlienCore for the first time, it walks you through a short setup wizard before anything else runs:</p>
   <ol style="padding-left:24px; line-height:2.2">
-    <li><strong>Login</strong> — sign in with your email (see the Login section below).</li>
     <li><strong>First-run settings</strong> — the Settings window opens so you can review defaults before AlienCore starts making changes.</li>
     <li><strong>Hardware scan</strong> — AlienCore fingerprints your CPU, GPU, RAM, and storage so it can tailor its tweaks to your exact hardware.</li>
     <li><strong>Baseline tweaks</strong> — system-wide optimizations are applied (network stack, scheduler, storage, privacy, visual effects).</li>
@@ -389,105 +386,29 @@
     <li><strong>Tray icon appears</strong> — AlienCore settles into the background from here on.</li>
   </ol>
 
-  <p>On every subsequent launch, steps 2 and 3 are skipped (hardware cache is reused unless you enable Hardware Refresh on Startup in the Service tab).</p>
+  <p>On every subsequent launch, steps 1 and 2 are skipped (hardware cache is reused unless you enable Hardware Refresh on Startup in the Service tab).</p>
 </section>
 
 <hr />
 
 <!-- ═══════════════════════════════════════════════════════════
-     LOGIN
+     LICENSE
 ════════════════════════════════════════════════════════════ -->
-<section id="login">
-  <h2>Login System</h2>
-  <p>AlienCore uses <strong>email + one-time PIN</strong> authentication. There are no passwords to remember or create.</p>
-
+<section id="license">
+  <h2>Free License</h2>
   <div class="box box-tip">
-    <strong>First time?</strong> Just sign in with any email address — your 30-day free trial of all base features starts automatically on your very first login. No credit card, no setup. Pro features will appear with a <strong>[PRO]</strong> badge and are available for purchase at any time.
+    <strong>AlienCore is free for everyone.</strong> Every feature in this manual — the full hardware tuning surface and the AI integration — is unlocked out of the box. There is no account to create, no sign-in, no trial clock, and nothing to buy.
   </div>
 
-  <h3>Signing In</h3>
-  <ol style="padding-left:24px; line-height:2.4">
-    <li>Enter your email address in the login window.</li>
-    <li>Click <strong>Send PIN</strong>. A 6-digit code will be emailed to you within seconds.</li>
-    <li>Enter the PIN in the field that appears.</li>
-    <li>Click <strong>Verify &amp; Sign In</strong>.</li>
-  </ol>
-
-  <div class="box box-info">
-    <strong>PIN codes expire after 10 minutes.</strong> If yours has expired, click "Resend PIN" to get a fresh one. To prevent abuse, there is a 60-second cooldown between PIN requests for the same email, and incorrect attempts are limited (the PIN is invalidated after 5 wrong tries — request a new one if you fat-finger it that many times).
-  </div>
-
-  <div class="box box-info">
-    <strong>Hardware identification.</strong> The first time you sign in, AlienCore generates a fingerprint from a few stable hardware identifiers (Windows MachineGuid, BIOS UUID, CPU name) and binds your session to that machine. If AlienCore cannot read those identifiers — usually because it's running in a sandboxed VM or under heavily restricted permissions — sign-in is refused with a "Hardware identification failed" message. Run AlienCore as a normal user on a real Windows install; no special configuration is needed on regular hardware.
-  </div>
-
-  <h3>Session Persistence</h3>
-  <p>Once signed in, your session is cached locally. You won't need to log in again unless:</p>
+  <p>What that means in practice:</p>
   <ul style="padding-left:24px; line-height:2">
-    <li>You manually log out from the Account tab.</li>
-    <li>Your session token expires. Each session has a 30-day rolling window, automatically refreshed on each launch, and a 90-day absolute cap from the original sign-in. After 90 days you'll need to sign in again — this is a security feature, not a license expiry.</li>
-    <li>The session is moved to a different machine. Sessions are bound to the hardware they were created on; copying <code>session.json</code> to another PC will be rejected at the next license check. The file is also signed so manually editing it (e.g. to flip license fields) breaks the signature and the file is discarded.</li>
+    <li><strong>No sign-in.</strong> AlienCore launches straight into the app. It never asks for an email address and never sends you a PIN.</li>
+    <li><strong>No internet requirement.</strong> AlienCore works fully offline. The only features that use the network are the ones that inherently need it: the optional AI features (which talk to the AI provider you configure with your own API key) and the update checker (which looks at GitHub releases).</li>
+    <li><strong>No feature tiers.</strong> Earlier previews of AlienCore had Base and Pro tiers; those gates are gone. If you see a reference to a tier anywhere, it's historical.</li>
+    <li><strong>Settings → Account</strong> now simply confirms that all features are unlocked.</li>
   </ul>
 
-  <h3>Offline Use</h3>
-  <p>If the AlienCore servers are temporarily unreachable (no internet, server maintenance), you can continue using AlienCore for up to <strong>72 hours</strong> from your last successful verification. After that, a reconnection is required to continue.</p>
-
-  <h3>The Account Tab Layout</h3>
-  <p><strong>Settings → Account</strong> shows your status as a card: a colored avatar circle (initials drawn from your email), your email address, a tier subtitle, and a row of license badges — green for <strong>Base License</strong>, purple for <strong>Pro Add-on</strong>, orange for <strong>Trial</strong> (with days remaining), or gray for <em>Not signed in</em>. Action buttons (<strong>Refresh License</strong>, <strong>Sign Out</strong>, or <strong>Sign In</strong>) sit at the bottom of the card.</p>
-
-  <p>Once you own both the base license and the Pro add-on, the purchase advertising is replaced with a <strong>"Your AlienCore Pro Subscription"</strong> panel listing what's unlocked. Until then, the Licenses &amp; Add-ons cards described below appear in that space.</p>
-</section>
-
-<!-- ═══════════════════════════════════════════════════════════
-     PURCHASING
-════════════════════════════════════════════════════════════ -->
-<section id="purchasing">
-  <h2>Purchasing</h2>
-  <div class="box box-tip">
-    <strong>30-Day Free Trial</strong><br />
-    Every new account automatically gets a full 30-day trial of all base features — no credit card required. Just sign in with your email and your trial starts immediately. Pro features remain visible but locked during the trial so you know exactly what you'd be unlocking.<br /><br />
-    Your trial is tied to your hardware, not just your email address. Creating a new email account or reinstalling AlienCore will not reset the trial clock.<br /><br />
-    <strong>What happens when the trial expires:</strong> AlienCore will not run until you purchase the base license. Every launch presents a paywall window with the AlienCore lifetime license ($19.99) Buy button, plus options to sign out (so you can log in under a different email that already owns a license) or quit. Once your purchase activates, the paywall closes automatically and AlienCore continues into normal startup — you don't need to relaunch.
-  </div>
-
-  <p>All purchases are <strong>one-time payments</strong>. There are no subscriptions, no monthly fees, and no license renewals. Your license is tied to your email address and covers all future versions of AlienCore forever.</p>
-
-  <div class="price-grid">
-    <div class="price-card">
-      <div class="price">$19.99</div>
-      <div class="price-label">AlienCore — Lifetime License</div>
-      <ul>
-        <li>All CPU, GPU, RAM, Network, Storage, Privacy &amp; Visual optimizations</li>
-        <li>Automatic profile switching (Idle / Working / Gaming / Streaming)</li>
-        <li>TVB Optimizer, Boost Score, CPU Topology, Interrupt Steering</li>
-        <li>Dynamic Boost Monitor, VRAM Clock Lock, Throttle Log, Efficiency Curve, Driver Flags</li>
-        <li>Working Set Trimmer, Leak Watchdog, DIMM Protection, Pagefile Advisor</li>
-        <li>RAM Composition viewer, Unified Memory Pressure meter</li>
-        <li>Insights tab, Drivers tab, Custom Profiles</li>
-        <li>Windows Services Manager</li>
-        <li>All future updates included</li>
-        <li>Unlimited installs, one email</li>
-      </ul>
-    </div>
-    <div class="price-card">
-      <div class="price">+$4.99</div>
-      <div class="price-label">Pro Add-on (requires base license)</div>
-      <ul>
-        <li>AI Chat — ask about your system in plain English</li>
-        <li>AI Watchdog — automatic health monitoring</li>
-        <li>AI Config Advisor — guided setting recommendations</li>
-      </ul>
-    </div>
-  </div>
-
-  <h3>How to Purchase</h3>
-  <p>Sign in to AlienCore first, then open <strong>Settings → Account</strong> and click the purchase button. PayPal opens in your browser — your AlienCore email is automatically linked to the payment.</p>
-
-  <p>License activation is <strong>automatic</strong> — usually within 30 seconds of payment confirmation. AlienCore polls the server in the background after you click buy and unlocks the features as soon as PayPal confirms.</p>
-
-  <div class="box box-warn">
-    <strong>Important:</strong> Use the same email address for your purchase that you use to sign in to AlienCore. The license is tied to that email.
-  </div>
+  <p>AlienCore remains <strong>source-available</strong> software: the code is published for reading and auditing, but it isn't open source — see the <a href="https://github.com/mourninggrace/AlienCore/blob/master/LICENSE">LICENSE</a> file for the exact terms.</p>
 </section>
 
 <hr />
@@ -608,8 +529,8 @@
     <tr><td class="setting">Full Power in Streaming</td><td class="default">On</td><td class="optimal">On</td><td>Same as above but triggered by streaming software (OBS, Streamlabs, XSplit).</td></tr>
     <tr><td class="setting">Hetero Scheduling</td><td class="default">On</td><td class="optimal">On</td><td>Configures Windows 11's Intel Thread Director integration to route threads correctly across P-cores and E-cores. Critical for Alder Lake and newer.</td></tr>
     <tr><td class="setting">Core Parking (Gaming)</td><td class="default">On</td><td class="optimal">On</td><td>Unparks all logical processors during gaming to ensure no P-core or E-core is sitting idle unnecessarily.</td></tr>
-    <tr><td class="setting">TVB Optimizer</td><td class="default">Off</td><td class="optimal">On (if idle heat matters)</td><td>See <a href="#cpu-tvb">TVB Optimizer</a>. <span class="badge badge-pro">PRO</span></td></tr>
-    <tr><td class="setting">Interrupt Steering</td><td class="default">Off</td><td class="optimal">On (gaming)</td><td>See <a href="#cpu-irq">Interrupt Steering</a>. <span class="badge badge-pro">PRO</span></td></tr>
+    <tr><td class="setting">TVB Optimizer</td><td class="default">Off</td><td class="optimal">On (if idle heat matters)</td><td>See <a href="#cpu-tvb">TVB Optimizer</a>.</td></tr>
+    <tr><td class="setting">Interrupt Steering</td><td class="default">Off</td><td class="optimal">On (gaming)</td><td>See <a href="#cpu-irq">Interrupt Steering</a>.</td></tr>
   </table>
 </section>
 
@@ -624,7 +545,7 @@
     <tr><td class="setting">HAGS</td><td class="default">On</td><td class="optimal">On</td><td>Hardware-Accelerated GPU Scheduling — required for DLSS 3 Frame Generation and generally reduces GPU input latency in DX12 games.</td></tr>
     <tr><td class="setting">PowerMizer Max Performance</td><td class="default">On</td><td class="optimal">On (plugged in)</td><td>Tells the NVIDIA driver to prefer maximum performance P-states on AC power. Prevents the GPU from throttling down unexpectedly.</td></tr>
     <tr><td class="setting">Optimal Decision (GPU)</td><td class="default">On</td><td class="optimal">On</td><td>Let AlienCore automatically decide power limits per profile. Disable if you want to set manual percentages.</td></tr>
-    <tr><td class="setting">VRAM Idle Clock Lock</td><td class="default">Off</td><td class="optimal">On (desktop use)</td><td>See <a href="#gpu-vram">VRAM Clock Lock</a>. <span class="badge badge-pro">PRO</span></td></tr>
+    <tr><td class="setting">VRAM Idle Clock Lock</td><td class="default">Off</td><td class="optimal">On (desktop use)</td><td>See <a href="#gpu-vram">VRAM Clock Lock</a>.</td></tr>
   </table>
 </section>
 
@@ -639,8 +560,8 @@
     <tr><td class="setting">Pagefile Managed</td><td class="default">On</td><td class="optimal">On</td><td>AlienCore manages the pagefile size. If Custom MB is 0, Windows manages the size automatically within an optimized range.</td></tr>
     <tr><td class="setting">Clear Standby Cache (Idle)</td><td class="default">On</td><td class="optimal">On</td><td>Periodically clears the Windows standby cache when idle. Frees up "in use" memory that's actually available but unreported by Task Manager.</td></tr>
     <tr><td class="setting">Disable Paging Executive</td><td class="default">On</td><td class="optimal">On (16 GB+)</td><td>Keeps kernel code and drivers pinned in RAM — they're never paged to disk. Reduces latency spikes caused by kernel page faults. Requires sufficient RAM.</td></tr>
-    <tr><td class="setting">DIMM Throttle Protection</td><td class="default">Off</td><td class="optimal">On (heavy workloads)</td><td>See <a href="#ram-dimm">DIMM Protection</a>. <span class="badge badge-pro">PRO</span></td></tr>
-    <tr><td class="setting">Leak Watchdog</td><td class="default">Off</td><td class="optimal">On (optional)</td><td>See <a href="#ram-leak">Leak Watchdog</a>. <span class="badge badge-pro">PRO</span></td></tr>
+    <tr><td class="setting">DIMM Throttle Protection</td><td class="default">Off</td><td class="optimal">On (heavy workloads)</td><td>See <a href="#ram-dimm">DIMM Protection</a>.</td></tr>
+    <tr><td class="setting">Leak Watchdog</td><td class="default">Off</td><td class="optimal">On (optional)</td><td>See <a href="#ram-leak">Leak Watchdog</a>.</td></tr>
   </table>
 </section>
 
@@ -738,7 +659,7 @@
 </section>
 
 <section id="tab-custom">
-  <h3>Custom Profiles <span class="badge badge-base">BASE</span></h3>
+  <h3>Custom Profiles</h3>
   <p>The bottom of the Profiles tab — under the heading <strong>App-Based Profile Switching</strong> — lets you create your own profiles that trigger based on specific applications. Each custom profile maps to one of the four built-in behavior modes (Idle, Working, Gaming, or Streaming) but activates on your chosen process list.</p>
 
   <p>Examples: a "Video Editing" profile that triggers on <code>premiere.exe</code> and uses Streaming behavior; or a "Compile" profile that triggers on <code>cl.exe</code> and runs at full Gaming power.</p>
@@ -801,7 +722,7 @@
 </section>
 
 <section id="tab-ai">
-  <h2>AI Tab <span class="badge badge-pro">PRO</span></h2>
+  <h2>AI Tab</h2>
   <p>The AI tab requires the Pro add-on. See <a href="#ai-chat">AI Features</a> below for full documentation of each feature.</p>
 
   <table>
@@ -816,12 +737,12 @@
 </section>
 
 <section id="tab-insights">
-  <h2>Insights Tab <span class="badge badge-base">BASE</span></h2>
+  <h2>Insights Tab</h2>
   <p>Insights shows a read-only overview of your system's health and optimization state — what AlienCore has done, what it has detected, and any recommendations. No configuration is needed here; it's purely informational.</p>
 </section>
 
 <section id="tab-drivers">
-  <h2>Drivers Tab <span class="badge badge-base">BASE</span></h2>
+  <h2>Drivers Tab</h2>
   <p>Shows the installed versions of key drivers (GPU, chipset, etc.) and flags any that are known to be outdated or have known issues. Provides direct download links to manufacturer driver pages.</p>
 </section>
 
@@ -831,7 +752,7 @@
      ADVANCED CPU FEATURES
 ════════════════════════════════════════════════════════════ -->
 <section id="cpu-tvb">
-  <h2>TVB Optimizer <span class="badge badge-pro">PRO</span></h2>
+  <h2>TVB Optimizer</h2>
 
   <p><strong>Intel Thermal Velocity Boost (TVB)</strong> is a feature found on high-end Intel CPUs (Core i9 Raptor Lake and newer) that grants an extra <strong>+200 MHz</strong> of boost clock when the CPU package temperature is <strong>below 70°C</strong>. Once the temperature crosses 70°C, the extra 200 MHz is instantly taken away.</p>
 
@@ -851,7 +772,7 @@
 </section>
 
 <section id="cpu-boost">
-  <h2>CPU Boost Score <span class="badge badge-pro">PRO</span></h2>
+  <h2>CPU Boost Score</h2>
   <p>The Boost Score panel shows a real-time quality rating for your CPU's boost behavior over a rolling 60-second window. A high score (green) means the CPU is performing well; a low score (red) indicates the factor you're measuring is the bottleneck.</p>
 
   <h3>Three Score Formulas</h3>
@@ -889,7 +810,7 @@
 </section>
 
 <section id="cpu-topology">
-  <h2>CPU Topology &amp; Core Roles <span class="badge badge-pro">PRO</span></h2>
+  <h2>CPU Topology &amp; Core Roles</h2>
   <p>Shows a detailed map of your CPU's physical and logical layout. What's shown depends on the silicon:</p>
 
   <h3>Intel Hybrid (12th / 13th / 14th Gen, Meteor Lake)</h3>
@@ -902,7 +823,7 @@
 </section>
 
 <section id="cpu-irq">
-  <h2>Interrupt Steering <span class="badge badge-pro">PRO</span></h2>
+  <h2>Interrupt Steering</h2>
   <p>Hardware interrupts (IRQs) are signals from devices — your NIC, NVMe, USB controller — that wake up a CPU core to handle data. By default, Windows routes these interrupts somewhat randomly. During gaming, an interrupt landing on the same P-core that's running your game thread causes a micro-stutter.</p>
 
   <h3>What Interrupt Steering Does</h3>
@@ -924,7 +845,7 @@
      ADVANCED GPU FEATURES
 ════════════════════════════════════════════════════════════ -->
 <section id="gpu-dynamic-boost">
-  <h2>Dynamic Boost Monitor <span class="badge badge-pro">PRO</span></h2>
+  <h2>Dynamic Boost Monitor</h2>
   <p>NVIDIA Dynamic Boost is a feature on RTX mobile GPUs that dynamically reallocates power between the CPU and GPU based on workload. When the GPU is under heavy load and the CPU has headroom, it borrows from the CPU's power budget to give the GPU more wattage.</p>
 
   <p>The Dynamic Boost Monitor in AlienCore shows you exactly how much power is being transferred between CPU and GPU in real time, and logs the history so you can see how it behaved over a session.</p>
@@ -935,7 +856,7 @@
 </section>
 
 <section id="gpu-vram">
-  <h2>VRAM Clock Lock <span class="badge badge-pro">PRO</span></h2>
+  <h2>VRAM Clock Lock</h2>
   <p>When the GPU is idle (desktop, media playback), the NVIDIA driver can leave VRAM running at high clocks unnecessarily — which generates heat and power draw for no benefit.</p>
 
   <h3>What VRAM Clock Lock Does</h3>
@@ -953,7 +874,7 @@
 </section>
 
 <section id="gpu-throttle">
-  <h2>GPU Throttle Log <span class="badge badge-pro">PRO</span></h2>
+  <h2>GPU Throttle Log</h2>
   <p>The Throttle Log records every time the GPU was forced to reduce its clock due to a hardware limit. It captures the timestamp, the throttle reason, and the resulting clock reduction.</p>
 
   <h3>Throttle Reasons</h3>
@@ -970,7 +891,7 @@
 </section>
 
 <section id="gpu-efficiency">
-  <h2>GPU Efficiency Curve <span class="badge badge-pro">PRO</span></h2>
+  <h2>GPU Efficiency Curve</h2>
   <p>Plots GPU performance (clock speed / FPS proxy) against power draw over time. The efficiency curve helps you find the "sweet spot" — the power level where you get the most performance per watt, before returns diminish.</p>
 
   <p>This is particularly useful on power-limited mobile GPUs where running at 100% TDP often yields only 5–8% more performance than 80% TDP, but with significantly more heat. The curve makes this visible.</p>
@@ -979,7 +900,7 @@
 </section>
 
 <section id="gpu-driver">
-  <h2>Driver Feature Flags <span class="badge badge-pro">PRO</span></h2>
+  <h2>Driver Feature Flags</h2>
   <p>Shows the state of key NVIDIA driver features and lets you toggle the ones that AlienCore can control. Includes HAGS, PowerMizer mode, DSR, and other driver-level registry flags.</p>
 
   <div class="box box-warn">
@@ -993,7 +914,7 @@
      ADVANCED RAM FEATURES
 ════════════════════════════════════════════════════════════ -->
 <section id="ram-composition">
-  <h2>RAM Composition <span class="badge badge-base">BASE</span></h2>
+  <h2>RAM Composition</h2>
   <p>Shows a detailed breakdown of how your physical RAM is currently being used — not just "used vs. free" (which Task Manager shows), but the full Windows memory model:</p>
 
   <table>
@@ -1007,7 +928,7 @@
 </section>
 
 <section id="ram-pressure">
-  <h2>Unified Memory Pressure <span class="badge badge-base">BASE</span></h2>
+  <h2>Unified Memory Pressure</h2>
   <p>A single composite metric that combines multiple Windows memory signals into one pressure score (0–100%). It accounts for page fault rate, modified page list size, available pages, and pagefile activity.</p>
 
   <p>A score under 30% is healthy. 30–60% means the system is working. Over 60% is elevated — the system is paging and performance may be impacted. Over 80% is critical.</p>
@@ -1016,7 +937,7 @@
 </section>
 
 <section id="ram-trimmer">
-  <h2>Working Set Trimmer <span class="badge badge-pro">PRO</span></h2>
+  <h2>Working Set Trimmer</h2>
   <p>Periodically forces Windows to trim the working sets (active RAM footprint) of background processes. This pushes rarely-accessed memory pages back to the standby list, where they can be instantly reclaimed.</p>
 
   <p>The trimmer runs automatically at idle. It doesn't kill processes or free their data — it just moves pages that haven't been touched recently to a lower-priority pool, freeing space for the foreground application.</p>
@@ -1027,7 +948,7 @@
 </section>
 
 <section id="ram-leak">
-  <h2>Memory Leak Watchdog <span class="badge badge-pro">PRO</span></h2>
+  <h2>Memory Leak Watchdog</h2>
   <p>Monitors every running process's memory footprint over time. If a process's resident memory grows continuously at a rate exceeding your configured threshold, it gets flagged as a potential memory leak.</p>
 
   <table>
@@ -1043,7 +964,7 @@
 </section>
 
 <section id="ram-dimm">
-  <h2>DIMM Protection <span class="badge badge-pro">PRO</span></h2>
+  <h2>DIMM Protection</h2>
   <p>Monitors DIMM (RAM stick) temperatures via LibreHardwareMonitor. If any DIMM reaches the configured temperature threshold, AlienCore automatically reduces the CPU's performance ceiling to lower memory controller heat — protecting your RAM from sustained high temperatures.</p>
 
   <table>
@@ -1056,7 +977,7 @@
 </section>
 
 <section id="ram-pagefile">
-  <h2>Pagefile Advisor <span class="badge badge-pro">PRO</span></h2>
+  <h2>Pagefile Advisor</h2>
   <p>Analyzes your pagefile usage patterns over time and recommends an optimal pagefile size based on your actual peak usage, not Windows defaults (which are often either too small or wasteful).</p>
 
   <p>It tracks peak pagefile consumption per session and, after enough data is collected, provides a specific recommendation: "Your peak pagefile usage over the last 30 sessions was 4.2 GB — a fixed pagefile of 6 GB is recommended."</p>
@@ -1074,7 +995,7 @@
      AI FEATURES
 ════════════════════════════════════════════════════════════ -->
 <section id="ai-chat">
-  <h2>AI Chat <span class="badge badge-pro">PRO</span></h2>
+  <h2>AI Chat</h2>
   <p>A chat interface that feeds your live system state to a large language model and lets you ask questions about your PC in plain English.</p>
 
   <p>Examples:</p>
@@ -1098,7 +1019,7 @@
 </section>
 
 <section id="ai-agentic">
-  <h2>Agentic Tools &amp; Safety <span class="badge badge-pro">PRO</span></h2>
+  <h2>Agentic Tools &amp; Safety</h2>
   <p>The AI chat is not just an advisor — it can <strong>act on your system</strong> when you ask it to. Say "switch to gaming profile," "set my power plan to high performance," "turn on G-Mode," or "show me my voltage options," and the AI will execute the corresponding tool after you confirm.</p>
 
   <h3>Available Tools</h3>
@@ -1141,7 +1062,7 @@
 </section>
 
 <section id="ai-watchdog">
-  <h2>AI Watchdog <span class="badge badge-pro">PRO</span></h2>
+  <h2>AI Watchdog</h2>
   <p>Runs automatically in the background at a configured interval. It feeds current system state (temps, load, throttle events, memory pressure, boost score) to the AI and checks for anything anomalous.</p>
 
   <p>If the AI identifies a problem — sustained thermal throttling, a memory leak, an unusual CPU behavior pattern — it generates an alert that appears as a system notification and is logged in the Insights tab.</p>
@@ -1155,7 +1076,7 @@
 </section>
 
 <section id="ai-advisor">
-  <h2>AI Advisor <span class="badge badge-pro">PRO</span></h2>
+  <h2>AI Advisor</h2>
   <p>A one-shot analysis mode. Click "Run Advisor" and it performs a comprehensive review of your current settings, hardware state, and historical data, then produces a prioritized list of recommendations specific to your system.</p>
 
   <p>The Advisor looks at:</p>
@@ -1171,7 +1092,7 @@
 </section>
 
 <section id="ai-voltage">
-  <h2>Voltage &amp; Tuning <span class="badge badge-pro">PRO</span></h2>
+  <h2>Voltage &amp; Tuning</h2>
   <p>AlienCore exposes CPU voltage-frequency tuning through the AI chat's agentic tools. Which path is available depends on the silicon and on BIOS policy.</p>
 
   <h3>Intel — OC Mailbox (MSR 0x150)</h3>
@@ -1205,7 +1126,7 @@
 </section>
 
 <section id="ai-gpu-tuning">
-  <h2>GPU Tuning <span class="badge badge-pro">PRO</span></h2>
+  <h2>GPU Tuning</h2>
   <p>The AI can apply runtime overclocks, undervolts, power limits, and fan overrides to the primary discrete GPU. NVIDIA-only in v1 — AMD Radeon and Intel Arc tuning are planned for a future release.</p>
 
   <h3>NVIDIA GeForce — NVML backend (live)</h3>
@@ -1232,7 +1153,7 @@
 </section>
 
 <section id="ai-memory-tuning">
-  <h2>Memory Tuning <span class="badge badge-pro">PRO</span></h2>
+  <h2>Memory Tuning</h2>
   <p>AlienCore's memory tuning exists in two layers — what's safely achievable from user-mode Windows, and what can only be done in BIOS.</p>
 
   <h3>What Runtime Memory Tuning Does NOT Do</h3>
@@ -1312,11 +1233,11 @@
   <table>
     <tr><th>Field</th><th>Details</th></tr>
     <tr><td>Application</td><td><strong>AlienCore</strong> — Adaptive System Optimizer</td></tr>
-    <tr><td>Version</td><td>1.0.0</td></tr>
+    <tr><td>Version</td><td>1.1.0</td></tr>
     <tr><td>Developer</td><td>Kyle Yeroshefsky</td></tr>
     <tr><td>Contact</td><td><a href="mailto:mourning.grace.2014@gmail.com">mourning.grace.2014@gmail.com</a></td></tr>
     <tr><td>Bug reports</td><td><a href="https://github.com/mourninggrace/AlienCore/issues/new" target="_blank">github.com/mourninggrace/AlienCore/issues/new</a></td></tr>
-    <tr><td>License</td><td>Proprietary — see your purchase receipt for terms</td></tr>
+    <tr><td>License</td><td>Free to use · source-available — see the <a href="https://github.com/mourninggrace/AlienCore/blob/master/LICENSE" target="_blank">LICENSE</a> file for terms</td></tr>
   </table>
 
   <h3>Open-Source Components</h3>
@@ -1328,13 +1249,13 @@
   </table>
 
   <div class="box box-info" style="margin-top:32px">
-    <strong>Thank you for using AlienCore.</strong> Your purchase directly supports continued development. All features — past and future — are included in the one-time base license price.
+    <strong>Thank you for using AlienCore.</strong> AlienCore is free — every feature, past and future, is included for everyone.
   </div>
 </section>
 
 <div class="spacer"></div>
 <p style="color:var(--fg-dim); font-size:12px; text-align:center; border-top:1px solid var(--border); padding-top:24px;">
-  AlienCore v1.0.0 &nbsp;·&nbsp; &copy; Kyle Yeroshefsky &nbsp;·&nbsp;
+  AlienCore v1.1.0 &nbsp;·&nbsp; &copy; Kyle Yeroshefsky &nbsp;·&nbsp;
   <a href="mailto:mourning.grace.2014@gmail.com">mourning.grace.2014@gmail.com</a>
 </p>
 

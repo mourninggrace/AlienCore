@@ -9,7 +9,7 @@
 [![CPU](https://img.shields.io/badge/CPU-Intel%20%7C%20AMD-0071C5?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 [![GPU](https://img.shields.io/badge/GPU-NVIDIA-76B900?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 [![License](https://img.shields.io/badge/License-Source--Available-orange?style=flat-square)](./LICENSE)
-[![Trial](https://img.shields.io/badge/Free%20Trial-30%20Days-brightgreen?style=flat-square)](https://github.com/mourninggrace/AlienCore)
+[![Price](https://img.shields.io/badge/Price-Free-brightgreen?style=flat-square)](https://github.com/mourninggrace/AlienCore)
 
 *Your PC has dozens of power, thermal, and priority settings. AlienCore adjusts them automatically based on what you're actually doing — gaming, streaming, working, or idle.*
 
@@ -178,11 +178,7 @@ Checks GitHub Releases automatically — 30 seconds after launch, then every 6 h
 
 ## Pricing
 
-| Tier | Price | What's Included |
-|------|-------|----------------|
-| **Base** | $19.99 one-time | All features — adaptive profiles, sensor bar, tray icon, OS tweaks, NVIDIA GPU tuning, Alienware AWCC integration, advanced CPU/GPU/RAM tuning, Windows services manager, privacy baseline, learning engine |
-| **Pro Add-on** | +$4.99 one-time | AI chat, AI watchdog, AI Config Advisor |
-| **Free Trial** | 30 days | Full base feature set — no payment required, hardware-fingerprinted |
+**AlienCore is free.** Every feature — adaptive profiles, sensor bar, tray icon, OS tweaks, NVIDIA GPU tuning, Alienware AWCC integration, advanced CPU/GPU/RAM tuning, Windows services manager, privacy baseline, learning engine, and the full AI integration (chat, watchdog, Config Advisor) — is unlocked for everyone. No account, no sign-in, no trial clock, no payment.
 
 ---
 
@@ -202,7 +198,7 @@ The manual is also available from inside the app: **Settings → footer → User
 
 1. Download `AlienCore-<version>-Setup.exe` from the [releases page](https://github.com/mourninggrace/AlienCore/releases/latest).
 2. Double-click to run. The installer drops AlienCore into `Program Files\AlienCore\`, creates Start Menu and Desktop shortcuts, and offers to launch the app on completion.
-3. The first launch automatically opens the first-run setup — pick your tweaks, sign in with your email, and AlienCore is configured.
+3. The first launch automatically opens the first-run setup — pick your tweaks and AlienCore is configured. No account or sign-in required.
 
 > **About the SmartScreen warning.** AlienCore is currently distributed unsigned. When you run the installer, Windows SmartScreen may show a blue panel saying "Windows protected your PC." This is normal for unsigned software from a small publisher — it does **not** mean the installer is malicious. Click **More info**, then **Run anyway** to proceed. A signed build is planned for a future release once initial demand justifies the cert cost; until then, you can verify the installer's `sha256` against the digest published in the GitHub release notes.
 
@@ -320,7 +316,7 @@ AlienCore runs on **any Windows machine with an NVIDIA GPU**, not just Alienware
 ## Technical Notes
 
 - No kernel driver installed by AlienCore itself. CPU MSR reads use the signed `WinRing0.sys` from LibreHardwareMonitor — the same driver HWiNFO uses.
-- Licensing is hardware-fingerprinted but not online-gated. AlienCore continues working if the license server is unreachable.
+- No license activation, account, or server connection is required — AlienCore is fully functional offline.
 - Undervolting (MSR 0x150) is wired through the UI but the MSR backend is currently stubbed — functional release planned. All other tuning features are live.
 - Pure Python source. No obfuscation. Config in plain JSON. Logs to a rotating text file. Audit-friendly by design.
 - Reference hardware: Alienware m18 R2 (i9-14900HX, RTX 4090 Mobile, 32 GB DDR5, Windows 11 Pro). Actively validated under daily load.
@@ -350,11 +346,11 @@ AlienCore bundles **LibreHardwareMonitor** (MPL-2.0) for hardware sensor reading
 
 ## License
 
-AlienCore is **source-available commercial software** — not open source. The
-source is published so you can read it, audit it, and verify for yourself that
-it isn't malware, isn't spyware, and isn't collecting anything beyond what the
-documentation discloses. You may **not** fork it, redistribute it, modify it,
-or resell it. Use requires a purchased license (or the 30-day free trial).
+AlienCore is **source-available software, free of charge** — free to use, but
+not open source. The source is published so you can read it, audit it, and
+verify for yourself that it isn't malware, isn't spyware, and isn't collecting
+anything beyond what the documentation discloses. You may **not** fork it,
+redistribute it, modify it, or resell it.
 
 Copyright © 2026 George Kyle Yeroshefsky. All Rights Reserved.  
 See [LICENSE](./LICENSE) for full terms.

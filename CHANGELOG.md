@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-15
+
+### Changed
+
+- **AlienCore is now free for everyone.** The paywall is disabled: no sign-in,
+  no 30-day trial clock, no Base ($19.99) or Pro (+$4.99) purchase — every
+  feature, including the AI integration, is unlocked out of the box. The
+  licensing machinery remains in the codebase behind a single
+  `PAYWALL_ENABLED` switch (off by default) so a paid tier could return in a
+  future release; versions released while the switch is off are free.
+- The Settings → Account tab now shows a simple "AlienCore is free" card
+  instead of sign-in, license status, and purchase options.
+- The app no longer contacts the licensing backend at all; AlienCore is fully
+  functional offline (AI features still need internet to reach your provider).
+- LICENSE amended: AlienCore is now free of charge for personal use. It
+  remains source-available (not open source) — reading and auditing the
+  source is welcome; redistribution and derivative works still require
+  permission.
+- README and user manual updated to remove pricing, trial, and sign-in
+  documentation.
+
 ## [1.0.0] - 2026-05-09
 
 Initial public release.

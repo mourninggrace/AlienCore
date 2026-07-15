@@ -6,7 +6,7 @@ Central definitions for version, paths, defaults, and thresholds.
 import os
 import sys
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 APP_NAME = "AlienCore"
 
 # ── Support / feedback ────────────────────────────────────────────────────────
@@ -14,9 +14,18 @@ SUPPORT_EMAIL     = "mourning.grace.2014@gmail.com"
 GITHUB_REPO       = "mourninggrace/AlienCore"
 GITHUB_ISSUES_URL = "https://github.com/mourninggrace/AlienCore/issues/new"
 
+# ── Paywall kill switch ──────────────────────────────────────────────────────
+# AlienCore is currently FREE for everyone: no sign-in, no trial clock, all
+# Base + Pro features unlocked.  The entire licensing stack (login dialog,
+# trial tracking, paywall, PayPal checkout, backend refresh) is dormant but
+# intact — flip this to True to restore the paid flow.  Re-enabling also
+# requires the licensing backend (BACKEND_URL below) to be live again.
+PAYWALL_ENABLED = False
+
 # ── Licensing backend ────────────────────────────────────────────────────────
 # Update this to your deployed server URL once you have a domain.
 # Example: "https://api.aliencore.app"  or  "https://yourserver.com:8765"
+# NOTE: while PAYWALL_ENABLED is False the client never contacts this server.
 BACKEND_URL = "https://aliencoreapp.duckdns.org"
 
 # PayPal account that receives payments

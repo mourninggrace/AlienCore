@@ -16,17 +16,65 @@ import time
 import urllib.error
 import urllib.request
 
-from core.constants import USER_DATA_DIR
+from core.constants import APP_NAME, USER_DATA_DIR, PAYWALL_ENABLED
 
 logger = logging.getLogger("aliencore.auth")
 
-# Session file lives alongside the rest of writable user state in
-# USER_DATA_DIR (%LOCALAPPDATA%\AlienCore\ in installer builds, project root
-# in source builds).  Keeping it here means an uninstall + Local-AppData wipe
-# actually severs the cached session — earlier builds put session.json under
-# %APPDATA%\AlienCore\ (Roaming), which survived a Local wipe and silently
-# auto-signed users back in after a "clean" reinstall.
-_SESSION_DIR  = USER_DATA_DIR
+# ── Windows DPAPI (token-at-rest encryption, FINDING #4) ──────────────────────
+# The session blob (which carries the bearer token + signed license payload) is
+# encrypted at rest with the per-user DPAPI master key via
+# win32crypt.CryptProtectData / CryptUnprotectData (user scope — the
+# CRYPTPROTECT_LOCAL_MACHINE flag is intentionally OFF so only this Windows
+# user account can decrypt it).  If pywin32 is unavailable (non-Windows dev
+# box) we fall back to the legacy plaintext+HMAC format and log a warning
+# rather than hard-crashing.
+try:
+    import win32crypt  # type: ignore
+    _HAVE_DPAPI = True
+except Exception:                       # pragma: no cover - non-Windows dev
+    win32crypt = None                   # type: ignore
+    _HAVE_DPAPI = False
+
+# Extra entropy mixed into the DPAPI blob.  Not a secret (it's in source), but
+# it scopes the ciphertext to AlienCore so an unrelated DPAPI blob can't be
+# swapped in.
+_DPAPI_ENTROPY = b"AlienCore-session-dpapi-v2"
+
+
+def _dpapi_protect(raw: bytes) -> bytes:
+    """Encrypt raw bytes with user-scoped DPAPI.  Raises on failure."""
+    return win32crypt.CryptProtectData(
+        raw, "AlienCore session", _DPAPI_ENTROPY, None, None, 0
+    )
+
+
+def _dpapi_unprotect(blob: bytes) -> bytes:
+    """Decrypt a user-scoped DPAPI blob.  Raises on failure."""
+    _descr, data = win32crypt.CryptUnprotectData(
+        blob, _DPAPI_ENTROPY, None, None, 0
+    )
+    return data
+
+
+# ── Session storage location (FINDING #4, second half) ────────────────────────
+# In source builds core.constants.USER_DATA_DIR resolves to the repo root, so a
+# plaintext session.json used to land *inside the working tree*.  Force session
+# storage under %LOCALAPPDATA%\AlienCore\ unconditionally: in frozen/installer
+# builds USER_DATA_DIR already points there (identical path, no behaviour
+# change), and in source builds it moves the session out of the repo.  If
+# %LOCALAPPDATA% can't be created (locked-down profile) we fall back to the
+# previous USER_DATA_DIR so we never hard-fail.
+def _resolve_session_dir() -> str:
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
+    candidate = os.path.join(base, APP_NAME)
+    try:
+        os.makedirs(candidate, exist_ok=True)
+        return candidate
+    except OSError:
+        return USER_DATA_DIR
+
+
+_SESSION_DIR  = _resolve_session_dir()
 _SESSION_PATH = os.path.join(_SESSION_DIR, "session.json")
 
 # Legacy location (%APPDATA%\AlienCore\session.json) — read once at startup
@@ -40,6 +88,13 @@ _LEGACY_SESSION_PATH = os.path.join(
 # Grace period: if server is unreachable, allow this many seconds of offline use
 _OFFLINE_GRACE_SECS = 72 * 3600   # 72 hours
 _TRIAL_DAYS         = 30           # free trial length for new accounts
+
+# Clock-rollback tolerance (FINDING #3).  A clock that jumps *backwards* by more
+# than this relative to the maximum wall-clock time we have ever observed is
+# treated as tampering (an attacker rolling the clock back to before a license
+# expired / to re-arm the offline grace window).  A small tolerance keeps
+# legitimate NTP corrections and DST quirks from tripping it.
+_CLOCK_TOLERANCE_SECS = 300
 
 _lock    = threading.Lock()
 _session: dict = {}   # in-memory cache
@@ -101,8 +156,15 @@ def load_session():
             _session = {}
         return
     try:
-        with open(_SESSION_PATH, "r", encoding="utf-8") as f:
-            outer = json.load(f)
+        with open(_SESSION_PATH, "rb") as f:
+            raw = f.read()
+        outer = _decode_session_file(raw)
+        if outer is None:
+            # Unreadable / undecryptable (e.g. DPAPI blob from another user, or
+            # corrupt file).  Treat as no session — fall through to login.
+            with _lock:
+                _session = {}
+            return
         # v1 ships with HMAC-signed sessions only — there is no legacy
         # unsigned-session compatibility window.  An unsigned session.json
         # could be a hand-crafted file dropped by malware on the local
@@ -110,17 +172,83 @@ def load_session():
         if not (isinstance(outer, dict) and "d" in outer and "s" in outer):
             if isinstance(outer, dict) and outer.get("token"):
                 logger.warning("Session file is unsigned — discarding (sign-in required)")
+            with _lock:
+                _session = {}
             return
         data, sig = outer["d"], outer["s"]
         if not isinstance(data, dict) or not _session_sig_valid(data, sig):
             logger.warning("Session file failed integrity check — discarding")
+            with _lock:
+                _session = {}
             return
+
+        # ── FINDING #3: clock-rollback / future-timestamp defense ─────────────
+        now = time.time()
+        last_verified = _safe_float(data.get("last_verified_at", 0))
+        max_seen      = _safe_float(data.get("max_seen_time", 0))
+        if last_verified > now + _CLOCK_TOLERANCE_SECS:
+            logger.warning(
+                "Session last_verified_at is in the FUTURE — clock tampering "
+                "suspected; discarding session."
+            )
+            with _lock:
+                _session = {}
+            return
+        if max_seen > 0 and now < (max_seen - _CLOCK_TOLERANCE_SECS):
+            logger.warning(
+                "Wall clock rolled back %.0fs below max observed time — "
+                "clock tampering suspected; discarding session.",
+                max_seen - now,
+            )
+            with _lock:
+                _session = {}
+            return
+        # Advance the watermark so a later rollback is caught.
+        data["max_seen_time"] = max(max_seen, now)
+
+        # ── FINDING #2: re-verify the server's Ed25519 signature on load ──────
+        # The HMAC above only proves the file wasn't altered after *this*
+        # client wrote it — its key derives from the (locally computable)
+        # fingerprint, so an attacker can forge a fresh HMAC.  The Ed25519
+        # signature, made with the server's private key, is what actually
+        # proves entitlement.  If it's missing/invalid, do NOT honor
+        # has_base / has_pro / expires_at — strip them but keep the session
+        # usable for an online re-check (token preserved).
+        if not _verify_loaded_license(data):
+            logger.warning(
+                "Session license signature absent/invalid on load — "
+                "entitlements withheld until server re-verification."
+            )
+            data = dict(data)
+            data["has_base"] = False
+            data["has_pro"]  = False
+        else:
+            # Signature is valid — bind the honored entitlements to the
+            # *signed* payload values, not the top-level (HMAC-only) fields.
+            # Otherwise an attacker could re-HMAC a session with has_pro=True
+            # while leaving an older, validly-signed has_pro=False payload in
+            # place.  The Ed25519-signed fields are authoritative.
+            sp = data.get("signed_payload") or {}
+            data = dict(data)
+            data["has_base"]         = bool(sp.get("has_base"))
+            data["has_pro"]          = bool(sp.get("has_pro"))
+            data["expires_at"]       = _safe_float(sp.get("expires_at", 0))
+            data["trial_started_at"] = sp.get("trial_started_at")
+
         if data.get("token"):
             with _lock:
                 _session = data
             logger.info("Session loaded for %s", data.get("email", "?"))
+            # Persist the advanced max_seen_time (and any stripped bits) so the
+            # rollback watermark is durable across restarts.
+            _persist()
+        else:
+            with _lock:
+                _session = {}
     except Exception as e:
         logger.debug("Session load error: %s", e)
+        with _lock:
+            _session = {}
 
 
 def refresh_session_async():
@@ -129,6 +257,8 @@ def refresh_session_async():
     Updates license fields if they changed (e.g. user just purchased).
     Does NOT block startup — call this after load_session().
     """
+    if not PAYWALL_ENABLED:
+        return   # free mode — never contact the licensing backend
     threading.Thread(target=_refresh_blocking, daemon=True,
                      name="AuthRefresh").start()
 
@@ -166,6 +296,8 @@ def get_session() -> dict:
 
 def is_logged_in() -> bool:
     """True if a non-expired session exists (locally — doesn't call server)."""
+    if not PAYWALL_ENABLED:
+        return True   # free mode — no account required
     s = get_session()
     if not s.get("token"):
         return False
@@ -178,6 +310,8 @@ def is_logged_in() -> bool:
 
 def is_licensed() -> bool:
     """True if the user has paid for the base license ($19.99)."""
+    if not PAYWALL_ENABLED:
+        return True   # free mode — everyone has Base
     return is_logged_in() and bool(get_session().get("has_base"))
 
 
@@ -188,6 +322,8 @@ def is_on_trial() -> bool:
     Trial begins on first login and is stored server-side; the timestamp is
     cached locally in the session file so it survives offline restarts.
     """
+    if not PAYWALL_ENABLED:
+        return False   # free mode — no trial clock
     if not is_logged_in():
         return False
     if is_licensed():
@@ -203,6 +339,8 @@ def trial_days_left() -> int:
     """
     Days remaining in the free trial.  Returns 0 if trial expired or not active.
     """
+    if not PAYWALL_ENABLED:
+        return 0   # free mode — no trial clock
     s = get_session()
     started = s.get("trial_started_at")
     if started is None:
@@ -213,6 +351,8 @@ def trial_days_left() -> int:
 
 def is_pro() -> bool:
     """True if the user has the Pro add-on (+$4.99)."""
+    if not PAYWALL_ENABLED:
+        return True   # free mode — everyone has Pro
     return is_licensed() and bool(get_session().get("has_pro"))
 
 
@@ -229,6 +369,8 @@ def needs_paywall() -> bool:
     confirmed at some point that this account had a trial and the trial has
     since elapsed.
     """
+    if not PAYWALL_ENABLED:
+        return False   # free mode — the hard lock never fires
     if not is_logged_in():
         return False
     if is_licensed():
@@ -245,8 +387,18 @@ def get_email() -> str:
 
 
 def _is_within_grace(s: dict) -> bool:
-    last = s.get("last_verified_at", 0)
-    return (time.time() - last) < _OFFLINE_GRACE_SECS
+    last = _safe_float(s.get("last_verified_at", 0))
+    now  = time.time()
+    # FINDING #3 — deny grace if the clock was rolled back below the highest
+    # wall-clock time we've ever observed (an attacker rewinding the clock to
+    # keep an expired license inside the offline-grace window), or if
+    # last_verified_at is itself in the future.
+    max_seen = _safe_float(s.get("max_seen_time", 0))
+    if max_seen > 0 and now < (max_seen - _CLOCK_TOLERANCE_SECS):
+        return False
+    if last > now + _CLOCK_TOLERANCE_SECS:
+        return False
+    return (now - last) < _OFFLINE_GRACE_SECS
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -297,6 +449,8 @@ def refresh_license() -> tuple[bool, str]:
     Manually refresh license info from the server (e.g. after purchasing).
     Returns (changed: bool, message: str).
     """
+    if not PAYWALL_ENABLED:
+        return True, "AlienCore is free — all features are unlocked."
     s = get_session()
     if not s.get("token"):
         return False, "Not logged in."
@@ -374,28 +528,89 @@ def _safe_float(v, fallback: float = 0.0) -> float:
     return f
 
 
-def _verify_license_payload(data: dict) -> bool:
-    """Return True iff the server's response carries a valid Ed25519
-    signature over the license payload.  Refuses to grant has_base / has_pro
-    without one — this is the defense against an attacker who MITMs
-    /auth/check and flips license bits to True."""
+# Fields the backend covers with its Ed25519 signature (must match
+# license_signing._canonical_bytes / backend _sign_license).  We persist
+# exactly these alongside the session so the signature can be re-verified at
+# disk-load time (FINDING #2).
+_SIGNED_FIELDS = (
+    "email", "has_base", "has_pro", "trial_started_at",
+    "expires_at", "issued_at", "signed_at", "fingerprint",
+)
+
+
+def _extract_signed_payload(data: dict) -> dict:
+    """Capture just the fields the server signed, for re-verification on
+    subsequent disk loads."""
+    return {k: data.get(k) for k in _SIGNED_FIELDS}
+
+
+def _verify_license_payload(data: dict, expected_email: "str | None" = None) -> bool:
+    """Return True iff the payload carries a valid Ed25519 signature over the
+    license fields AND the signed payload is bound to *this* machine and the
+    session email.
+
+    Defenses:
+      * FINDING #2 — refuses has_base/has_pro without a valid server signature
+        (attacker MITMs /auth/check or forges session.json and flips bits).
+      * FINDING #5 — asserts payload['fingerprint'] == this machine's
+        fingerprint and payload['email'] == session email, so a signed Pro
+        payload issued to machine A cannot be replayed on machine B.
+      * FINDING #7 — fails CLOSED when the embedded public key is not
+        configured (returns False instead of trusting unsigned bits)."""
     from core import license_signing
     if not license_signing.is_configured():
-        # Public key placeholder — pre-deploy / dev environments.  Trust
-        # the server but log loudly so it's obvious this is not production.
+        # FINDING #7: fail CLOSED.  The shipped build embeds a real key; if it
+        # is somehow missing/placeholder we deny entitlements rather than
+        # unlocking Pro/Base without proof of payment.
         logger.warning(
-            "License signature verification SKIPPED — public key not "
-            "configured.  Pro/Base features unlock without proof of payment."
+            "License public key not configured — failing CLOSED, "
+            "Pro/Base entitlements denied."
         )
-        return True
+        return False
     sig = data.get("license_sig")
     if not sig:
-        logger.warning("Server response lacks license_sig — license rejected")
+        logger.warning("License payload lacks license_sig — license rejected")
         return False
     if not license_signing.verify(data, sig):
         logger.warning("License signature INVALID — license rejected")
         return False
+
+    # FINDING #5 — machine + identity binding.
+    try:
+        from core import fingerprint as fp
+        local_fp = fp.get()
+    except Exception:
+        local_fp = ""
+    payload_fp = str(data.get("fingerprint", ""))
+    if not payload_fp or payload_fp != local_fp:
+        logger.warning(
+            "License fingerprint mismatch (payload bound to a different "
+            "machine) — license rejected"
+        )
+        return False
+    if expected_email is not None:
+        pe = str(data.get("email", "")).strip().lower()
+        ee = str(expected_email).strip().lower()
+        if pe != ee:
+            logger.warning(
+                "License email mismatch (signed for %r, session %r) — rejected",
+                pe, ee,
+            )
+            return False
     return True
+
+
+def _verify_loaded_license(data: dict) -> bool:
+    """Re-verify the server's Ed25519 signature over the license payload that
+    was persisted with the session (FINDING #2).  Called on every disk load
+    *after* the HMAC integrity check, before any entitlement is honored."""
+    sp = data.get("signed_payload")
+    sig = data.get("license_sig")
+    if not isinstance(sp, dict) or not sig:
+        return False
+    payload = dict(sp)
+    payload["license_sig"] = sig
+    return _verify_license_payload(payload, expected_email=data.get("email"))
 
 
 def _save_session(data: dict):
@@ -405,7 +620,11 @@ def _save_session(data: dict):
     # the signature doesn't verify, treat the session as unlicensed — the
     # token still works for /auth/check but features stay locked until a
     # valid signed response arrives.
-    if not _verify_license_payload(data):
+    # Capture the signed payload + signature BEFORE any stripping so it can be
+    # re-verified on every future disk load (FINDING #2).
+    signed_payload = _extract_signed_payload(data)
+    license_sig    = data.get("license_sig")
+    if not _verify_license_payload(data, expected_email=data.get("email")):
         data = dict(data)
         data["has_base"] = False
         data["has_pro"]  = False
@@ -426,6 +645,10 @@ def _save_session(data: dict):
         "trial_started_at": trial,
         "expires_at":       _safe_float(data.get("expires_at", 0)),
         "last_verified_at": time.time(),
+        # Persist the server's signed payload + signature so the Ed25519
+        # signature can be re-verified at disk-load time (FINDING #2).
+        "signed_payload":   signed_payload,
+        "license_sig":      license_sig,
     }
     with _lock:
         _session = session
@@ -434,7 +657,9 @@ def _save_session(data: dict):
 
 def _merge_session(data: dict):
     """Update license fields without touching the token."""
-    if not _verify_license_payload(data):
+    signed_payload = _extract_signed_payload(data)
+    license_sig    = data.get("license_sig")
+    if not _verify_license_payload(data, expected_email=data.get("email")):
         # Force-clear license bits when the response can't be verified.
         # This is the same defense as _save_session — a MITM that flips
         # has_pro=true is rejected even on rolling refresh.
@@ -454,6 +679,8 @@ def _merge_session(data: dict):
             "expires_at":       _safe_float(data.get("expires_at"),
                                             _safe_float(_session.get("expires_at", 0))),
             "last_verified_at": time.time(),
+            "signed_payload":   signed_payload,
+            "license_sig":      license_sig,
         })
     _persist()
 
@@ -475,12 +702,80 @@ def _persist():
         tmp = _SESSION_PATH + ".tmp"
         with _lock:
             data = dict(_session)
+        # Advance the clock-rollback watermark on every write (FINDING #3).
+        now = time.time()
+        data["max_seen_time"] = max(_safe_float(data.get("max_seen_time", 0)), now)
+        with _lock:
+            _session["max_seen_time"] = data["max_seen_time"]
         sig = _session_sig(data)
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"d": data, "s": sig}, f)
+        outer = {"d": data, "s": sig}
+        raw = _encode_session_file(outer)
+        with open(tmp, "wb") as f:
+            f.write(raw)
         os.replace(tmp, _SESSION_PATH)
     except Exception as e:
         logger.debug("Session persist error: %s", e)
+
+
+# ── On-disk session encoding (FINDING #4: encrypt token at rest) ──────────────
+# Format: a DPAPI-protected build prepends a magic header followed by the raw
+# CryptProtectData blob.  A plaintext-fallback build (non-Windows dev, or
+# pywin32 missing) writes the legacy JSON form so the file stays human-readable
+# and HMAC-protected.  _decode_session_file auto-detects which form is present.
+_DPAPI_MAGIC = b"ACSESSION-DPAPI1\n"
+
+
+def _encode_session_file(outer: dict) -> bytes:
+    """Serialize the signed session envelope to bytes for atomic write.
+    Encrypts with user-scoped DPAPI when available; otherwise falls back to
+    legacy plaintext JSON (still HMAC-protected)."""
+    plain = json.dumps(outer, separators=(",", ":")).encode("utf-8")
+    if _HAVE_DPAPI:
+        try:
+            return _DPAPI_MAGIC + _dpapi_protect(plain)
+        except Exception as e:
+            logger.warning(
+                "DPAPI encryption failed (%s) — falling back to plaintext "
+                "session storage.", e
+            )
+    else:
+        logger.warning(
+            "win32crypt unavailable — storing session in plaintext+HMAC "
+            "(token NOT encrypted at rest)."
+        )
+    return plain
+
+
+def _decode_session_file(raw: bytes):
+    """Decode bytes read from session.json into the signed envelope dict.
+    Returns None when the blob can't be read/decrypted (treated as no
+    session — caller falls through to the login flow)."""
+    if not raw:
+        return None
+    if raw.startswith(_DPAPI_MAGIC):
+        if not _HAVE_DPAPI:
+            logger.warning(
+                "Encrypted session present but win32crypt is unavailable — "
+                "cannot decrypt; treating as logged out."
+            )
+            return None
+        try:
+            plain = _dpapi_unprotect(raw[len(_DPAPI_MAGIC):])
+        except Exception as e:
+            # Blob created under a different Windows user / corrupt / tampered.
+            logger.warning("Session decryption failed (%s) — treating as logged out.", e)
+            return None
+        try:
+            return json.loads(plain.decode("utf-8"))
+        except Exception as e:
+            logger.debug("Decrypted session is not valid JSON: %s", e)
+            return None
+    # Legacy / fallback plaintext JSON.
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        logger.debug("Session file is not valid JSON: %s", e)
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

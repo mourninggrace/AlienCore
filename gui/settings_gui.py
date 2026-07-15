@@ -993,7 +993,7 @@ class SettingsWindow:
                     panel.after(0, lambda: topo_lbl.config(text=txt, fg=ACCENT))
             except Exception as e:
                 if panel.winfo_exists():
-                    panel.after(0, lambda: topo_lbl.config(text=f"Detection failed: {e}", fg=WARN))
+                    panel.after(0, lambda e=e: topo_lbl.config(text=f"Detection failed: {e}", fg=WARN))
 
         import threading as _t
         _t.Thread(target=_load_topo, daemon=True).start()
@@ -3155,7 +3155,7 @@ class SettingsWindow:
             drivers = self._query_drivers()
             self._drv_tab.after(0, lambda: self._populate_drivers(drivers, gen))
         except Exception as e:
-            self._drv_tab.after(0, lambda: self._drivers_on_error(e, gen))
+            self._drv_tab.after(0, lambda e=e: self._drivers_on_error(e, gen))
 
     def _drivers_on_error(self, exc, gen):
         if gen != self._drv_gen:
@@ -3562,9 +3562,34 @@ class SettingsWindow:
     def _tab_account(self):
         import webbrowser, urllib.parse
         from core import auth
-        from core.constants import PAYPAL_BUSINESS_EMAIL, BACKEND_URL, PAYPAL_CHECKOUT_URL
+        from core.constants import (PAYPAL_BUSINESS_EMAIL, BACKEND_URL,
+                                    PAYPAL_CHECKOUT_URL, PAYWALL_ENABLED)
 
         t = self._make_tab("Account")
+
+        # ── Free mode ─────────────────────────────────────────────────────────
+        # While the paywall is disabled there is no account, trial, or license
+        # to manage — render a simple status card instead of the sign-in /
+        # purchase machinery below (which stays intact for a future paid mode).
+        if not PAYWALL_ENABLED:
+            self._section(t, "License")
+            card = tk.Frame(t, bg=BG_HW, padx=24, pady=20)
+            card.pack(fill="x", padx=16, pady=(4, 8))
+            head = tk.Frame(card, bg=BG_HW)
+            head.pack(anchor="w", fill="x")
+            tk.Label(head, text="✓", font=("Segoe UI", 16, "bold"),
+                     bg=BG_HW, fg=ACCENT2).pack(side="left", padx=(0, 8))
+            tk.Label(head, text="AlienCore is free",
+                     font=("Segoe UI", 13, "bold"),
+                     bg=BG_HW, fg=FG_HEAD).pack(side="left")
+            tk.Label(card,
+                     text="Every feature — including the AI integration — is "
+                          "unlocked for everyone. No account, sign-in, trial, "
+                          "or purchase is required.",
+                     font=("Segoe UI", 9, "italic"),
+                     bg=BG_HW, fg=FG_DIM, justify="left",
+                     wraplength=820).pack(anchor="w", pady=(4, 0))
+            return
 
         # ── Login status ──────────────────────────────────────────────────────
         self._section(t, "Account")
@@ -4119,7 +4144,7 @@ class SettingsWindow:
             svcs = sm.get_all_curated_states()
             self._svc_tab.after(0, lambda: self._populate_services(svcs))
         except Exception as e:
-            self._svc_tab.after(0, lambda: self._svc_loader.config(text=f"Error: {e}"))
+            self._svc_tab.after(0, lambda e=e: self._svc_loader.config(text=f"Error: {e}"))
 
     def _populate_services(self, services):
         from core import services_manager as sm

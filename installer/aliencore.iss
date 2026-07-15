@@ -10,7 +10,7 @@
 ;     dist/AlienCore-{version}-Setup.exe
 
 #define MyAppName        "AlienCore"
-#define MyAppVersion     "1.0.0"
+#define MyAppVersion     "1.1.0"
 #define MyAppPublisher   "George Kyle Yeroshefsky"
 #define MyAppURL         "https://github.com/mourninggrace/AlienCore"
 #define MyAppExeName     "AlienCore.exe"
