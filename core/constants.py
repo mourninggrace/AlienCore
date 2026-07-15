@@ -41,6 +41,19 @@ PAYPAL_CHECKOUT_URL = (
     else "https://www.paypal.com/cgi-bin/webscr"
 )
 
+# ── Donations ────────────────────────────────────────────────────────────────
+# AlienCore is free; this is a purely optional "buy me a coffee" link that opens
+# a PayPal donation page pre-filled to the business email above.  Swap this for
+# a Ko-fi / Buy Me a Coffee / GitHub Sponsors URL if you'd rather use one of
+# those — it's just handed to webbrowser.open(), nothing else depends on it.
+DONATE_URL = (
+    "https://www.paypal.com/cgi-bin/webscr"
+    "?cmd=_donations"
+    "&business=" + PAYPAL_BUSINESS_EMAIL.replace("@", "%40") +
+    "&item_name=AlienCore+%E2%80%94+support+development"
+    "&currency_code=USD"
+)
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 # Two roots:
 #   BASE_DIR       — read-only bundled assets (lhm_bridge.exe, CHANGELOG.md,

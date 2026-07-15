@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   licensing machinery remains in the codebase behind a single
   `PAYWALL_ENABLED` switch (off by default) so a paid tier could return in a
   future release; versions released while the switch is off are free.
-- The Settings → Account tab now shows a simple "AlienCore is free" card
-  instead of sign-in, license status, and purchase options.
+- The Settings → Account tab now shows a simple "AlienCore is free" card,
+  plus an optional "Support AlienCore" donation card with a PayPal Donate
+  button, instead of sign-in, license status, and purchase options.
 - The app no longer contacts the licensing backend at all; AlienCore is fully
   functional offline (AI features still need internet to reach your provider).
 - LICENSE amended: AlienCore is now free of charge for personal use. It

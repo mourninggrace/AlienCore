@@ -180,6 +180,8 @@ Checks GitHub Releases automatically — 30 seconds after launch, then every 6 h
 
 **AlienCore is free.** Every feature — adaptive profiles, sensor bar, tray icon, OS tweaks, NVIDIA GPU tuning, Alienware AWCC integration, advanced CPU/GPU/RAM tuning, Windows services manager, privacy baseline, learning engine, and the full AI integration (chat, watchdog, Config Advisor) — is unlocked for everyone. No account, no sign-in, no trial clock, no payment.
 
+AlienCore is built and maintained by one person and given away for free. If it earns a spot on your machine, donations are welcome and entirely optional — there's a **Donate** button in **Settings → Account**. Every feature stays free regardless.
+
 ---
 
 ## Documentation

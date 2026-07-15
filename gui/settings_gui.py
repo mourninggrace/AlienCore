@@ -3572,6 +3572,8 @@ class SettingsWindow:
         # to manage — render a simple status card instead of the sign-in /
         # purchase machinery below (which stays intact for a future paid mode).
         if not PAYWALL_ENABLED:
+            from core.constants import DONATE_URL
+
             self._section(t, "License")
             card = tk.Frame(t, bg=BG_HW, padx=24, pady=20)
             card.pack(fill="x", padx=16, pady=(4, 8))
@@ -3589,6 +3591,30 @@ class SettingsWindow:
                      font=("Segoe UI", 9, "italic"),
                      bg=BG_HW, fg=FG_DIM, justify="left",
                      wraplength=820).pack(anchor="w", pady=(4, 0))
+
+            # ── Optional donation ask ─────────────────────────────────────────
+            self._section(t, "Support AlienCore")
+            donate = tk.Frame(t, bg=BG_HW, padx=24, pady=20)
+            donate.pack(fill="x", padx=16, pady=(4, 8))
+            dhead = tk.Frame(donate, bg=BG_HW)
+            dhead.pack(anchor="w", fill="x")
+            tk.Label(dhead, text="♥", font=("Segoe UI", 15, "bold"),
+                     bg=BG_HW, fg="#ff5b7f").pack(side="left", padx=(0, 8))
+            tk.Label(dhead, text="Enjoying AlienCore?",
+                     font=("Segoe UI", 12, "bold"),
+                     bg=BG_HW, fg=FG_HEAD).pack(side="left")
+            tk.Label(donate,
+                     text="AlienCore is built and maintained by one person, in "
+                          "spare time, and given away for free. If it's earned a "
+                          "spot on your machine, a small donation helps keep the "
+                          "updates coming. Entirely optional — every feature "
+                          "stays free either way.",
+                     font=("Segoe UI", 9), bg=BG_HW, fg=FG_DIM,
+                     justify="left", wraplength=820).pack(anchor="w",
+                                                          pady=(4, 12))
+            self._btn(donate, "Donate via PayPal  ♥",
+                      lambda: webbrowser.open(DONATE_URL),
+                      "#ff5b7f", bold=True).pack(anchor="w")
             return
 
         # ── Login status ──────────────────────────────────────────────────────
